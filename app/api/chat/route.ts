@@ -11,7 +11,7 @@ const QWEN_STREAM_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     .trim()
     .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, "");
-const MODEL_NAME = "qwen3.7-max-preview";
+const MODEL_NAME = "qwen3.6-flash-2026-04-16";
 const FRIST_MODEL_NAME = "qwen3.6-flash";
 
 // 2. ⚡ 核心改动：不再直接覆盖原文件，而是生成 .pending 文件并计算出 Git 风格的 Diff
@@ -273,89 +273,116 @@ export async function POST(req: Request) {
     // ========================================================
     // 阶段二：流式文本生成阶段 (输出精美的 markdown diff 视图)
     // ========================================================
-    const response = await fetch(QWEN_STREAM_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: currentContext,
-        stream: true,
-      }),
-    });
+    const controllerWithTimeout = new AbortController();
+    const timeoutId = setTimeout(() => controllerWithTimeout.abort(), 160000); // 160s 超时
+    try {
+      const response = await fetch(QWEN_STREAM_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: MODEL_NAME,
+          messages: currentContext,
+          stream: true,
+        }),
+        signal: controllerWithTimeout.signal, // ⚡ 绑定信号
+      });
 
-    if (!response.ok) throw new Error("Second-stage Stream failed");
-    if (!response.body) throw new Error("Response Body is null");
+      clearTimeout(timeoutId); // 成功建立连接，清除定时器
 
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder("utf-8");
-    const reader = response.body.getReader();
+      if (!response.ok)
+        throw new Error(
+          `Second-stage Stream failed with status ${response.status}`,
+        );
+      if (!response.body) throw new Error("Response Body is null");
 
-    const outputStream = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(encoder.encode(": connected\n\n"));
+      if (!response.ok) throw new Error("Second-stage Stream failed");
+      if (!response.body) throw new Error("Response Body is null");
 
-        // 🌟 1. 检查上下文，如果刚刚执行了工具，先发送补丁就绪信号
-        const lastToolCall = assistantMessage?.tool_calls?.[0];
-        if (lastToolCall?.function.name === "propose_file_change") {
-          // 解析之前保存的补丁结果
-          const toolResult = currentContext.find(
-            (m) => m.role === "tool",
-          )?.content;
-          if (toolResult) {
-            // 发送特定的补丁就绪指令给前端
-            controller.enqueue(encoder.encode(`data: ${toolResult}\n\n`));
-          }
-        }
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder("utf-8");
+      const reader = response.body.getReader();
 
-        let buffer = "";
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+      const outputStream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(encoder.encode(": connected\n\n"));
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split(/\r?\n/);
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith("data:")) continue;
-
-              const dataJson = trimmed.slice("data:".length).trim();
-              if (dataJson === "[DONE]") break;
-
-              try {
-                const parsed = JSON.parse(dataJson);
-                const text = parsed.choices?.[0]?.delta?.content || "";
-                if (text) {
-                  // 2. 将文本回复封装为 TEXT_CHUNK
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "TEXT", content: text })}\n\n`,
-                    ),
-                  );
-                }
-              } catch (e) {}
+          // 🌟 1. 检查上下文，如果刚刚执行了工具，先发送补丁就绪信号
+          const lastToolCall = assistantMessage?.tool_calls?.[0];
+          if (lastToolCall?.function.name === "propose_file_change") {
+            // 解析之前保存的补丁结果
+            const toolResult = currentContext.find(
+              (m) => m.role === "tool",
+            )?.content;
+            if (toolResult) {
+              // 发送特定的补丁就绪指令给前端
+              controller.enqueue(encoder.encode(`data: ${toolResult}\n\n`));
             }
           }
-        } finally {
-          controller.close();
-          reader.releaseLock();
-        }
-      },
-    });
-    // 🌟 【关键修复】确保这里直接返回了 Response，且没有在其他地方提前 return
-    return new Response(outputStream, {
-      headers: {
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "X-Accel-Buffering": "no",
-      },
-    });
+
+          let buffer = "";
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split(/\r?\n/);
+              buffer = lines.pop() || "";
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+                const dataJson = trimmed.slice("data:".length).trim();
+                if (dataJson === "[DONE]") break;
+
+                try {
+                  const parsed = JSON.parse(dataJson);
+                  const text = parsed.choices?.[0]?.delta?.content || "";
+                  if (text) {
+                    // 2. 将文本回复封装为 TEXT_CHUNK
+                    controller.enqueue(
+                      encoder.encode(
+                        `data: ${JSON.stringify({ type: "TEXT", content: text })}\n\n`,
+                      ),
+                    );
+                  }
+                } catch (e) {}
+              }
+            }
+          } finally {
+            controller.close();
+            reader.releaseLock();
+          }
+        },
+      });
+      // 🌟 【关键修复】确保这里直接返回了 Response，且没有在其他地方提前 return
+      return new Response(outputStream, {
+        headers: {
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+
+      // 如果是被我们手动 abort 的，或者是原生的 timeout
+      if (
+        fetchError.name === "AbortError" ||
+        fetchError.code === "UND_ERR_HEADERS_TIMEOUT"
+      ) {
+        console.error(
+          "🚨 阶段二大模型响应头接收超时，可能是模型生成 Diff 耗时过长或网络拥堵。",
+        );
+        throw new Error("大模型响应超时，请稍后重试。");
+      }
+      throw fetchError;
+    }
   } catch (error: any) {
     console.error("❌ [致命错误]:", error);
     return NextResponse.json(
