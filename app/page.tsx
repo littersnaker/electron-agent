@@ -1,27 +1,15 @@
+// src/app/page.tsx
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
-
-type AttachedFile = {
-  name: string;
-  type: string;
-  base64: string;
-  textContent?: string;
-};
-
-type ChatSession = {
-  id: string;
-  title: string;
-  messages: Message[];
-};
+// 1. ⚡ 删掉旧的 Virtuoso 引入，引入我们刚刚写好的 ChatList 组件
+import ChatList from "./component/ChatList";
+import {
+  Message,
+  AttachedFile,
+  ChatSession,
+  StreamPacket,
+} from "./const/pageConst";
 
 const DB_NAME = "GeminiChatDB";
 const DB_VERSION = 1;
@@ -30,12 +18,10 @@ const MAX_CONTEXT_MESSAGES = 24;
 const starterMessages: Message[] = [
   {
     role: "assistant",
-    content:
-      "你好，我是你的智能对话机器人，有什么问题可以问我哦！",
+    content: "你好，我是你的智能对话机器人，有什么问题可以问我哦！",
   },
 ];
 
-// ⚡ 封装原生的 IndexedDB 异步连接器
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -56,7 +42,7 @@ function openDB(): Promise<IDBDatabase> {
 export default function Home() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
-  
+
   const [messages, setMessages] = useState<Message[]>(starterMessages);
   const [input, setInput] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
@@ -65,18 +51,16 @@ export default function Home() {
   const [isParsingFile, setIsParsingFile] = useState(false);
   const isFetchingRef = useRef(false);
   const finalTextRef = useRef("");
-  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
+  // ⚡ 2. 删掉旧的 virtuosoRef 引用，列表内部自己接管
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 1. 异步初始化加载 IndexedDB 数据
+  // 1. 异步初始化加载 IndexedDB 数据 (保持原样...)
   useEffect(() => {
     async function initChatFromDB() {
       try {
         const db = await openDB();
-        
-        // 读取所有历史会话
         const allSessions = await new Promise<ChatSession[]>((resolve) => {
           const tx = db.transaction("sessions", "readonly");
           const store = tx.objectStore("sessions");
@@ -85,8 +69,10 @@ export default function Home() {
           req.onerror = () => resolve([]);
         });
 
-        // 读取上次活跃的会话 ID
-        const activeIdSetting = await new Promise<{ key: string; value: string } | null>((resolve) => {
+        const activeIdSetting = await new Promise<{
+          key: string;
+          value: string;
+        } | null>((resolve) => {
           const tx = db.transaction("settings", "readonly");
           const store = tx.objectStore("settings");
           const req = store.get("activeSessionId");
@@ -97,32 +83,39 @@ export default function Home() {
         let initialSessions = allSessions;
         let initialActiveId = activeIdSetting?.value || "";
 
-        // 如果数据库是空的，初始化创建一个默认会话
         if (initialSessions.length === 0) {
           const defaultSession: ChatSession = {
-            id: "session_" + Date.now() + Math.random().toString(36).substring(2, 9),
+            id:
+              "session_" +
+              Date.now() +
+              Math.random().toString(36).substring(2, 9),
             title: "新的对话",
             messages: starterMessages,
           };
           initialSessions = [defaultSession];
           initialActiveId = defaultSession.id;
 
-          // 顺手写入数据库做兜底持久化
           const tx = db.transaction(["sessions", "settings"], "readwrite");
           tx.objectStore("sessions").put(defaultSession);
-          tx.objectStore("settings").put({ key: "activeSessionId", value: defaultSession.id });
+          tx.objectStore("settings").put({
+            key: "activeSessionId",
+            value: defaultSession.id,
+          });
         } else {
-          // 校验上次活跃的 ID 在列表里是否存在
-          if (!initialActiveId || !initialSessions.some(s => s.id === initialActiveId)) {
+          if (
+            !initialActiveId ||
+            !initialSessions.some((s) => s.id === initialActiveId)
+          ) {
             initialActiveId = initialSessions[0].id;
           }
         }
 
-        // 按 ID 的创建时间戳倒序排列侧边栏（如果需要，这里我们保持默认读取顺序）
         setSessions(initialSessions);
         setActiveSessionId(initialActiveId);
-        
-        const currentSession = initialSessions.find(s => s.id === initialActiveId);
+
+        const currentSession = initialSessions.find(
+          (s) => s.id === initialActiveId,
+        );
         if (currentSession) {
           setMessages(currentSession.messages);
         }
@@ -132,21 +125,22 @@ export default function Home() {
         setIsLoaded(true);
       }
     }
-
     initChatFromDB();
   }, []);
 
-
-  // 3. 当切换活跃会话时，单独将 activeSessionId 记录到设置表
+  // 3. 当切换活跃会话时记录设置表 (保持原样...)
   useEffect(() => {
     if (!isLoaded || !activeSessionId) return;
     openDB().then((db) => {
       const tx = db.transaction("settings", "readwrite");
-      tx.objectStore("settings").put({ key: "activeSessionId", value: activeSessionId });
+      tx.objectStore("settings").put({
+        key: "activeSessionId",
+        value: activeSessionId,
+      });
     });
   }, [activeSessionId, isLoaded]);
 
-  // 4. 切换会话逻辑
+  // 4. 切换会话逻辑 (保持原样...)
   const switchSession = (sessionId: string) => {
     if (isStreaming || sessionId === activeSessionId) return;
     abortRef.current?.abort();
@@ -162,7 +156,7 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // 5. 新增对话逻辑
+  // 5. 新增对话逻辑 (保持原样...)
   const createNewSession = async () => {
     if (isStreaming) return;
     abortRef.current?.abort();
@@ -177,20 +171,19 @@ export default function Home() {
     setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
     setMessages(starterMessages);
-    
+
     setInput("");
     setAttachedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
 
-    // 同步将新行插入到数据库
     const db = await openDB();
     const tx = db.transaction("sessions", "readwrite");
     tx.objectStore("sessions").put(newSession);
   };
 
-  // 6. 删除特定会话逻辑
+  // 6. 删除特定会话逻辑 (保持原样...)
   const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); 
+    e.stopPropagation();
     if (isStreaming) return;
 
     if (sessions.length <= 1) {
@@ -201,7 +194,6 @@ export default function Home() {
     const remainingSessions = sessions.filter((s) => s.id !== sessionId);
     setSessions(remainingSessions);
 
-    // 从数据库中彻底擦除该条会话
     const db = await openDB();
     const tx = db.transaction("sessions", "readwrite");
     tx.objectStore("sessions").delete(sessionId);
@@ -213,16 +205,7 @@ export default function Home() {
     }
   };
 
-  // 自动吸底逻辑
-  useEffect(() => {
-    if (isStreaming && virtuosoRef.current) {
-      virtuosoRef.current.scrollToIndex({
-        index: messages.length - 1,
-        align: "end",
-        behavior: "auto",
-      });
-    }
-  }, [messages, isStreaming]);
+  // ⚡ 3. 【核心删改】：彻底删掉原来的自动吸底 useEffect 副作用
 
   useEffect(() => {
     return () => {
@@ -230,11 +213,10 @@ export default function Home() {
     };
   }, []);
 
-  // 前端多模态及 PDF 深度解析模块（未变动）
+  // 前端多模态及 PDF 深度解析模块 (保持原样...)
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsParsingFile(true);
     try {
       if (file.type.startsWith("image/")) {
@@ -253,24 +235,20 @@ export default function Home() {
         reader.readAsDataURL(file);
         return;
       }
-
       if (file.type === "application/pdf") {
         const pdfjsLib = await import("pdfjs-dist");
         pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-
         const arrayBuffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({
           data: new Uint8Array(arrayBuffer),
         });
         const pdf = await loadingTask.promise;
-
         let fullText = "";
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const tokenizedText = await page.getTextContent();
-          const pageText = tokenizedText.items
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .map((item: any) => item.str)
+          const pageText = (tokenizedText.items as Array<{ str?: string }>)
+            .map((item) => item.str || "")
             .join(" ");
           fullText += pageText + "\n";
         }
@@ -283,7 +261,6 @@ export default function Home() {
         setIsParsingFile(false);
         return;
       }
-
       const textReader = new FileReader();
       textReader.onload = (textEvent) => {
         setAttachedFile({
@@ -304,6 +281,7 @@ export default function Home() {
     }
   };
 
+  // 核心 handleSubmit 流式请求及存储 (保持原样...)
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const textContent = input.trim();
@@ -319,57 +297,62 @@ export default function Home() {
       ? `📎 [文件：${attachedFile.name}]\n  ${textContent}`
       : textContent;
 
-    // 组装包含用户当前输入的最新历史记录
     const updatedHistory: Message[] = [
       ...messages,
       { role: "user" as const, content: displayPrompt },
       { role: "assistant" as const, content: "" },
     ];
 
-    // ==========================================
-    // ⚡ 1. 核心合规重构：在事件触发时，立即计算标题（不依赖 useEffect）
-    // ==========================================
-    const currentSession = sessions.find(s => s.id === activeSessionId);
+    const currentSession = sessions.find((s) => s.id === activeSessionId);
     let updatedTitle = currentSession?.title || "新的对话";
 
     if (updatedTitle === "新的对话" || updatedTitle === "New Chat") {
-      const cleanContent = displayPrompt.replace(/^📎 \[文件：.*?\]\s*/g, "").trim();
+      const cleanContent = displayPrompt
+        .replace(/^📎 \[文件：.*?\]\s*/g, "")
+        .trim();
       const firstSentence = cleanContent.split(/[\n。？?！!]/)[0].trim();
       if (firstSentence) {
-        updatedTitle = firstSentence.length > 15 
-          ? firstSentence.slice(0, 15) + "..." 
-          : firstSentence;
+        updatedTitle =
+          firstSentence.length > 15
+            ? firstSentence.slice(0, 15) + "..."
+            : firstSentence;
       } else {
         updatedTitle = cleanContent.slice(0, 12) || "新的对话";
       }
     }
 
-    // ⚡ 2. 立即同步更新侧边栏 Session 列表状态，并存入第一笔数据（用户消息 + 新标题）
     setSessions((prev) =>
-      prev.map((s) => (s.id === activeSessionId ? { ...s, title: updatedTitle, messages: updatedHistory } : s))
+      prev.map((s) =>
+        s.id === activeSessionId
+          ? { ...s, title: updatedTitle, messages: updatedHistory }
+          : s,
+      ),
     );
     const db = await openDB();
     const tx = db.transaction("sessions", "readwrite");
-    tx.objectStore("sessions").put({ id: activeSessionId, title: updatedTitle, messages: updatedHistory });
+    tx.objectStore("sessions").put({
+      id: activeSessionId,
+      title: updatedTitle,
+      messages: updatedHistory,
+    });
 
-    // 更新右侧聊天面板的数据源
     setMessages(updatedHistory);
 
-    // 准备发送给 API 的 payload
     const apiMessages = [
       ...updatedHistory.slice(-MAX_CONTEXT_MESSAGES).map((m) => ({
         role: m.role,
         content:
-          m.role === "user" &&
-          m.content === displayPrompt &&
-          attachedFile
+          m.role === "user" && m.content === displayPrompt && attachedFile
             ? attachedFile.type.startsWith("image/")
               ? [
                   {
                     type: "text",
                     text: textContent || "请帮我分析一下这张图片。",
                   },
-                  { type: "image_url", image_url: { url: attachedFile.base64 } },
+                  {
+                    type: "image_url",
+                    image_url: { url: attachedFile.base64 },
+                  },
                 ]
               : combinedText
             : m.content,
@@ -391,12 +374,14 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          sessionId: activeSessionId,
+        }),
         signal: abortController.signal,
       });
 
       if (!response.body || !response.ok) throw new Error("Request failed.");
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
@@ -404,55 +389,83 @@ export default function Home() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split(/\r?\n\r?/);
-        buffer = chunks.pop() || "";
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
 
-        for (const chunk of chunks) {
-          const line = chunk.trim();
-          if (!line || line.startsWith(":")) continue;
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith(":")) continue;
+          if (trimmed.startsWith("data:")) {
+            const rawData = trimmed.slice("data:".length).trim();
+            if (rawData === "[DONE]") continue;
 
-          const dataLine = line.split("\n").find((l) => l.startsWith("data:"));
-          if (!dataLine) continue;
+            try {
+              // 🎯 安全地通过接口断言，平息 ESLint 的 `no-explicit-any` 和不安全成员访问警告
+              const packet = JSON.parse(rawData) as StreamPacket;
 
-          const rawData = dataLine.slice("data:".length).trim();
-          if (rawData === "[DONE]") continue;
+              if (packet && typeof packet === "object") {
+                // 分支一：处理真实的大模型流式吐字（包括逻辑思考与正文）
+                if (packet.type === "TEXT") {
+                  const textToken = packet.content || "";
+                  if (textToken) {
+                    finalTextRef.current += textToken;
+                    setMessages((prev) => {
+                      const updated = [...prev];
+                      updated[updated.length - 1] = {
+                        role: "assistant",
+                        content: finalTextRef.current,
+                      };
+                      return updated;
+                    });
+                  }
+                }
 
-          try {
-            const packet = JSON.parse(rawData);
+                // 分支二：处理 LangGraph 拓扑节点的普通进度状态
+                else if (packet.type === "STATUS") {
+                  const statusText = packet.content || "";
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      role: "assistant",
+                      content: statusText, // 💡 临时渲染成状态文字，带给用户极佳的动态反馈
+                    };
+                    return updated;
+                  });
+                }
 
-            if (packet.type === "TEXT" || typeof packet === "string") {
-              const textToken =
-                typeof packet === "string" ? packet : packet.content;
+                // 分支三：处理 LangGraph 正在调用特定工具的状态
+                else if (packet.type === "TOOL_STATUS") {
+                  const toolName = packet.content || "";
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      role: "assistant",
+                      content: `🔧 正在调用代码控制台执行修改: [${toolName}]...`,
+                    };
+                    return updated;
+                  });
+                }
 
-              finalTextRef.current += textToken;
-              
-              // ⚡ 3. 流式传输期间，【只】更新右侧文本展示区 messages，维持 Virtuoso 极速流畅渲染
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: finalTextRef.current,
-                };
-                return updated;
-              });
+                // 分支四：处理补丁就绪信号
+                else if (packet.type === "DIFF_READY") {
+                  console.log("检测到补丁就绪信号:", packet.payload);
+                }
+              }
+            } catch (e) {
+              console.warn("解析流数据包跳过一行:", trimmed, e);
             }
-          } catch (e) {
-            console.error("解析流数据包失败:", e);
           }
         }
       }
     } catch (error) {
       if (abortController.signal.aborted) return;
-      const message = error instanceof Error ? error.message : "Streaming failed.";
-      finalTextRef.current = message; // 保证异常信息也能被完整收录
+      const message =
+        error instanceof Error ? error.message : "Streaming failed.";
+      finalTextRef.current = message;
       setMessages((prev) => {
         const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: message,
-        };
+        updated[updated.length - 1] = { role: "assistant", content: message };
         return updated;
       });
     } finally {
@@ -460,26 +473,21 @@ export default function Home() {
       abortRef.current = null;
       setIsStreaming(false);
 
-      // ==========================================
-      // ⚡ 4. 核心合规重构：流式交互彻底关闭时，一次性对最终全量数据收网持久化
-      // ==========================================
       const finalHistory = [
         ...updatedHistory.slice(0, -1),
-        { role: "assistant" as const, content: finalTextRef.current }
+        { role: "assistant" as const, content: finalTextRef.current },
       ];
-      
-      // 更新左侧内存 Session 状态
       setSessions((prev) =>
-        prev.map((s) => (s.id === activeSessionId ? { ...s, messages: finalHistory } : s))
+        prev.map((s) =>
+          s.id === activeSessionId ? { ...s, messages: finalHistory } : s,
+        ),
       );
-      
-      // 最终完整写入 IndexedDB
       const finalDb = await openDB();
       const finalTx = finalDb.transaction("sessions", "readwrite");
-      finalTx.objectStore("sessions").put({ 
-        id: activeSessionId, 
-        title: updatedTitle, 
-        messages: finalHistory 
+      finalTx.objectStore("sessions").put({
+        id: activeSessionId,
+        title: updatedTitle,
+        messages: finalHistory,
       });
     }
   }
@@ -495,39 +503,28 @@ export default function Home() {
     setInput("");
     setAttachedFile(null);
     setIsStreaming(false);
-    
-    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, title: "新的对话", messages: starterMessages } : s));
-    
-    // 清空数据库中该特定会话里面的对话内容
-    openDB().then(db => {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSessionId
+          ? { ...s, title: "新的对话", messages: starterMessages }
+          : s,
+      ),
+    );
+    openDB().then((db) => {
       const tx = db.transaction("sessions", "readwrite");
-      tx.objectStore("sessions").put({ id: activeSessionId, title: "新的对话", messages: starterMessages });
+      tx.objectStore("sessions").put({
+        id: activeSessionId,
+        title: "新的对话",
+        messages: starterMessages,
+      });
     });
   }
 
-  const renderMessageRow = (message: Message, isUser: boolean) => (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
-      <div
-        className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-6 shadow-sm 
-          ${isUser ? "bg-blue-600 text-white whitespace-pre-wrap" : "bg-white text-zinc-900"}`}
-      >
-        {isUser ? (
-          message.content
-        ) : (
-          <div className="prose prose-sm prose-zinc max-w-none w-full overflow-x-auto wrap-break-word whitespace-normal">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content || "Thinking..."}
-            </ReactMarkdown>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  // ⚡ 4. 【核心删改】：彻底删掉原来的 renderMessageRow 整个函数
 
   return (
     <main className="min-h-screen bg-zinc-100 text-zinc-950 flex overflow-hidden">
-      
-      {/* 左侧历史会话侧边栏 */}
+      {/* 左侧历史会话侧边栏 (保持原样...) */}
       <div className="w-64 bg-zinc-900 text-zinc-200 flex flex-col h-screen border-r border-zinc-800 shrink-0 select-none">
         <div className="p-4">
           <button
@@ -538,8 +535,6 @@ export default function Home() {
             <span className="text-base font-bold">＋</span> 新增对话
           </button>
         </div>
-        
-        {/* 会话列表列表 */}
         <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1">
           {sessions.map((session) => {
             const isActive = session.id === activeSessionId;
@@ -566,7 +561,6 @@ export default function Home() {
             );
           })}
         </div>
-        
         <div className="p-3 border-t border-zinc-800 text-xs text-zinc-500 text-center">
           共 {sessions.length} 个历史对话 (已启用 IndexedDB 存储)
         </div>
@@ -577,9 +571,7 @@ export default function Home() {
         <header className="mb-5 flex items-center justify-between border-b border-zinc-200 pb-4">
           <div>
             <h1 className="text-2xl font-semibold">AI Chat Component</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              千问模型
-            </p>
+            <p className="mt-1 text-sm text-zinc-500">千问模型</p>
           </div>
           <div className="flex gap-2">
             {isStreaming && (
@@ -599,21 +591,15 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 pb-4">
-          <Virtuoso
-            ref={virtuosoRef}
-            className="h-full w-full"
-            data={messages}
-            followOutput={(isAtBottom) => {
-              if (isStreaming) return "auto";
-              return isAtBottom ? "auto" : false;
-            }}
-            itemContent={(index, message) => {
-              return renderMessageRow(message, message.role === "user");
-            }}
-          />
-        </div>
+        {/* ⚡ 5. 【核心替换】：在这里直接换上我们封装好的高效 ChatList 组件 */}
+        {/* 💡 绝招：key={activeSessionId} 强制在切换会话时使组件重载，瞬间闪现吸底，不再卡在顶部！ */}
+        <ChatList
+          key={activeSessionId}
+          messages={messages}
+          isStreaming={isStreaming}
+        />
 
+        {/* 底部输入框表单 (保持原样...) */}
         <div className="border-t border-zinc-200 pt-4">
           {attachedFile && (
             <div className="mb-2 flex items-center gap-2 max-w-xs rounded-md bg-zinc-200 px-3 py-1.5 text-xs text-zinc-700">
@@ -651,7 +637,6 @@ export default function Home() {
               className="hidden"
               accept="image/*,application/pdf,text/*"
             />
-
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -661,7 +646,6 @@ export default function Home() {
             >
               📎
             </button>
-
             <input
               className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500"
               onChange={(event) => setInput(event.target.value)}
@@ -675,7 +659,6 @@ export default function Home() {
               value={input}
               disabled={isParsingFile}
             />
-
             <button
               className="rounded-md bg-zinc-950 px-5 py-3 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
               disabled={(!input.trim() && !attachedFile) || isParsingFile}
