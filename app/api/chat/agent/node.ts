@@ -99,7 +99,7 @@ export async function routerNode(
       Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "qwen3.6-plus",
+      model: "qwen3.7-plus-2026-05-26",
       messages: firstStageContext,
       tools: tools,
       tool_choice: "auto",
@@ -492,7 +492,7 @@ export async function summarizeHistoryNode(
         Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "qwen3.7-max-2026-06-08",
+        model: "qwen3.7-max-2026-05-20",
         messages: [{ role: "user", content: summaryPrompt }],
         stream: false,
       }),
@@ -533,7 +533,7 @@ export async function reportNode(state: typeof AgentState.State) {
         Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`, // 确保环境变量存在
       },
       body: JSON.stringify({
-        model: "qwen3.7-max-2026-06-08", // 确保模型名称正确，之前你可能用了别的qwen3.6-plus
+        model: "qwen3.7-max-2026-05-20", // 确保模型名称正确，之前你可能用了别的qwen3.6-plus
         messages: [
           {
             role: "system",

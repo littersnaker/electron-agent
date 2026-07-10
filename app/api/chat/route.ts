@@ -245,7 +245,7 @@ export async function POST(req: Request): Promise<Response> {
               Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
             },
             body: JSON.stringify({
-              model: "qwen3.7-plus-2026-05-26-2026-05-26",
+              model: "qwen3.7-plus-2026-05-26",
               messages: [systemPrompt, ...recentMessages],
               stream: true,
             }),
