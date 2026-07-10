@@ -85,9 +85,14 @@ export async function POST(req: Request): Promise<Response> {
 
           // 如果 MemorySaver 已有状态，只传入新消息（最后一条），避免消息重复
           // 如果服务器重启后状态丢失，传入前端发送的所有消息恢复上下文
-          const messagesToGraph = hasExistingState
-            ? [inputMessages[inputMessages.length - 1]]
-            : inputMessages;
+          let messagesToGraph = inputMessages;
+          if (hasExistingState) {
+            messagesToGraph = [inputMessages[inputMessages.length - 1]]; // 默认取最新一条 User 消息
+            if (inputMessages.length >= 2) {
+              // 将上一条 Assistant 的回复也塞进图里，补全上下文闭环
+              messagesToGraph.unshift(inputMessages[inputMessages.length - 2]);
+            }
+          }
 
           const graphStream = await graph.stream(
             { messages: messagesToGraph },
@@ -144,10 +149,13 @@ export async function POST(req: Request): Promise<Response> {
             }
           }
 
-          const graphSnapshot = await graph.getState({
+          // const graphSnapshot = await graph.getState({
+          //   configurable: { thread_id: sessionId },
+          // });
+          const finalSnapshot = await graph.getState({
             configurable: { thread_id: sessionId },
           });
-          finalState = graphSnapshot.values as AgentStateValues;
+          finalState = finalSnapshot.values as AgentStateValues;
           if (finalState.summary) {
             controller.enqueue(
               encoder.encode(
@@ -237,7 +245,7 @@ export async function POST(req: Request): Promise<Response> {
               Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
             },
             body: JSON.stringify({
-              model: "qwen3.7-plus",
+              model: "qwen3.7-plus-2026-05-26-2026-05-26",
               messages: [systemPrompt, ...recentMessages],
               stream: true,
             }),
@@ -277,7 +285,9 @@ export async function POST(req: Request): Promise<Response> {
                   const dataJson = trimmed.slice("data:".length).trim();
                   if (dataJson !== "[DONE]") {
                     try {
-                      const parsed = JSON.parse(dataJson) as StreamDeltaResponse;
+                      const parsed = JSON.parse(
+                        dataJson,
+                      ) as StreamDeltaResponse;
                       const delta = parsed.choices?.[0]?.delta;
                       const reasoning = delta?.reasoning_content || "";
                       const content = delta?.content || "";

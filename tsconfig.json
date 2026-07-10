@@ -30,5 +30,15 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "electron/**/*",
+    "scripts/**/*",
+    ".electron/**/*",
+    "forge.config.ts",
+    "out-server", // ✨ 必须加上：忽略我们的预处理目录
+    ".electron", // ✨ 建议加上：忽略你的 electron 源码目录（如果有的话）
+    "out", // ✨ 建议加上：忽略其他的构建输出
+    "dist"
+  ]
 }

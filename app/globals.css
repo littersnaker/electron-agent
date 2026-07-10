@@ -2,31 +2,149 @@
 @plugin "@tailwindcss/typography"; /* 🔥 v4 插件引入专属新写法 */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 暗黑紫蓝渐变主题色板 */
+  --background: #0a0a0f;
+  --background-soft: #12121a;
+  --surface: #16161f;
+  --surface-hover: #1d1d2a;
+  --border: #26263a;
+  --border-soft: #1f1f2e;
+  --foreground: #ededf2;
+  --foreground-muted: #9a9ab0;
+  --foreground-subtle: #6b6b85;
+  /* 紫蓝渐变强调色 */
+  --accent-from: #a855f7;
+  --accent-via: #8b5cf6;
+  --accent-to: #6366f1;
+  --accent: #8b5cf6;
+  --accent-glow: rgba(139, 92, 246, 0.35);
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Noto Sans Mono SC", "Fira Code", "Source Code Pro", Consolas, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .chat-message {
   content-visibility: auto;
   contain-intrinsic-size: 0 96px;
+}
+
+/* ===== 自定义滚动条（暗黑紫色调） ===== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* ===== 渐变文字 ===== */
+.text-gradient {
+  background: linear-gradient(135deg, var(--accent-from) 0%, var(--accent-to) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ===== 渐变背景按钮 ===== */
+.btn-gradient {
+  background: linear-gradient(135deg, var(--accent-from) 0%, var(--accent-to) 100%);
+  box-shadow: 0 4px 16px -4px var(--accent-glow);
+  transition: all 0.2s ease;
+}
+.btn-gradient:hover:not(:disabled) {
+  box-shadow: 0 6px 24px -4px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.btn-gradient:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* ===== 玻璃质感卡片 ===== */
+.glass {
+  background: rgba(22, 22, 31, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-soft);
+}
+
+/* ===== 发光效果 ===== */
+.glow-accent {
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 20px -4px var(--accent-glow);
+}
+
+/* ===== 流式输入框聚焦辉光 ===== */
+.input-glow:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* ===== 加载呼吸动画 ===== */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+
+/* ===== 流式打字光标 ===== */
+@keyframes blink-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.caret::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--accent);
+  animation: blink-caret 1s step-end infinite;
+}
+
+/* ===== Markdown 正文暗黑适配 ===== */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-links: var(--accent-from);
+  --tw-prose-code: #e6b3ff;
+  --tw-prose-pre-bg: #0d0d14;
+  --tw-prose-pre-code: #d4d4e8;
+  --tw-prose-quotes: var(--foreground-muted);
+  --tw-prose-bold: #ffffff;
+  --tw-prose-bullets: var(--accent);
+  --tw-prose-counters: var(--foreground-muted);
+  --tw-prose-hr: var(--border);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border-soft);
+}
+.prose pre {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+.prose code::before,
+.prose code::after {
+  content: "";
+}
+.prose :not(pre) > code {
+  background: var(--surface-hover);
+  padding: 0.15em 0.4em;
+  border-radius: 5px;
+  font-size: 0.88em;
 }

@@ -11,6 +11,28 @@ import {
   StreamPacket,
 } from "./const/pageConst";
 
+// 暗黑主题硬编码颜色（避免 CSS 变量加载时序问题）
+const T = {
+  bg: "#0a0a0f",
+  bgSoft: "#12121a",
+  surface: "#16161f",
+  surfaceHover: "#1d1d2a",
+  border: "#26263a",
+  borderSoft: "#1f1f2e",
+  fg: "#ededf2",
+  fgMuted: "#9a9ab0",
+  fgSubtle: "#6b6b85",
+  accentFrom: "#a855f7",
+  accentTo: "#6366f1",
+  accentGlow: "rgba(139, 92, 246, 0.35)",
+  accentGrad: "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)",
+  green: "#22c55e",
+};
+
+function createSessionId(): string {
+  return "session_" + Date.now() + Math.random().toString(36).substring(2, 9);
+}
+
 const DB_NAME = "GeminiChatDB";
 const DB_VERSION = 1;
 const MAX_CONTEXT_MESSAGES = 24;
@@ -86,10 +108,7 @@ export default function Home() {
 
         if (initialSessions.length === 0) {
           const defaultSession: ChatSession = {
-            id:
-              "session_" +
-              Date.now() +
-              Math.random().toString(36).substring(2, 9),
+            id: createSessionId(),
             title: "新的对话",
             messages: starterMessages,
           };
@@ -177,7 +196,7 @@ export default function Home() {
     setCurrentTool(""); // ⚡ 创建新会话时清空工具状态
 
     const newSession: ChatSession = {
-      id: "session_" + Date.now() + Math.random().toString(36).substring(2, 9),
+      id: createSessionId(),
       title: "新的对话",
       messages: starterMessages,
     };
@@ -566,8 +585,7 @@ export default function Home() {
     clearedSessionRef.current = activeSessionId;
 
     // 2. 生成全新的 ID
-    const newSessionId =
-      "session_" + Date.now() + Math.random().toString(36).substring(2, 9);
+    const newSessionId = createSessionId();
 
     // 3. 更新本地状态
     setMessages(starterMessages);
@@ -592,36 +610,67 @@ export default function Home() {
   // ⚡ 4. 【核心删改】：彻底删掉原来的 renderMessageRow 整个函数
 
   return (
-    <main className="min-h-screen bg-zinc-100 text-zinc-950 flex overflow-hidden">
-      {/* 左侧历史会话侧边栏 (保持原样...) */}
-      <div className="w-64 bg-zinc-900 text-zinc-200 flex flex-col h-screen border-r border-zinc-800 shrink-0 select-none">
-        <div className="p-4">
+    <main className="min-h-screen flex overflow-hidden" style={{ background: T.bg, color: T.fg }}>
+      {/* 左侧历史会话侧边栏 */}
+      <div
+        className="w-72 flex flex-col h-screen shrink-0 select-none"
+        style={{ background: T.bgSoft, borderRight: `1px solid ${T.borderSoft}` }}
+      >
+        {/* 顶部品牌区 */}
+        <div className="px-5 pt-5 pb-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-xl shrink-0"
+              style={{ background: T.accentGrad, boxShadow: `0 4px 14px -4px ${T.accentGlow}` }}
+            >
+              A
+            </div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold text-gradient">智能助手</div>
+              <div className="text-xs" style={{ color: T.fgSubtle }}>千问大模型驱动</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 新增对话按钮 */}
+        <div className="px-4 pb-3">
           <button
             onClick={createNewSession}
             disabled={isStreaming}
-            className="w-full flex items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-zinc-700 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-gradient w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
           >
-            <span className="text-base font-bold">＋</span> 新增对话
+            <span className="text-base leading-none">＋</span> 新建对话
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1">
+
+        {/* 会话列表 */}
+        <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
+          <div className="px-2 py-1 text-xs font-medium" style={{ color: T.fgSubtle }}>
+            历史对话
+          </div>
           {sessions.map((session) => {
             const isActive = session.id === activeSessionId;
             return (
               <div
                 key={session.id}
                 onClick={() => switchSession(session.id)}
-                className={`group flex items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium cursor-pointer transition-colors
-                  ${isActive ? "bg-zinc-800 text-white" : "hover:bg-zinc-800/40 text-zinc-400 hover:text-zinc-200"}`}
+                className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium cursor-pointer transition-all
+                  ${isActive ? "" : "hover:bg-[#1d1d2a]"}`}
+                style={
+                  isActive
+                    ? { background: T.surfaceHover, color: T.fg, boxShadow: `inset 2px 0 0 ${T.accentFrom}` }
+                    : { color: T.fgMuted }
+                }
               >
                 <div className="flex items-center gap-2.5 truncate flex-1 mr-2">
-                  <span className="text-sm shrink-0">💬</span>
+                  <span className="text-sm shrink-0 opacity-70">💬</span>
                   <span className="truncate">{session.title}</span>
                 </div>
                 <button
                   onClick={(e) => deleteSession(session.id, e)}
                   disabled={isStreaming}
-                  className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-200 transition-opacity px-1 font-bold text-xs disabled:hidden"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity px-1 font-bold text-xs disabled:hidden hover:text-red-400"
+                  style={{ color: T.fgSubtle }}
                   title="删除对话"
                 >
                   ✕
@@ -630,29 +679,37 @@ export default function Home() {
             );
           })}
         </div>
-        <div className="p-3 border-t border-zinc-800 text-xs text-zinc-500 text-center">
-          共 {sessions.length} 个历史对话 (已启用 IndexedDB 存储)
+
+        {/* 底部状态栏 */}
+        <div className="px-4 py-3 text-xs flex items-center justify-between" style={{ borderTop: `1px solid ${T.borderSoft}`, color: T.fgSubtle }}>
+          <span>共 {sessions.length} 个对话</span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: T.green }}></span>
+            已本地存储
+          </span>
         </div>
       </div>
 
       {/* 右侧聊天区域 */}
-      <div className="flex-1 flex flex-col h-screen max-w-5xl mx-auto px-4 py-6">
-        <header className="mb-5 flex items-center justify-between border-b border-zinc-200 pb-4">
+      <div className="flex-1 flex flex-col h-screen max-w-5xl mx-auto px-6 py-6">
+        <header className="mb-5 flex items-center justify-between pb-4" style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
           <div>
-            <h1 className="text-2xl font-semibold">AI Chat Component</h1>
-            <p className="mt-1 text-sm text-zinc-500">千问模型</p>
+            <h1 className="text-xl font-semibold text-gradient">AI 对话</h1>
+            <p className="mt-0.5 text-xs" style={{ color: T.fgSubtle }}>基于 LangGraph 智能体 · 通义千问</p>
           </div>
           <div className="flex gap-2">
             {isStreaming && (
               <button
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium bg-white hover:bg-zinc-200"
+                className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
+                style={{ background: T.surfaceHover, color: T.fg, border: `1px solid ${T.border}` }}
                 onClick={stopStreaming}
               >
-                Stop
+                ⏹ 停止生成
               </button>
             )}
             <button
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium bg-white hover:bg-zinc-200"
+              className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
+              style={{ background: T.surfaceHover, color: T.fg, border: `1px solid ${T.border}` }}
               onClick={clearChat}
             >
               清空对话
@@ -670,15 +727,16 @@ export default function Home() {
         />
 
         {/* 底部输入框表单 (保持原样...) */}
-        <div className="border-t border-zinc-200 pt-4">
+        <div className="pt-4" style={{ borderTop: `1px solid ${T.borderSoft}` }}>
           {attachedFile && (
-            <div className="mb-2 flex items-center gap-2 max-w-xs rounded-md bg-zinc-200 px-3 py-1.5 text-xs text-zinc-700">
+            <div className="mb-2 flex items-center gap-2 max-w-xs rounded-lg px-3 py-1.5 text-xs" style={{ background: T.surfaceHover, color: T.fgMuted }}>
               {attachedFile.type.startsWith("image/") ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={attachedFile.base64}
                   alt="preview"
-                  className="h-8 w-8 rounded object-cover border bg-white"
+                  className="h-8 w-8 rounded object-cover border"
+                  style={{ borderColor: T.border }}
                 />
               ) : (
                 <span className="text-lg">📄</span>
@@ -688,7 +746,8 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                className="text-zinc-400 hover:text-zinc-600 ml-1 font-bold"
+                className="ml-1 font-bold hover:opacity-70"
+                style={{ color: T.fgSubtle }}
                 onClick={() => {
                   setAttachedFile(null);
                   if (fileInputRef.current) fileInputRef.current.value = "";
@@ -710,31 +769,33 @@ export default function Home() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center justify-center rounded-md border border-zinc-300 bg-white px-3.5 text-xl hover:bg-zinc-50 active:scale-95 transition-transform"
-              title="Upload file"
+              className="flex items-center justify-center rounded-lg px-3.5 text-xl transition-all hover:opacity-80 active:scale-95"
+              style={{ background: T.surface, color: T.fgMuted, border: `1px solid ${T.border}` }}
+              title="上传文件"
               disabled={isStreaming || isParsingFile}
             >
               📎
             </button>
             <input
-              className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500"
+              className="input-glow min-w-0 flex-1 rounded-lg px-4 py-3 text-sm outline-none transition-all"
+              style={{ background: T.surface, color: T.fg, border: `1px solid ${T.border}` }}
               onChange={(event) => setInput(event.target.value)}
               placeholder={
                 isParsingFile
                   ? "⚡ 正在深度解析文件中..."
                   : attachedFile
-                    ? "Ask about this file..."
-                    : "Type a message..."
+                    ? "问问关于这份文件的内容..."
+                    : "输入你的问题，按回车发送..."
               }
               value={input}
               disabled={isParsingFile}
             />
             <button
-              className="rounded-md bg-zinc-950 px-5 py-3 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+              className="btn-gradient rounded-lg px-5 py-3 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
               disabled={(!input.trim() && !attachedFile) || isParsingFile}
               type="submit"
             >
-              {isParsingFile ? "Parsing..." : "Send"}
+              {isParsingFile ? "解析中..." : "发送"}
             </button>
           </form>
         </div>

@@ -1,18 +1,27 @@
 {
   "name": "my-app",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "main": ".electron/main.js",
+  "author": "white",
+  "description": "AI Chat Application",
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron:dev": "pnpm electron:compile && electron .",
+    "electron:build": "tsx scripts/build-electron.ts",
+    "electron:package": "electron-forge package",
+    "electron:make": "electron-forge make",
+    "electron:compile": "tsx scripts/compile-electron.ts"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",
     "@langchain/core": "^1.1.49",
     "@langchain/langgraph": "^1.4.2",
     "@sentry/nextjs": "^10.58.0",
+    "electron-updater": "^6.8.9",
     "https-proxy-agent": "^9.0.0",
     "next": "16.2.6",
     "node-fetch": "^2.7.0",
@@ -25,15 +34,29 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-deb": "^7.11.2",
+    "@electron-forge/maker-dmg": "^7.11.2",
+    "@electron-forge/maker-rpm": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/lodash": "^4.17.24",
     "@types/node": "^25.9.1",
     "@types/node-fetch": "^2.6.13",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.0.0",
+    "electron-is-dev": "^3.0.1",
+    "electron-squirrel-startup": "^1.0.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "lodash": "^4.18.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   }
 }

@@ -5,6 +5,23 @@ import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+// 暗黑主题硬编码颜色
+const T = {
+  bg: "#0a0a0f",
+  bgSoft: "#12121a",
+  surface: "#16161f",
+  surfaceHover: "#1d1d2a",
+  border: "#26263a",
+  borderSoft: "#1f1f2e",
+  fg: "#ededf2",
+  fgMuted: "#9a9ab0",
+  fgSubtle: "#6b6b85",
+  accentFrom: "#a855f7",
+  accent: "#8b5cf6",
+  amber: "#f59e0b",
+  green: "#22c55e",
+};
+
 // 1. 强类型接口契约
 interface AssistantMessageRowProps {
   content: string;
@@ -57,10 +74,10 @@ const ThinkingSkeleton = () => {
 
   return (
     <div className="py-1 w-64 sm:w-80 select-none">
-      <div className="flex items-center gap-2 mb-3 text-zinc-400 text-xs font-medium">
+      <div className="flex items-center gap-2 mb-3 text-xs font-medium" style={{ color: T.fgMuted }}>
         <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: T.accentFrom }} />
+          <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: T.accent }} />
         </span>
         <span className="animate-pulse">AI 正在深度思考中...</span>
       </div>
@@ -68,7 +85,8 @@ const ThinkingSkeleton = () => {
         {Array.from({ length: lineCount }).map((_, i) => (
           <div
             key={i}
-            className={`${widths[i % widths.length]} h-3 bg-zinc-200 rounded-md animate-pulse transition-all duration-300 ease-out`}
+            className={`${widths[i % widths.length]} h-3 rounded-md animate-pulse transition-all duration-300 ease-out`}
+            style={{ background: T.surfaceHover }}
           />
         ))}
       </div>
@@ -90,16 +108,16 @@ export default function AssistantMessageRow({
   if (currentTool && !content.trim()) {
     return (
       <div className="py-2 w-72 animate-pulse font-mono select-none">
-        <div className="flex items-center gap-2 text-blue-600 text-xs font-semibold mb-2">
+        <div className="flex items-center gap-2 text-xs font-semibold mb-2" style={{ color: T.accentFrom }}>
           <span className="flex h-2 w-2 relative">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: T.accentFrom }} />
+            <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: T.accent }} />
           </span>
-          <span>SYSTEM AGENT ACTIVE</span>
+          <span>智能体执行中</span>
         </div>
-        <div className="p-2 rounded bg-zinc-950 text-emerald-400 text-xs shadow-md border border-zinc-800">
-          <span className="text-zinc-500">&gt;_ langgraph_executing:</span>{" "}
-          <span className="underline decoration-wavy decoration-emerald-500 font-bold">
+        <div className="p-2 rounded-lg text-xs shadow-md" style={{ background: T.bg, border: `1px solid ${T.border}`, color: T.green }}>
+          <span style={{ color: T.fgSubtle }}>&gt;_ 正在调用:</span>{" "}
+          <span className="underline decoration-wavy font-bold" style={{ textDecorationColor: T.green }}>
             {currentTool}
           </span>
         </div>
@@ -115,11 +133,12 @@ export default function AssistantMessageRow({
     <div className="w-full flex flex-col gap-3">
       {/* 思考大纲面板 */}
       {thinking && (
-        <div className="border border-zinc-100 rounded-lg bg-zinc-50 overflow-hidden shadow-[inset_0_1px_2px_rgba(0,0,0,0.02)]">
+        <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${T.borderSoft}`, background: T.bgSoft }}>
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="w-full px-3 py-2 flex items-center justify-between text-zinc-500 hover:text-zinc-800 text-xs font-medium border-b border-zinc-100 bg-zinc-50/50 transition-colors"
+            className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium transition-colors"
+            style={{ color: T.fgMuted, borderBottom: isExpanded ? `1px solid ${T.borderSoft}` : "none", background: T.surface }}
           >
             <div className="flex items-center gap-2">
               <span
@@ -130,17 +149,17 @@ export default function AssistantMessageRow({
               <span className="flex items-center gap-1.5">
                 💡 AI 思考过程
                 {isThinking && (
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                  <span className="inline-block w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: T.amber }} />
                 )}
               </span>
             </div>
-            <span className="text-[10px] text-zinc-400">
+            <span className="text-[10px]" style={{ color: T.fgSubtle }}>
               {isExpanded ? "点击折叠" : "点击展开"}
             </span>
           </button>
 
           {isExpanded && (
-            <div className="p-3 max-h-48 overflow-y-auto text-xs text-zinc-500 font-mono leading-5 break-all whitespace-pre-wrap">
+            <div className="p-3 max-h-48 overflow-y-auto text-xs font-mono leading-5 break-all whitespace-pre-wrap" style={{ color: T.fgMuted }}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 disallowedElements={["script", "iframe", "object", "embed", "form", "input", "style"]}
@@ -149,7 +168,7 @@ export default function AssistantMessageRow({
                 {thinking}
               </ReactMarkdown>
               {isThinking && (
-                <div className="mt-2 h-2.5 bg-zinc-200 rounded animate-pulse w-1/3" />
+                <div className="mt-2 h-2.5 rounded animate-pulse w-1/3" style={{ background: T.surfaceHover }} />
               )}
             </div>
           )}
@@ -158,7 +177,7 @@ export default function AssistantMessageRow({
 
       {/* Markdown 正文回答区 */}
       {(finalText.trim() || !isThinking) && (
-        <div className="prose prose-sm prose-zinc max-w-none w-full overflow-x-auto wrap-break-word whitespace-normal">
+        <div className="prose prose-sm max-w-none w-full overflow-x-auto wrap-break-word whitespace-normal">
           {finalText.trim() ? (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -169,7 +188,7 @@ export default function AssistantMessageRow({
             </ReactMarkdown>
           ) : (
             <div className="space-y-2 animate-pulse py-1">
-              <div className="h-3 bg-zinc-200 rounded w-1/4" />
+              <div className="h-3 rounded w-1/4" style={{ background: T.surfaceHover }} />
             </div>
           )}
         </div>

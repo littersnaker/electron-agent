@@ -1,6 +1,11 @@
+nodeLinker: hoisted
+shamefullyHoist: true
+
 allowBuilds:
   '@google/genai': false
-  '@sentry/cli': set this to true or false
+  '@sentry/cli': true
+  electron-winstaller: true
+  esbuild: true
   protobufjs: false
   sharp: false
   unrs-resolver: false
