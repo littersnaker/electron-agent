@@ -6,6 +6,7 @@ import { nativeTheme } from "electron";
 nativeTheme.themeSource = "dark";
 // squirrel startup handler (Windows only)
 try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   if (require("electron-squirrel-startup")) {
     app.quit();
   }
@@ -369,6 +370,7 @@ function setupAutoUpdater(): void {
   if (isDev) return;
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { autoUpdater } = require("electron-updater");
     autoUpdater.checkForUpdatesAndNotify();
 
