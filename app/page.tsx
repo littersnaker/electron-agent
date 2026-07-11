@@ -4,12 +4,14 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 // 1. ⚡ 删掉旧的 Virtuoso 引入，引入我们刚刚写好的 ChatList 组件
 import ChatList from "./component/ChatList";
+import TextareaAutosize from "react-textarea-autosize";
 import {
   Message,
   AttachedFile,
   ChatSession,
   StreamPacket,
 } from "./const/pageConst";
+import CustomTitleBar from "./component/CustomTitleBar";
 
 // 暗黑主题硬编码颜色（避免 CSS 变量加载时序问题）
 const T = {
@@ -317,6 +319,12 @@ export default function Home() {
       setIsParsingFile(false);
     }
   };
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as unknown as FormEvent<HTMLFormElement>);
+    }
+  };
 
   // 核心 handleSubmit 流式请求及存储 (保持原样...)
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -610,173 +618,208 @@ export default function Home() {
   // ⚡ 4. 【核心删改】：彻底删掉原来的 renderMessageRow 整个函数
 
   return (
-    <main className="min-h-screen flex overflow-hidden" style={{ background: T.bg, color: T.fg }}>
-      {/* 左侧历史会话侧边栏 */}
-      <div
-        className="w-72 flex flex-col h-screen shrink-0 select-none"
-        style={{ background: T.bgSoft, borderRight: `1px solid ${T.borderSoft}` }}
-      >
-        {/* 顶部品牌区 */}
-        <div className="px-5 pt-5 pb-3">
-          <div className="flex items-center gap-3">
-            <div
-              className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-xl shrink-0"
-              style={{ background: T.accentGrad, boxShadow: `0 4px 14px -4px ${T.accentGlow}` }}
-            >
-              A
-            </div>
-            <div className="min-w-0">
-              <div className="text-base font-semibold text-gradient">智能助手</div>
-              <div className="text-xs" style={{ color: T.fgSubtle }}>千问大模型驱动</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 新增对话按钮 */}
-        <div className="px-4 pb-3">
-          <button
-            onClick={createNewSession}
-            disabled={isStreaming}
-            className="btn-gradient w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
-          >
-            <span className="text-base leading-none">＋</span> 新建对话
-          </button>
-        </div>
-
-        {/* 会话列表 */}
-        <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
-          <div className="px-2 py-1 text-xs font-medium" style={{ color: T.fgSubtle }}>
-            历史对话
-          </div>
-          {sessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            return (
+    <main
+      className="h-screen flex flex-col  overflow-hidden"
+      style={{ background: T.bg, color: T.fg }}
+    >
+      <div className="shrink-0">
+        <CustomTitleBar />
+      </div>
+      <div className="flex flex-1 overflow-hidden border-t border-gray-700">
+        {/* 左侧历史会话侧边栏 */}
+        <div
+          className="w-72 flex flex-col  shrink-0 select-none"
+          style={{
+            background: T.bgSoft,
+            borderRight: `1px solid ${T.borderSoft}`,
+          }}
+        >
+          {/* 顶部品牌区 */}
+          <div className="px-5 pt-5 pb-3">
+            <div className="flex items-center gap-3">
               <div
-                key={session.id}
-                onClick={() => switchSession(session.id)}
-                className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium cursor-pointer transition-all
-                  ${isActive ? "" : "hover:bg-[#1d1d2a]"}`}
-                style={
-                  isActive
-                    ? { background: T.surfaceHover, color: T.fg, boxShadow: `inset 2px 0 0 ${T.accentFrom}` }
-                    : { color: T.fgMuted }
-                }
+                className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-xl shrink-0"
+                style={{
+                  background: T.accentGrad,
+                  boxShadow: `0 4px 14px -4px ${T.accentGlow}`,
+                }}
               >
-                <div className="flex items-center gap-2.5 truncate flex-1 mr-2">
-                  <span className="text-sm shrink-0 opacity-70">💬</span>
-                  <span className="truncate">{session.title}</span>
+                A
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-semibold text-gradient">
+                  智能助手
+                </div>
+                <div className="text-xs" style={{ color: T.fgSubtle }}>
+                  千问大模型驱动
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 新增对话按钮 */}
+          <div className="px-4 pb-3">
+            <button
+              onClick={createNewSession}
+              disabled={isStreaming}
+              className="btn-gradient w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+            >
+              <span className="text-base leading-none">＋</span> 新建对话
+            </button>
+          </div>
+
+          {/* 会话列表 */}
+          <div className="flex-1 overflow-y-auto px-3 pb-4 space-y-1">
+            <div
+              className="px-2 py-1 text-xs font-medium"
+              style={{ color: T.fgSubtle }}
+            >
+              历史对话
+            </div>
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => switchSession(session.id)}
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium cursor-pointer transition-all
+                  ${isActive ? "" : "hover:bg-[#1d1d2a]"}`}
+                  style={
+                    isActive
+                      ? {
+                          background: T.surfaceHover,
+                          color: T.fg,
+                          boxShadow: `inset 2px 0 0 ${T.accentFrom}`,
+                        }
+                      : { color: T.fgMuted }
+                  }
+                >
+                  <div className="flex items-center gap-2.5 truncate flex-1 mr-2">
+                    <span className="text-sm shrink-0 opacity-70">💬</span>
+                    <span className="truncate">{session.title}</span>
+                  </div>
+                  <button
+                    onClick={(e) => deleteSession(session.id, e)}
+                    disabled={isStreaming}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity px-1 font-bold text-xs disabled:hidden hover:text-red-400"
+                    style={{ color: T.fgSubtle }}
+                    title="删除对话"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 底部状态栏 */}
+          <div
+            className="px-4 py-3 text-xs flex items-center justify-between"
+            style={{
+              borderTop: `1px solid ${T.borderSoft}`,
+              color: T.fgSubtle,
+            }}
+          >
+            <span>共 {sessions.length} 个对话</span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: T.green }}
+              ></span>
+              已本地存储
+            </span>
+          </div>
+        </div>
+
+        {/* 右侧聊天区域 */}
+        <div className="flex-1 flex flex-col max-w-5xl mx-auto px-6 py-6">
+          <header
+            className="mb-5 flex items-center justify-between pb-4"
+            style={{ borderBottom: `1px solid ${T.borderSoft}` }}
+          >
+            <div>
+              <h1 className="text-xl font-semibold text-gradient">AI 对话</h1>
+              <p className="mt-0.5 text-xs" style={{ color: T.fgSubtle }}>
+                基于 LangGraph 智能体 · 通义千问
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {isStreaming && (
+                <button
+                  className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
+                  style={{
+                    background: T.surfaceHover,
+                    color: T.fg,
+                    border: `1px solid ${T.border}`,
+                  }}
+                  onClick={stopStreaming}
+                >
+                  ⏹ 停止生成
+                </button>
+              )}
+              <button
+                className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
+                style={{
+                  background: T.surfaceHover,
+                  color: T.fg,
+                  border: `1px solid ${T.border}`,
+                }}
+                onClick={clearChat}
+              >
+                清空对话
+              </button>
+            </div>
+          </header>
+
+          {/* ⚡ 5. 【核心替换】：在这里直接换上我们封装好的高效 ChatList 组件 */}
+          {/* 💡 绝招：key={activeSessionId} 强制在切换会话时使组件重载，瞬间闪现吸底，不再卡在顶部！ */}
+          <ChatList
+            key={activeSessionId}
+            messages={messages}
+            isStreaming={isStreaming}
+            currentTool={currentTool} // ⚡ 传递当前工具状态给 ChatList
+          />
+
+          {/* 底部输入框表单 (保持原样...) */}
+          <div
+            className="pt-4"
+            style={{ borderTop: `1px solid ${T.borderSoft}` }}
+          >
+            {attachedFile && (
+              <div
+                className="mb-2 flex items-center gap-2 max-w-xs rounded-lg px-3 py-1.5 text-xs"
+                style={{ background: T.surfaceHover, color: T.fgMuted }}
+              >
+                {attachedFile.type.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={attachedFile.base64}
+                    alt="preview"
+                    className="h-8 w-8 rounded object-cover border"
+                    style={{ borderColor: T.border }}
+                  />
+                ) : (
+                  <span className="text-lg">📄</span>
+                )}
+                <div className="flex-1 truncate font-medium">
+                  {attachedFile.name}
                 </div>
                 <button
-                  onClick={(e) => deleteSession(session.id, e)}
-                  disabled={isStreaming}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity px-1 font-bold text-xs disabled:hidden hover:text-red-400"
+                  type="button"
+                  className="ml-1 font-bold hover:opacity-70"
                   style={{ color: T.fgSubtle }}
-                  title="删除对话"
+                  onClick={() => {
+                    setAttachedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
                 >
                   ✕
                 </button>
               </div>
-            );
-          })}
-        </div>
-
-        {/* 底部状态栏 */}
-        <div className="px-4 py-3 text-xs flex items-center justify-between" style={{ borderTop: `1px solid ${T.borderSoft}`, color: T.fgSubtle }}>
-          <span>共 {sessions.length} 个对话</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: T.green }}></span>
-            已本地存储
-          </span>
-        </div>
-      </div>
-
-      {/* 右侧聊天区域 */}
-      <div className="flex-1 flex flex-col h-screen max-w-5xl mx-auto px-6 py-6">
-        <header className="mb-5 flex items-center justify-between pb-4" style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
-          <div>
-            <h1 className="text-xl font-semibold text-gradient">AI 对话</h1>
-            <p className="mt-0.5 text-xs" style={{ color: T.fgSubtle }}>基于 LangGraph 智能体 · 通义千问</p>
-          </div>
-          <div className="flex gap-2">
-            {isStreaming && (
-              <button
-                className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
-                style={{ background: T.surfaceHover, color: T.fg, border: `1px solid ${T.border}` }}
-                onClick={stopStreaming}
-              >
-                ⏹ 停止生成
-              </button>
             )}
-            <button
-              className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
-              style={{ background: T.surfaceHover, color: T.fg, border: `1px solid ${T.border}` }}
-              onClick={clearChat}
-            >
-              清空对话
-            </button>
-          </div>
-        </header>
 
-        {/* ⚡ 5. 【核心替换】：在这里直接换上我们封装好的高效 ChatList 组件 */}
-        {/* 💡 绝招：key={activeSessionId} 强制在切换会话时使组件重载，瞬间闪现吸底，不再卡在顶部！ */}
-        <ChatList
-          key={activeSessionId}
-          messages={messages}
-          isStreaming={isStreaming}
-          currentTool={currentTool} // ⚡ 传递当前工具状态给 ChatList
-        />
-
-        {/* 底部输入框表单 (保持原样...) */}
-        <div className="pt-4" style={{ borderTop: `1px solid ${T.borderSoft}` }}>
-          {attachedFile && (
-            <div className="mb-2 flex items-center gap-2 max-w-xs rounded-lg px-3 py-1.5 text-xs" style={{ background: T.surfaceHover, color: T.fgMuted }}>
-              {attachedFile.type.startsWith("image/") ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={attachedFile.base64}
-                  alt="preview"
-                  className="h-8 w-8 rounded object-cover border"
-                  style={{ borderColor: T.border }}
-                />
-              ) : (
-                <span className="text-lg">📄</span>
-              )}
-              <div className="flex-1 truncate font-medium">
-                {attachedFile.name}
-              </div>
-              <button
-                type="button"
-                className="ml-1 font-bold hover:opacity-70"
-                style={{ color: T.fgSubtle }}
-                onClick={() => {
-                  setAttachedFile(null);
-                  if (fileInputRef.current) fileInputRef.current.value = "";
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          <form className="flex gap-2" onSubmit={handleSubmit}>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              className="hidden"
-              accept="image/*,application/pdf,text/*"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center justify-center rounded-lg px-3.5 text-xl transition-all hover:opacity-80 active:scale-95"
-              style={{ background: T.surface, color: T.fgMuted, border: `1px solid ${T.border}` }}
-              title="上传文件"
-              disabled={isStreaming || isParsingFile}
-            >
-              📎
-            </button>
-            <input
+            <form className="flex flex-col gap-2 " onSubmit={handleSubmit}>
+              {/* <input
               className="input-glow min-w-0 flex-1 rounded-lg px-4 py-3 text-sm outline-none transition-all"
               style={{ background: T.surface, color: T.fg, border: `1px solid ${T.border}` }}
               onChange={(event) => setInput(event.target.value)}
@@ -789,15 +832,65 @@ export default function Home() {
               }
               value={input}
               disabled={isParsingFile}
-            />
-            <button
-              className="btn-gradient rounded-lg px-5 py-3 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
-              disabled={(!input.trim() && !attachedFile) || isParsingFile}
-              type="submit"
-            >
-              {isParsingFile ? "解析中..." : "发送"}
-            </button>
-          </form>
+            /> */}
+
+              <div className="flex items-center justify-between gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept="image/*,application/pdf,text/*"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center justify-center rounded-lg px-3.5 text-xl transition-all hover:opacity-80 active:scale-95"
+                  style={{
+                    background: T.surface,
+                    color: T.fgMuted,
+                    border: `1px solid ${T.border}`,
+                  }}
+                  title="上传文件"
+                  disabled={isStreaming || isParsingFile}
+                >
+                  📎
+                </button>
+              </div>
+              <div
+                className="mt-2 relative flex items-center gap-2 text-xs"
+                style={{ color: T.fgSubtle }}
+              >
+                <TextareaAutosize
+                  minRows={4}
+                  maxRows={4} // 设置最大行数，超过后显示滚动条
+                  className="input-glow min-w-0 flex-1 rounded-lg px-4 py-3 text-sm outline-none transition-all resize-none h-25 pr-20" // 预留右侧按钮空间
+                  style={{
+                    background: T.surface,
+                    color: T.fg,
+                    border: `1px solid ${T.border}`,
+                    lineHeight: "1.5rem", // 保持行高一致
+                  }}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isParsingFile
+                      ? "⚡ 正在深度解析..."
+                      : "输入问题，Shift+Enter 换行..."
+                  }
+                  value={input}
+                  disabled={isParsingFile}
+                />
+                <button
+                  className="btn-gradient absolute right-[10px] bottom-[10px] rounded-lg px-5 py-3 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
+                  disabled={(!input.trim() && !attachedFile) || isParsingFile}
+                  type="submit"
+                >
+                  {isParsingFile ? "解析中..." : "发送"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </main>

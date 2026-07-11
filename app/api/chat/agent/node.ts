@@ -84,6 +84,11 @@ export async function routerNode(
     2. If the current request is new and unrelated to previous tool results, return 'NO_TOOL' immediately.
     3. If the current request requires further tools or is a direct follow-up, output the appropriate tool call.
     4. Only continue analyzing previous tool results if the user's current request explicitly references them.
+    【核心指令】
+1. 当用户让你分析代码、查看项目结构或寻找特定文件时（例如问“说一下主进程代码和next的页面结构”），你【绝对禁止】在文本回复中口头承诺“让我查看...”、“接下来我将去读取...”等废话。
+2. 你必须【立刻、马上】调用对应的工具（如 list_directory 查看目录，或 read_file_from_disk 读取文件）。
+3. 只有当你已经通过工具链获取了所有必要的代码上下文、能够完全回答用户的问题时，你才允许不调用工具并给出最终结论。
+4. 记住：你的行动力体现在调用工具上，而不是在文本里说空话。
                   `,
     },
     {
@@ -133,6 +138,33 @@ export async function routerNode(
   return { routeDecision: "NO_TOOL" };
 }
 
+async function getCodeOutline(filePath: string): Promise<string> {
+  try {
+    const safePath = await getSafePath(filePath);
+    if (!fs.existsSync(safePath)) return `❌ 未找到文件: ${filePath}`;
+
+    const content = fs.readFileSync(safePath, "utf-8");
+    const lines = content.split("\n");
+    const outline: string[] = [];
+
+    lines.forEach((line, index) => {
+      // 匹配前端常用的 export, function, class, interface, type, 以及主进程的 ipcMain 监听等关键行
+      if (
+        /^\s*(export\s+)?(function|class|interface|enum|type)\b/.test(line) ||
+        /^\s*(export\s+)?const\s+\w+\s*=\s*(\(|async)/.test(line) ||
+        /ipcMain\.(on|handle)/.test(line)
+      ) {
+        outline.push(`Line ${index + 1}: ${line.trim()}`);
+      }
+    });
+
+    return outline.length > 0
+      ? `📄 [${filePath}] 代码结构大纲:\n${outline.join("\n")}`
+      : `📄 [${filePath}] 未检测到明显的顶层导出或方法定义（可能全是内联配置）。`;
+  } catch (error) {
+    return `❌ 提取大纲失败: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 // --------------------------------------------------------
 // 磁盘物理辅助操作
 // --------------------------------------------------------
@@ -167,7 +199,6 @@ async function proposeCodeChange(
 }
 async function getSafePath(filePath: string): Promise<string> {
   const rootPath = process.cwd();
-  // 强制移除开头的 ./ 或 /，确保它始终是相对于 rootPath 的
   const normalizedPath = filePath.replace(/^(\.\/|\/)/, "");
   return path.join(rootPath, normalizedPath);
 }
@@ -435,6 +466,31 @@ export async function executeToolsNode(
           }),
         );
         break;
+      // 💡 【核心补全 1】: 补全获取本地时间
+      case "get_local_time":
+        result = new Date().toLocaleString("zh-CN", {
+          timeZone: "Asia/Shanghai",
+        });
+        toolOutputs.push(
+          new ToolMessage({
+            content: `当前系统时间: ${result}`,
+            tool_call_id: toolCall.id ?? "unknown_id",
+            name: toolCall.name,
+          }),
+        );
+        break;
+
+      // 💡 【核心补全 3】: 新增大纲技能的物理响应
+      case "get_code_outline":
+        result = await getCodeOutline(filePath);
+        toolOutputs.push(
+          new ToolMessage({
+            content: result,
+            tool_call_id: toolCall.id ?? "unknown_id",
+            name: toolCall.name,
+          }),
+        );
+        break;
       default:
         console.warn(`Unknown tool: ${toolCall.name}`);
     }
@@ -525,46 +581,55 @@ export async function reportNode(state: typeof AgentState.State) {
   // 增加防御性判断
   if (!summary) return { messages: [] };
 
+  // 💡 【核心修复点 1】：从整个消息历史中，精准捞出用户最后一次提问的真实内容
+  const humanMessages = state.messages.filter((m) => m._getType() === "human");
+  const lastUserQuery =
+    humanMessages.length > 0
+      ? humanMessages[humanMessages.length - 1].content
+      : "分析项目结构";
+
   try {
     const res = await fetch(QWEN_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`, // 确保环境变量存在
+        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "qwen3.7-max-2026-05-20", // 确保模型名称正确，之前你可能用了别的qwen3.6-plus
+        model: "qwen3.7-max-2026-05-20",
         messages: [
           {
             role: "system",
-            content: "你是一位代码分析专家，请根据摘要给出建议。",
+            content: `你是一位卓越的高级全栈开发专家和编程助手。
+【核心任务】
+1. 请结合工具调用后沉淀的【核心源码与结构摘要】，直接、具体、深刻地回答用户提出的技术问题。
+2. 【绝对禁止】给出“泛泛的建议”、“后续步骤”或“宏观报告”等空洞废话。
+3. 用户的目的不是要你评估项目，而是要你解答他的疑问。用户要你“说一下主进程代码”，你就必须根据摘要里的具体代码细节、文件名和逻辑，清晰地罗列并讲解出来。`,
           },
-          { role: "user", content: `摘要内容: ${summary}` },
+          {
+            role: "user",
+            content: `用户真实想问的问题是: "${lastUserQuery}"\n\n后台工具帮你扫描到的核心代码及结构摘要如下:\n${summary}`,
+          },
         ],
-        stream: false, // 强制非流式
+        stream: false, // 保持非流式（或根据你的流式架构调整）
       }),
     });
 
-    // 1. 必须先检查 res.ok
     if (!res.ok) {
       const errorText = await res.text();
-      console.error("ReportNode API Error:", errorText);
-      return {
-        messages: [new AIMessage("分析总结生成失败，请检查 API 配置。")],
-      };
+      console.error("ReportNode API 报错:", errorText);
+      return {};
     }
 
-    // 2. 只有确认是 JSON 才解析
     const data = await res.json();
+    const finalReply = data.choices?.[0]?.message?.content || "";
 
-    // 3. 安全提取内容
-    const content = data.choices?.[0]?.message?.content || "无法生成详细建议。";
-
+    // 💡 【核心修复点 2】：把大模型真正解答用户问题的文本作为 AIMessage 返回，流向 END
     return {
-      messages: [new AIMessage(content)],
+      messages: [new AIMessage({ content: finalReply })],
     };
   } catch (error) {
-    console.error("ReportNode Exception:", error);
-    return { messages: [new AIMessage("分析总结过程出现异常。")] };
+    console.error("❌ 报告节点炸了:", error);
+    return {};
   }
 }

@@ -2,7 +2,8 @@ import { app, BrowserWindow, Menu, shell } from "electron";
 import path from "path";
 import fs from "fs";
 import { spawn, ChildProcess, execSync } from "child_process";
-
+import { nativeTheme } from "electron";
+nativeTheme.themeSource = "dark";
 // squirrel startup handler (Windows only)
 try {
   if (require("electron-squirrel-startup")) {
@@ -86,7 +87,11 @@ function killStaleDevServer(): void {
       // 用 PowerShell 杀掉命令行包含 "next" 和 "dev" 的 node 进程
       execSync(
         `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name='node.exe'\\" | Where-Object { $_.CommandLine -match 'next' -and $_.CommandLine -match 'dev' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
-        { stdio: "ignore", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh", timeout: 8000 }
+        {
+          stdio: "ignore",
+          shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+          timeout: 8000,
+        },
       );
       console.log("[Electron] Killed stale next dev processes");
     } catch {
@@ -96,7 +101,11 @@ function killStaleDevServer(): void {
     try {
       execSync(
         `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
-       { stdio: "ignore", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh", timeout: 8000 }
+        {
+          stdio: "ignore",
+          shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+          timeout: 8000,
+        },
       );
     } catch {
       // 端口未占用，忽略
@@ -227,11 +236,14 @@ function createWindow(): BrowserWindow {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: "智能助手",
-    icon: path.join(app.getAppPath(), "public", "icon.png"),
-    autoHideMenuBar: true,
+    frame: false,
     backgroundColor: "#0a0a0f",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    titleBarStyle: 'hidden', // 强制开启隐藏标题栏模式
+    titleBarOverlay: {
+      color: "#131321", // 工具栏背景色
+      symbolColor: "#ededf2", // 按钮颜色
+      height: 52, // 工具栏高度
+    },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -245,6 +257,7 @@ function createWindow(): BrowserWindow {
   win.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`,
   );
+
 
   // 显示窗口（splash 会立刻可见）
   win.once("ready-to-show", () => {
@@ -346,7 +359,6 @@ function loadMainWindowWithRetry(): void {
         }
       });
   }
-
   tryLoad();
 }
 

@@ -25,14 +25,11 @@ workflow.addConditionalEdges(
       return "execute_tools";
     }
 
-    // 🛡️ 智能门控：如果不需要工具，直接结束，跳过摘要
-    // summarize 只在需要压缩历史上下文时触发，不影响最终回复质量
-    return END;
+    return "summarize";
   },
   {
     execute_tools: "execute_tools",
     summarize: "summarize",
-    __end__: END, // 增加一个直接结束的路径
   },
 );
 

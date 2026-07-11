@@ -153,4 +153,21 @@ export const tools = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_code_outline",
+      description: "提取单个文件的代码大纲（函数名、类名、接口、导出项），而不读取完整代码体。适合在处理超大文件或快速了解文件结构时使用。",
+      parameters: {
+        type: "object",
+        properties: {
+          filePath: {
+            type: "string",
+            description: "相对于项目根目录的文件路径，例如 'app/page.tsx' 或 'main/index.ts'",
+          },
+        },
+        required: ["filePath"],
+      },
+    },
+  },
 ];
