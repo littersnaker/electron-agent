@@ -243,7 +243,7 @@ function createWindow(): BrowserWindow {
     titleBarOverlay: {
       color: "#131321", // 工具栏背景色
       symbolColor: "#ededf2", // 按钮颜色
-      height: 52, // 工具栏高度
+      height: 42, // 工具栏高度
     },
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
