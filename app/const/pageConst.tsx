@@ -29,4 +29,6 @@ export const ToolNameMap: Record<string, string> = {
   apply_file_change: "✅ 正在应用代码修改...",
   get_diff: "📊 正在对比代码差异...",
   search_codebase: "🔎 正在搜索代码库...",
-};
+  get_code_outline:"📝 正在分析代码结构...",
+  get_local_time: "⏰ 正在获取本地时间...",
+  get_file_content: "📄 正在获取文件内容..."};

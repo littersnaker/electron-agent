@@ -124,6 +124,7 @@ export async function POST(req: Request): Promise<Response> {
                 | Array<{ name?: string }>
                 | undefined;
               const firstMessageName = messages?.[0]?.name ?? "Unknown";
+              console.log("firstMessageName", firstMessageName);
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({ type: "TOOL_STATUS", content: `${ToolNameMap[firstMessageName] || "Unknown Tool"}` })}\n\n`,

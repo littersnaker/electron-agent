@@ -330,6 +330,7 @@ export default function Home() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const textContent = input.trim();
+    console.log("提交的文本内容:", textContent);
     if ((!textContent && !attachedFile) || isStreaming || isParsingFile) return;
 
     let combinedText = textContent;
