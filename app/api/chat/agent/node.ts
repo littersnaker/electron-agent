@@ -32,6 +32,7 @@ interface QwenSummaryResponse {
 export async function routerNode(
   state: typeof AgentState.State,
 ): Promise<Record<string, unknown>> {
+  const model = state.model;
   // 只保留 user/assistant 消息，排除 ToolMessage，避免历史工具结果强制触发新工具调用
   const recentMessages = state.messages
     .filter((m) => m._getType() !== "tool")
@@ -41,7 +42,7 @@ export async function routerNode(
     {
       role: "system",
       content: `You are an autonomous coding agent.
-
+            Current Working Directory: ${state.workingDir || "未指定，默认使用项目启动目录"}
             Role:
             Senior Full Stack Engineer.
 
@@ -104,7 +105,7 @@ export async function routerNode(
       Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "qwen3.7-plus-2026-05-26",
+      model: model,
       messages: firstStageContext,
       tools: tools,
       tool_choice: "auto",
@@ -138,10 +139,14 @@ export async function routerNode(
   return { routeDecision: "NO_TOOL" };
 }
 
-async function getCodeOutline(filePath: string): Promise<string> {
+async function getCodeOutline(
+  filePath: string,
+  workingDir: string,
+): Promise<string> {
   try {
-    const safePath = await getSafePath(filePath);
-    if (!fs.existsSync(safePath)) return `❌ 未找到文件: ${filePath}`;
+    const safePath = await getSafePath(filePath, workingDir);
+    if (!fs.existsSync(safePath))
+      return `❌ 未找到文件: ${workingDir || filePath}`;
 
     const content = fs.readFileSync(safePath, "utf-8");
     const lines = content.split("\n");
@@ -159,8 +164,8 @@ async function getCodeOutline(filePath: string): Promise<string> {
     });
 
     return outline.length > 0
-      ? `📄 [${filePath}] 代码结构大纲:\n${outline.join("\n")}`
-      : `📄 [${filePath}] 未检测到明显的顶层导出或方法定义（可能全是内联配置）。`;
+      ? `📄 [${workingDir || filePath}] 代码结构大纲:\n${outline.join("\n")}`
+      : `📄 [${workingDir || filePath}] 未检测到明显的顶层导出或方法定义（可能全是内联配置）。`;
   } catch (error) {
     return `❌ 提取大纲失败: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -168,54 +173,64 @@ async function getCodeOutline(filePath: string): Promise<string> {
 // --------------------------------------------------------
 // 磁盘物理辅助操作
 // --------------------------------------------------------
-async function proposeCodeChange(
+// async function proposeCodeChange(
+//   filePath: string,
+//   fileContent: string,
+//   workingDir: string
+// ): Promise<string> {
+//   try {
+//     const rootPath = workingDir || process.cwd();
+//     const safePath = path.join(
+//       rootPath,
+//       filePath.startsWith("./") ? filePath : path.join("./", filePath),
+//     );
+//     if (!fs.existsSync(safePath)) {
+//       fs.writeFileSync(safePath, fileContent, "utf-8");
+//       return JSON.stringify({ msg: `🆕 成功新建了文件：${filePath}` });
+//     }
+//     const pendingPath = `${safePath}.pending`;
+//     fs.writeFileSync(pendingPath, fileContent, "utf-8");
+//     return JSON.stringify({
+//       type: "DIFF_READY",
+//       payload: {
+//         original: filePath,
+//         pending: `${filePath}.pending`,
+//         message: "我已将修改生成在 .pending 文件中",
+//       },
+//     });
+//   } catch (error: unknown) {
+//     const errorMessage = error instanceof Error ? error.message : String(error);
+//     return `❌ 计算补丁失败: ${errorMessage}`;
+//   }
+// }
+async function getSafePath(
   filePath: string,
-  fileContent: string,
+  workingDir: string,
 ): Promise<string> {
-  try {
-    const rootPath = process.cwd();
-    const safePath = path.join(
-      rootPath,
-      filePath.startsWith("./") ? filePath : path.join("./", filePath),
-    );
-    if (!fs.existsSync(safePath)) {
-      fs.writeFileSync(safePath, fileContent, "utf-8");
-      return JSON.stringify({ msg: `🆕 成功新建了文件：${filePath}` });
-    }
-    const pendingPath = `${safePath}.pending`;
-    fs.writeFileSync(pendingPath, fileContent, "utf-8");
-    return JSON.stringify({
-      type: "DIFF_READY",
-      payload: {
-        original: filePath,
-        pending: `${filePath}.pending`,
-        message: "我已将修改生成在 .pending 文件中",
-      },
-    });
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return `❌ 计算补丁失败: ${errorMessage}`;
-  }
-}
-async function getSafePath(filePath: string): Promise<string> {
-  const rootPath = process.cwd();
+  const rootPath = workingDir || process.cwd(); // ⚡ 核心替换
   const normalizedPath = filePath.replace(/^(\.\/|\/)/, "");
   return path.join(rootPath, normalizedPath);
 }
 
-async function readFileFromLocalDisk(filePath: string): Promise<string> {
+async function readFileFromLocalDisk(
+  filePath: string,
+  workingDir: string,
+): Promise<string> {
   try {
-    const safePath = await getSafePath(filePath); // 统一调用
+    const safePath = await getSafePath(filePath, workingDir);
     if (!fs.existsSync(safePath))
-      return `❌ 未找到文件: ${filePath} (实际查找路径: ${safePath})`;
+      return `❌ 未找到文件: ${workingDir || filePath}`;
     return fs.readFileSync(safePath, "utf-8");
   } catch (error: unknown) {
     return `❌ 读取失败: ${error}`;
   }
 }
-async function listDirectory(dirPath = "."): Promise<string> {
+async function listDirectory(
+  dirPath = ".",
+  workingDir: string,
+): Promise<string> {
   try {
-    const rootPath = process.cwd();
+    const rootPath = workingDir || process.cwd();
     const targetDir = path.join(rootPath, dirPath);
 
     const files = fs.readdirSync(targetDir, {
@@ -236,7 +251,10 @@ async function listDirectory(dirPath = "."): Promise<string> {
     return `❌ 读取目录失败: ${errorMessage}`;
   }
 }
-async function searchCodebase(keyword: string): Promise<string> {
+async function searchCodebase(
+  keyword: string,
+  workingDir: string,
+): Promise<string> {
   try {
     const results: string[] = [];
 
@@ -263,14 +281,16 @@ async function searchCodebase(keyword: string): Promise<string> {
             const content = fs.readFileSync(fullPath, "utf8");
 
             if (content.includes(keyword)) {
-              results.push(path.relative(process.cwd(), fullPath));
+              results.push(
+                path.relative(workingDir || process.cwd(), fullPath),
+              );
             }
           } catch {}
         }
       }
     }
 
-    walk(process.cwd());
+    walk(workingDir || process.cwd());
 
     return JSON.stringify(results, null, 2);
   } catch (error) {
@@ -279,25 +299,24 @@ async function searchCodebase(keyword: string): Promise<string> {
     return `❌ 搜索失败: ${errorMessage}`;
   }
 }
-async function runTerminalCommand(command: string): Promise<string> {
+async function runTerminalCommand(
+  command: string,
+  workingDir: string,
+): Promise<string> {
   try {
     const result = execSync(command, {
-      cwd: process.cwd(),
+      cwd: workingDir || process.cwd(), // ⚡ 核心替换
       encoding: "buffer",
       timeout: 15000,
     });
     return result.toString("utf-8");
   } catch (error: unknown) {
-    if (error instanceof Error) {
-      return error.message;
-    }
-
     return String(error);
   }
 }
-async function getDiff(filePath: string): Promise<string> {
+async function getDiff(filePath: string, workingDir: string): Promise<string> {
   try {
-    const original = path.join(process.cwd(), filePath);
+    const original = path.join(workingDir || process.cwd(), filePath);
 
     const pending = `${original}.pending`;
 
@@ -319,8 +338,11 @@ async function getDiff(filePath: string): Promise<string> {
     return err.stdout ?? err.message ?? "Diff failed";
   }
 }
-async function applyFileChange(filePath: string): Promise<string> {
-  const original = path.join(process.cwd(), filePath);
+async function applyFileChange(
+  filePath: string,
+  workingDir: string,
+): Promise<string> {
+  const original = path.join(workingDir || process.cwd(), filePath);
 
   const pending = `${original}.pending`;
 
@@ -337,9 +359,10 @@ async function applyFileChange(filePath: string): Promise<string> {
 async function proposeFileChange(
   filePath: string,
   fileContent: string,
+  workingDir: string,
 ): Promise<string> {
   try {
-    const safePath = await getSafePath(filePath);
+    const safePath = await getSafePath(filePath, workingDir);
 
     // 如果父目录不存在，先创建父目录（防止报错）
     const dir = path.dirname(safePath);
@@ -384,7 +407,7 @@ export async function executeToolsNode(
   }
 
   const toolOutputs: ToolMessage[] = [];
-
+  const currentWorkingDir = state.workingDir || process.cwd(); // 取出工作目录
   for (const toolCall of lastMessage.tool_calls) {
     const args = toolCall.args as Record<string, string>;
     const filePath = args.filePath || "";
@@ -392,7 +415,11 @@ export async function executeToolsNode(
     let result = "";
     switch (toolCall.name) {
       case "propose_file_change":
-        result = await proposeFileChange(filePath, fileContent);
+        result = await proposeFileChange(
+          filePath,
+          fileContent,
+          currentWorkingDir,
+        );
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -402,7 +429,7 @@ export async function executeToolsNode(
           }),
         );
         // 自动追加 Diff 检查
-        const diff = await getDiff(filePath);
+        const diff = await getDiff(filePath, currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content: diff,
@@ -412,7 +439,7 @@ export async function executeToolsNode(
         );
         break;
       case "list_directory":
-        result = await listDirectory(args.dirPath || ".");
+        result = await listDirectory(args.dirPath || ".", currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -423,7 +450,7 @@ export async function executeToolsNode(
         );
         break;
       case "search_codebase":
-        result = await searchCodebase(args.keyword || "");
+        result = await searchCodebase(args.keyword || "", currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -434,7 +461,7 @@ export async function executeToolsNode(
         );
         break;
       case "apply_file_change":
-        result = await applyFileChange(filePath);
+        result = await applyFileChange(filePath, currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -445,7 +472,10 @@ export async function executeToolsNode(
         );
         break;
       case "run_terminal_command":
-        result = await runTerminalCommand(args.command || "");
+        result = await runTerminalCommand(
+          args.command || "",
+          currentWorkingDir,
+        );
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -456,7 +486,7 @@ export async function executeToolsNode(
         );
         break;
       case "read_file_from_disk":
-        result = await readFileFromLocalDisk(filePath);
+        result = await readFileFromLocalDisk(filePath, currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content:
@@ -482,7 +512,7 @@ export async function executeToolsNode(
 
       // 💡 【核心补全 3】: 新增大纲技能的物理响应
       case "get_code_outline":
-        result = await getCodeOutline(filePath);
+        result = await getCodeOutline(filePath, currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
             content: result,
@@ -504,6 +534,7 @@ export async function executeToolsNode(
 export async function summarizeHistoryNode(
   state: typeof AgentState.State,
 ): Promise<Record<string, unknown>> {
+  const modelel = state.model;
   const messages = state.messages || [];
   const summary = state.summary || "";
   const keepCount = 5; // 保留最近5条消息，确保文件读取内容不被删除
@@ -525,6 +556,7 @@ export async function summarizeHistoryNode(
     1. 文件读取的结果和关键内容
     2. 文件修改进度和bug修复结论
     3. 用户的原始请求和意图
+    4. 用户当前的需求
     
     [当前已有历史摘要]:
     ${summary || "暂无历史摘要"}
@@ -548,7 +580,7 @@ export async function summarizeHistoryNode(
         Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "qwen3.7-max-2026-05-20",
+        model: modelel,
         messages: [{ role: "user", content: summaryPrompt }],
         stream: false,
       }),
@@ -577,6 +609,7 @@ export async function summarizeHistoryNode(
   }
 }
 export async function reportNode(state: typeof AgentState.State) {
+  const model = state.model;
   const summary = state.summary;
   // 增加防御性判断
   if (!summary) return { messages: [] };
@@ -596,7 +629,7 @@ export async function reportNode(state: typeof AgentState.State) {
         Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "qwen3.7-max-2026-05-20",
+        model: model,
         messages: [
           {
             role: "system",

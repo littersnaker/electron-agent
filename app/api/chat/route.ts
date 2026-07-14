@@ -36,7 +36,10 @@ interface ToolPayload extends Record<string, unknown> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  if (!process.env.DASHSCOPE_API_KEY) {
+  const customApiKey = req.headers.get("x-dashscope-api-key");
+  const customApiModel = req.headers.get("x-dashscope-model") as string;
+  const apiKey = customApiKey || process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) {
     return NextResponse.json(
       { error: "Missing DASHSCOPE_API_KEY" },
       { status: 500 },
@@ -47,9 +50,13 @@ export async function POST(req: Request): Promise<Response> {
     const body = (await req.json()) as {
       messages?: FrontendMessage[];
       sessionId?: string;
+      workingDir?: string; // ⚡ 新增的参数放在这里
     };
+
+    // 2. 提取出你需要的所有变量
     const messages = body.messages || [];
     const sessionId = body.sessionId || "default-global-thread";
+    const workingDir = body.workingDir; // 如果 LangGraph 拓扑图需要用到，可以在这里取出来
 
     const inputMessages: BaseMessage[] = messages.map((m) => {
       if (m.role === "user") return new HumanMessage(m.content);
@@ -87,17 +94,20 @@ export async function POST(req: Request): Promise<Response> {
           // 如果服务器重启后状态丢失，传入前端发送的所有消息恢复上下文
           let messagesToGraph = inputMessages;
           if (hasExistingState) {
-            messagesToGraph = [inputMessages[inputMessages.length - 1]]; // 默认取最新一条 User 消息
+            messagesToGraph = [inputMessages[inputMessages.length - 1]];
             if (inputMessages.length >= 2) {
-              // 将上一条 Assistant 的回复也塞进图里，补全上下文闭环
               messagesToGraph.unshift(inputMessages[inputMessages.length - 2]);
             }
           }
+          const workingDir = body.workingDir || "";
 
           const graphStream = await graph.stream(
-            { messages: messagesToGraph },
+            { messages: messagesToGraph, model: customApiModel },
             {
-              configurable: { thread_id: sessionId },
+              configurable: {
+                thread_id: sessionId,
+                working_dir: workingDir, // 👈 可以在这里传递给图上下文
+              },
               recursionLimit: 50,
               streamMode: "updates",
             },
@@ -171,7 +181,7 @@ export async function POST(req: Request): Promise<Response> {
           console.error("LangGraph 运行期异常:", graphErr);
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "ERROR", content: "Agent 思考流中断" })}\n\n`,
+              `data: ${JSON.stringify({ type: "TOOL_STATUS", content: "Agent 思考流中断" })}\n\n`,
             ),
           );
           controller.close();
@@ -195,12 +205,24 @@ export async function POST(req: Request): Promise<Response> {
         // 系统提示词：禁止模型在最终回复阶段输出任何内部 XML，并明确要求模型必须输出最终正文
         const systemPrompt = {
           role: "system",
-          content: `You are an expert AI software architect and coding agent. Respond in Chinese.
-⚠️ CRITICAL OUTPUT PROTOCOL:
-1. Before writing any final response, you MUST perform deep reasoning and planning.
-2. The API will automatically separate your reasoning into 'reasoning_content' and your final answer into 'content'. You do NOT need to manually wrap your thinking in any tags.
-3. After reading files or analyzing code, you MUST provide a comprehensive response in the final content, including key findings, file structure analysis, and actionable suggestions.
-4. 🚫 STRICT RULE: The tool execution phase is OVER. DO NOT output ANY raw XML tool calls (like <function_calls>, <invoke>, <tool_call>). Provide your answer directly using standard Markdown!${memorySummaryText}`,
+          content: `你是一位顶级 AI 软件架构师与全栈编码代理。你的目标是高效、准确地协助用户完成项目开发。
+
+【协作原则与工作流】：
+1. 深入分析：在开始任何编码任务前，先理清需求。如有必要，使用 'read_file_from_disk' 或 'search_codebase' 获取上下文。
+2. 优先使用工具：涉及文件修改时，必须使用 'propose_file_change' 提交修改。提交后，利用 'get_diff' 检查差异，确保逻辑无误，最后使用 'apply_file_change' 正式落地。
+3. 动态调整：如果终端命令出现错误，请自行读取相关文件并分析错误日志，随后尝试修复。
+4. 明确的沟通：完成每一个阶段性目标后，使用简洁专业的中文进行总结，并汇报你的工作进度。
+
+【约束与协议】：
+- 编码修改：建议使用 'propose_file_change' -> 'get_diff' -> 'apply_file_change' 的闭环流程，确保每次修改都经过验证，并且编码习惯必须严格要求eslint+typescript格式。
+- 严禁输出xml代码块或任何内部标记语言，所有输出必须为标准 Markdown 格式。
+- 严禁在对话内容中输出超长的完整代码块，涉及文件更新请一律使用工具处理。
+- 如果用户需求模糊，请主动提问。
+- 在输出最终报告时，使用标准 Markdown 格式（支持代码块语法 \`\`\`）。
+- 始终保持 proactive（主动），如果发现代码可以优化或存在潜在 Bug，请直接向用户提出改进建议，并在得到许可后调用工具进行操作。
+
+【当前上下文】：
+${memorySummaryText}`,
         };
 
         const recentMessages = (finalState?.messages || [])
@@ -246,8 +268,16 @@ export async function POST(req: Request): Promise<Response> {
               Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
             },
             body: JSON.stringify({
-              model: "qwen3.7-plus-2026-05-26",
-              messages: [systemPrompt, ...recentMessages],
+              model: customApiModel,
+              messages: [
+                systemPrompt,
+                ...recentMessages,
+                {
+                  role: "user",
+                  content:
+                    "工具执行阶段已完毕。请直接给我最终的 Markdown 中文解答正文，不要带有任何思考过程或工具调用格式。",
+                },
+              ],
               stream: true,
             }),
           });

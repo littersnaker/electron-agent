@@ -4,6 +4,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 // 1. ⚡ 删掉旧的 Virtuoso 引入，引入我们刚刚写好的 ChatList 组件
 import ChatList from "./component/ChatList";
+import ApiKeyModal from "./component/ApiKeyModal";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   Message,
@@ -12,6 +13,8 @@ import {
   StreamPacket,
 } from "./const/pageConst";
 import CustomTitleBar from "./component/CustomTitleBar";
+import ModelSelector from "./component/ModelSelector";
+import { AVAILABLE_MODELS } from "./const/modelList";
 
 // 暗黑主题硬编码颜色（避免 CSS 变量加载时序问题）
 const T = {
@@ -76,10 +79,60 @@ export default function Home() {
   const [currentTool, setCurrentTool] = useState<string>(""); // ⚡ 新增：当前执行的工具名状态
   const isFetchingRef = useRef(false);
   const finalTextRef = useRef("");
+  const [workingDir, setWorkingDir] = useState<string>("");
+  const [apiKey, setApiKey] = useState<string>("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("qwen3.7-max-2026-05-20");
 
   // ⚡ 2. 删掉旧的 virtuosoRef 引用，列表内部自己接管
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    async function checkAuth() {
+      // 1. 先检查服务器是否有默认 Key
+      const res = await fetch("/api/config");
+      const { hasDefaultKey } = await res.json();
+
+      // 2. 检查本地是否有用户 Key
+      const savedKey = localStorage.getItem("DASHSCOPE_API_KEY");
+
+      // 逻辑判断：
+      // 如果是第一次打开应用，不管有没有key都打开这个弹窗
+      // 如果 服务器没 Key 且 本地也没 Key -> 必须弹窗
+      // 如果 服务器有 Key -> 不弹窗 (使用服务器 Key)
+      // 如果 本地有 Key -> 不弹窗 (使用本地 Key)
+      if (!localStorage.getItem("frist_open")) {
+        setShowKeyModal(true);
+        localStorage.setItem("frist_open", "true");
+      }
+      if (!hasDefaultKey && !savedKey) {
+        setShowKeyModal(true);
+      }
+    }
+
+    checkAuth();
+  }, []);
+  const handleSave = (key?: string) => {
+    if (key) {
+      localStorage.setItem("DASHSCOPE_API_KEY", key);
+      setApiKey(key);
+    }
+    setShowKeyModal(false);
+  };
+  const handleSelectFolder = async () => {
+    try {
+      // 调用我们在 preload.js 中暴露的方法
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const folderPath = await window.electronAPI.selectFolder();
+      if (folderPath) {
+        setWorkingDir(folderPath);
+      }
+    } catch (error) {
+      console.error("选择文件夹失败:", error);
+    }
+  };
 
   // 1. 异步初始化加载 IndexedDB 数据 (保持原样...)
   useEffect(() => {
@@ -420,10 +473,15 @@ export default function Home() {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-dashscope-api-key": apiKey || "",
+          "x-dashscope-model": selectedModel , // ⚡ 新增：把选中的模型 ID 发给后端
+        },
         body: JSON.stringify({
           messages: apiMessages,
           sessionId: activeSessionId,
+          workingDir: workingDir, // ⚡ 新增：把当前工作目录发给后端
         }),
         signal: abortController.signal,
       });
@@ -559,6 +617,10 @@ export default function Home() {
         return;
       }
 
+      if (!finalTextRef.current.trim()) {
+        finalTextRef.current =
+          "⚠️ 未能获取到大模型的有效回复内容，请检查服务端工作流日志。";
+      }
       const finalHistory = [
         ...updatedHistory.slice(0, -1),
         { role: "assistant" as const, content: finalTextRef.current },
@@ -582,6 +644,13 @@ export default function Home() {
     isFetchingRef.current = false;
     abortRef.current?.abort();
     setCurrentTool(""); // ⚡ 停止流式时清空工具状态
+    setMessages((prevMessages) => [
+      ...prevMessages,
+      {
+        role: "assistant", // 或者 'assistant'，取决于你的 UI 如何渲染
+        content: "⚠️ 生成已由用户手动停止。",
+      },
+    ]);
   }
 
   // 标记当前会话是否已被清空，防止 sendMessage 的 finally 保存旧数据
@@ -623,6 +692,8 @@ export default function Home() {
       className="h-screen flex flex-col  overflow-hidden"
       style={{ background: T.bg, color: T.fg }}
     >
+      {/* 触发弹窗组件 */}
+      <ApiKeyModal isOpen={showKeyModal} onSave={handleSave} />
       <div className="shrink-0">
         <CustomTitleBar />
       </div>
@@ -744,7 +815,7 @@ export default function Home() {
                 基于 LangGraph 智能体 · 通义千问
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
               {isStreaming && (
                 <button
                   className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
@@ -758,6 +829,23 @@ export default function Home() {
                   ⏹ 停止生成
                 </button>
               )}
+              {/* 模型选择器 */}
+              <div className=" flex items-center gap-2">
+                <label className=" text-gray-500  block">
+                  选择模型
+                </label>
+                <ModelSelector
+                  models={AVAILABLE_MODELS}
+                  selectedModel={selectedModel}
+                  onSelect={setSelectedModel}
+                />
+              </div>
+              <button
+                className="text-gray-400 cursor-pointer hover:text-white"
+                onClick={() => setShowKeyModal(true)}
+              >
+                ⚙️ 设置 API Key
+              </button>
               <button
                 className="rounded-lg px-3.5 py-2 text-sm font-medium transition-all hover:opacity-80"
                 style={{
@@ -818,24 +906,29 @@ export default function Home() {
                 </button>
               </div>
             )}
-
+            {/* ⚡ 新增：显示当前正在操作的文件夹 */}
+            {workingDir && (
+              <div
+                className="mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs border border-purple-500/30"
+                style={{ background: "rgba(139, 92, 246, 0.1)", color: T.fg }}
+              >
+                <span className="text-base">📁</span>
+                <span style={{ color: T.fgSubtle }}>当前操作目录:</span>
+                <span className="flex-1 truncate font-mono font-medium text-purple-400">
+                  {workingDir}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWorkingDir("")}
+                  className="hover:text-red-400"
+                  title="清除目录"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <form className="flex flex-col gap-2 " onSubmit={handleSubmit}>
-              {/* <input
-              className="input-glow min-w-0 flex-1 rounded-lg px-4 py-3 text-sm outline-none transition-all"
-              style={{ background: T.surface, color: T.fg, border: `1px solid ${T.border}` }}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={
-                isParsingFile
-                  ? "⚡ 正在深度解析文件中..."
-                  : attachedFile
-                    ? "问问关于这份文件的内容..."
-                    : "输入你的问题，按回车发送..."
-              }
-              value={input}
-              disabled={isParsingFile}
-            /> */}
-
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center  gap-2">
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -856,6 +949,21 @@ export default function Home() {
                   disabled={isStreaming || isParsingFile}
                 >
                   📎
+                </button>
+                {/* ⚡ 新增：选择文件夹按钮 */}
+                <button
+                  type="button"
+                  onClick={handleSelectFolder}
+                  className="flex items-center justify-center rounded-lg px-3.5 text-xl transition-all hover:opacity-80 active:scale-95"
+                  style={{
+                    background: T.surface,
+                    color: T.fgMuted,
+                    border: `1px solid ${T.border}`,
+                  }}
+                  title="选择工作目录"
+                  disabled={isStreaming || isParsingFile}
+                >
+                  📁
                 </button>
               </div>
               <div

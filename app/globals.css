@@ -20,7 +20,10 @@
   --accent-glow: rgba(139, 92, 246, 0.35);
   color-scheme: dark;
 }
-
+.custom-title-bar{
+  /* 可拖拽 */
+  -webkit-app-region: drag;
+}
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

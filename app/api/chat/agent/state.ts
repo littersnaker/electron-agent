@@ -6,6 +6,7 @@ export const AgentState = Annotation.Root({
     reducer: messagesStateReducer, // 👈 必须用这个，才能正确处理 RemoveMessage 和 ID 查重
     default: () => [],
   }),
+  model: Annotation<string>,
   // ⚡ 新增：用于滚动记录历史压缩摘要，极大地节约 Token
   summary: Annotation<string>({
     reducer: (x, y) => y ?? x,
@@ -18,5 +19,9 @@ export const AgentState = Annotation.Root({
   pendingDiffResult: Annotation<string | null>({
     reducer: (x, y) => y ?? x,
     default: () => null,
+  }),
+  workingDir: Annotation<string>({
+    reducer: (x, y) => y ?? x,
+    default: () => "",
   }),
 });

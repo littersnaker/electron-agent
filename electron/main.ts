@@ -1,9 +1,11 @@
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from "electron";
 import path from "path";
 import fs from "fs";
 import { spawn, ChildProcess, execSync } from "child_process";
 import { nativeTheme } from "electron";
+import * as dotenv from "dotenv";
 nativeTheme.themeSource = "dark";
+dotenv.config({ path: path.join(__dirname, "../.env.local") });
 // squirrel startup handler (Windows only)
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -129,10 +131,16 @@ function killStaleDevServer(): void {
  * Start the Next.js server as a child process.
  */
 function startServer(): void {
-  const env = { ...process.env };
-  env.NEXT_PUBLIC_IS_ELECTRON = "1";
-  env.PORT = String(PORT);
-  env.HOSTNAME = "localhost";
+  const env = {
+    ...process.env, // 继承主进程的环境变量
+    NEXT_PUBLIC_IS_ELECTRON: "1",
+    PORT: String(PORT),
+    HOSTNAME: "localhost",
+
+    // 💡 关键：在这里显式注入！
+    // 这样子进程启动时，就能拿到从 .env.local 读取到的这个值
+    DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY,
+  };
 
   // 清理残留的 dev server 进程和锁文件
   if (isDev) {
@@ -239,7 +247,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     frame: false,
     backgroundColor: "#0a0a0f",
-    titleBarStyle: 'hidden', // 强制开启隐藏标题栏模式
+    titleBarStyle: "hidden", // 强制开启隐藏标题栏模式
     titleBarOverlay: {
       color: "#131321", // 工具栏背景色
       symbolColor: "#ededf2", // 按钮颜色
@@ -258,7 +266,6 @@ function createWindow(): BrowserWindow {
   win.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`,
   );
-
 
   // 显示窗口（splash 会立刻可见）
   win.once("ready-to-show", () => {
@@ -392,6 +399,20 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     mainWindow = createWindow();
+
+    // ⚡ 新增：注册选择文件夹的 IPC 事件
+    ipcMain.handle("dialog:openDirectory", async () => {
+      if (!mainWindow) return null;
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ["openDirectory"], // 只允许选择文件夹
+        title: "选择项目工作目录",
+      });
+      if (canceled || filePaths.length === 0) {
+        return null;
+      }
+      return filePaths[0]; // 返回选中的文件夹绝对路径
+    });
+
     startServer();
     setupAutoUpdater();
   });
