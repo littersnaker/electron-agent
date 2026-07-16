@@ -56,7 +56,6 @@ export async function POST(req: Request): Promise<Response> {
     // 2. 提取出你需要的所有变量
     const messages = body.messages || [];
     const sessionId = body.sessionId || "default-global-thread";
-    const workingDir = body.workingDir; // 如果 LangGraph 拓扑图需要用到，可以在这里取出来
 
     const inputMessages: BaseMessage[] = messages.map((m) => {
       if (m.role === "user") return new HumanMessage(m.content);
@@ -102,7 +101,11 @@ export async function POST(req: Request): Promise<Response> {
           const workingDir = body.workingDir || "";
 
           const graphStream = await graph.stream(
-            { messages: messagesToGraph, model: customApiModel },
+            {
+              messages: messagesToGraph,
+              model: customApiModel,
+              workingDir: workingDir,
+            },
             {
               configurable: {
                 thread_id: sessionId,
@@ -272,11 +275,11 @@ ${memorySummaryText}`,
               messages: [
                 systemPrompt,
                 ...recentMessages,
-                {
-                  role: "user",
-                  content:
-                    "工具执行阶段已完毕。请直接给我最终的 Markdown 中文解答正文，不要带有任何思考过程或工具调用格式。",
-                },
+                // {
+                //   role: "user",
+                //   content:
+                //     "工具执行阶段已完毕。请直接给我最终的 Markdown 中文解答正文，不要带有任何思考过程或工具调用格式。",
+                // },
               ],
               stream: true,
             }),

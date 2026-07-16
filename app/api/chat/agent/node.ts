@@ -85,11 +85,23 @@ export async function routerNode(
     2. If the current request is new and unrelated to previous tool results, return 'NO_TOOL' immediately.
     3. If the current request requires further tools or is a direct follow-up, output the appropriate tool call.
     4. Only continue analyzing previous tool results if the user's current request explicitly references them.
+    【终端命令执行规范】(⚠️新增这段)
+当前的终端执行工具是**完全非交互式（Non-interactive）**的后台环境，无法接收用户的键盘输入（如回车、上下键选择、输入 y/n 等）。
+当你需要执行初始化项目（如 Taro、Next.js、Vue 等脚手架）或安装命令时，必须遵守以下铁律：
+1. **绝对禁止**执行任何会产生交互式询问的命令！这会导致系统死锁崩溃。
+2. **必须携带自动确认/静默参数**。例如：
+   - ❌ 错误：\`taro init myApp\` （会触发选项卡死）
+   - ✅ 正确：\`npx @tarojs/cli init myApp --template default --css sass --typescript\` 
+   - ❌ 错误：\`npm init\`
+   - ✅ 正确：\`npm init -y\`
+3. 如果你不确定某个脚手架的非交互参数是什么，请在执行前先输出解释，然后使用最基础的命令组合。
+    
     【核心指令】
 1. 当用户让你分析代码、查看项目结构或寻找特定文件时（例如问“说一下主进程代码和next的页面结构”），你【绝对禁止】在文本回复中口头承诺“让我查看...”、“接下来我将去读取...”等废话。
 2. 你必须【立刻、马上】调用对应的工具（如 list_directory 查看目录，或 read_file_from_disk 读取文件）。
 3. 只有当你已经通过工具链获取了所有必要的代码上下文、能够完全回答用户的问题时，你才允许不调用工具并给出最终结论。
 4. 记住：你的行动力体现在调用工具上，而不是在文本里说空话。
+5. 如果文件夹为空则调用对应的工具完成用户的需求，但是最后总结不能出现xml等标记语言，必须是标准 Markdown 格式
                   `,
     },
     {

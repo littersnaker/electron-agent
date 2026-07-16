@@ -2,6 +2,7 @@ export const AVAILABLE_MODELS = [
   { id: "qwen3.7-plus-2026-05-26", name: "qwen3.7-plus-2026-05-26" },
   { id: "qwen3.5-plus-2026-04-20", name: "qwen3.5-plus-2026-04-20" },
   { id: "qwen3.6-max-preview", name: "qwen3.6-max-preview" },
+  { id: "qwen3.7-max-2026-05-20", name: "qwen3.7-max-2026-05-20" },
   { id: "qwen3.7-max", name: "qwen3.7-max" },
   { id: "deepseek-v4-pro", name: "deepseek-v4-pro" },
   { id: "kimi-k2.7-code", name: "kimi-k2.7-code" },

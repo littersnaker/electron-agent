@@ -91,14 +91,17 @@ export const tools = [
     type: "function",
     function: {
       name: "run_terminal_command",
-      description:
-        "执行终端命令并返回执行结果。例如 pnpm lint、pnpm build、git status。",
+    description: 
+        "在当前工作目录下执行终端命令（如 npm, git, npx 等）。" +
+        "【⛔ 致命警告：当前是无头(Headless)环境，不支持任何交互！" +
+        "任何会触发 CLI 询问（Prompt/Select）的命令（如基础的 taro init, create-vue）都会导致系统死锁。" +
+        "创建项目必须使用所有非交互式 Flags（例如 --template, --typescript, -y, --force 等）跳过交互环节！】",
       parameters: {
         type: "object",
         properties: {
           command: {
             type: "string",
-            description: "终端命令",
+            description: "要执行的具体 shell 命令",
           },
         },
         required: ["command"],
