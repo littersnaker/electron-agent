@@ -21,20 +21,36 @@ interface Props {
   onSelect: (modelId: string) => void;
 }
 
-export default function ModelSelector({ models, selectedModel, onSelect }: Props) {
+export default function ModelSelector({
+  models,
+  selectedModel,
+  onSelect,
+}: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [isAbove, setIsAbove] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      // 如果距离底部小于 200px (下拉菜单高度)，则向上打开
+      setIsAbove(window.innerHeight - rect.bottom < 200);
+    }
+  }, [isOpen]);
 
   const current = models.find((m) => m.id === selectedModel) || models[0];
 
@@ -50,17 +66,27 @@ export default function ModelSelector({ models, selectedModel, onSelect }: Props
         }}
       >
         <span className="truncate">{current.name}</span>
-        <svg 
-          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} 
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        <svg
+          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 9l-7 7-7-7"
+          />
         </svg>
       </button>
 
       {isOpen && (
-        <div 
-          className="absolute z-50 w-full mt-2 py-1 rounded-lg border shadow-xl animate-in fade-in zoom-in-95 duration-150"
+        <div
+          className={`absolute z-50 w-full py-1 h-80 overflow-scroll rounded-lg border shadow-xl animate-in fade-in zoom-in-95 duration-150 ${
+            // isAbove ? "bottom-full mb-2" : "top-full mt-2" 
+            "bottom-full mb-2"
+          }`}
           style={{ background: T.surface, borderColor: T.border }}
         >
           {models.map((model) => (

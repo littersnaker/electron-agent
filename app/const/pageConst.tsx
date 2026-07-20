@@ -14,6 +14,18 @@ export type ChatSession = {
   id: string;
   title: string;
   messages: Message[];
+  mode: "qa" | "code";
+  projectId: string | null;
+  updatedAt: string;
+};
+
+export type WorkspaceProject = {
+  id: string;
+  name: string;
+  rootPath: string;
+  indexStatus: "idle" | "indexing" | "ready" | "error";
+  indexedFileCount: number;
+  lastOpenedAt: string;
 };
 export interface StreamPacket {
   type?: "TEXT" | "STATUS" | "TOOL_STATUS" | "DIFF_READY";
@@ -22,6 +34,7 @@ export interface StreamPacket {
 }
 
 export const ToolNameMap: Record<string, string> = {
+  search_project_index: "正在检索本地代码索引...",
   list_directory: "🔍 正在扫描文件目录...",
   propose_file_change: "✍️ 正在构思代码修改...",
   read_file_from_disk: "📖 正在读取文件内容...",

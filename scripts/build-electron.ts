@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -21,7 +22,7 @@ try {
   if (!fs.existsSync(standaloneSource)) {
     throw new Error('.next/standalone 目录不存在，请检查 Next.js 是否成功构建。');
   }
-  fs.cpSync(standaloneSource, outServerDir, { recursive: true });
+  fs.cpSync(standaloneSource, outServerDir, { recursive: true, dereference: true });
 
   const destStatic = path.join(outServerDir, '.next/static');
   fs.mkdirSync(destStatic, { recursive: true });
@@ -44,12 +45,11 @@ try {
   //   }
   // }
 
-  console.log('\n=== Step 4: 启动 Electron Forge 提取绿色运行版 (跳过易错的 make 阶段) ===');
-  // ✨ 核心改变：把 make 改成 package
-  // 这样只会生成包含 .exe 的绿色文件夹，彻底避开那个全是乱码报错的 Windows 编译器
-  execSync('pnpm exec electron-forge package', { stdio: 'inherit', cwd: rootDir });
+  console.log('\n=== Step 4: electron-builder 打包绿色运行版 ===');
+  execSync('pnpm exec electron-builder --dir', { stdio: 'inherit', cwd: rootDir });
   
-  console.log('\n🎉 [成功] 绿色运行版已生成！请前往 out 目录下查看，接下来请使用 Inno Setup 封装为安装包。');
+  console.log('\n🎉 [成功] 绿色运行版已生成！请前往 out/MyApp-win32-x64 目录查看。');
+  console.log('💡 如需生成安装包，请运行: pnpm electron:make');
 
 } catch (error) {
   console.error('\n❌ 构建或打包过程中发生错误:', error);

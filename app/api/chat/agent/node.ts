@@ -8,9 +8,14 @@ import path from "path";
 import { tools } from "../tools";
 import { AgentState } from "./state";
 import { execSync } from "child_process";
+import { searchProjectIndex } from "@/app/lib/server/workspace-store";
 const QWEN_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-
+// 1. 定义消息结构类型，替代任何类型
+interface SimpleMessage {
+  role: string;
+  content: string;
+}
 interface QwenMessageResponse {
   choices?: Array<{
     message?: {
@@ -21,9 +26,21 @@ interface QwenMessageResponse {
       }>;
     };
   }>;
+  // 👇 补全 usage 类型
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 interface QwenSummaryResponse {
   choices?: Array<{ message?: { content: string | null } }>;
+  // 👇 补全 usage 类型
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 // --------------------------------------------------------
@@ -33,7 +50,7 @@ export async function routerNode(
   state: typeof AgentState.State,
 ): Promise<Record<string, unknown>> {
   const model = state.model;
-  // 只保留 user/assistant 消息，排除 ToolMessage，避免历史工具结果强制触发新工具调用
+  const apiKey = state.apiKey || process.env.DASHSCOPE_API_KEY;
   const recentMessages = state.messages
     .filter((m) => m._getType() !== "tool")
     .slice(-6);
@@ -47,6 +64,7 @@ export async function routerNode(
             Senior Full Stack Engineer.
 
             Capabilities:
+            - Search the selected project's SQLite code index
             - Explore project structure
             - Search source code
             - Read files
@@ -56,11 +74,12 @@ export async function routerNode(
             - Fix issues
 
             Tool Strategy:
-            1. Unknown project? -> list_directory
-            2. Unknown file location? -> search_codebase
-            3. Before modifying code? -> read_file_from_disk
-            4. Need code changes? -> propose_file_change
-            5. Need validation? -> run_terminal_command
+            1. Need to locate relevant code? -> search_project_index first
+            2. Unknown project? -> list_directory
+            3. Unknown file location? -> search_codebase
+            4. Before modifying code? -> read_file_from_disk
+            5. Need code changes? -> propose_file_change
+            6. Need validation? -> run_terminal_command
 
             Rules:
             - Never assume file contents.
@@ -114,7 +133,7 @@ export async function routerNode(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: model,
@@ -127,6 +146,15 @@ export async function routerNode(
 
   const result = (await res.json()) as QwenMessageResponse;
   const assistantMessage = result.choices?.[0]?.message;
+
+  // 👇 提取并上报本次路由节点的 token 消耗
+  const nodeUsage = result.usage
+    ? {
+        prompt: result.usage.prompt_tokens,
+        completion: result.usage.completion_tokens,
+        total: result.usage.total_tokens,
+      }
+    : { prompt: 0, completion: 0, total: 0 };
 
   if (assistantMessage?.tool_calls && assistantMessage.tool_calls.length > 0) {
     console.log(
@@ -146,11 +174,15 @@ export async function routerNode(
     return {
       routeDecision: "TOOL_CALL",
       messages: [aiMessage],
+      tokenUsage: nodeUsage, // 👈 累加 Token
     };
   }
-  return { routeDecision: "NO_TOOL" };
+  return { routeDecision: "NO_TOOL", tokenUsage: nodeUsage }; // 👈 累加 Token
 }
-
+const stripThinkContent = (content: string | unknown): string => {
+  if (typeof content !== "string") return "";
+  return content.replace(/<INTERNAL_THINK_START>[\s\S]*?<INTERNAL_THINK_END>/g, "").trim();
+};
 async function getCodeOutline(
   filePath: string,
   workingDir: string,
@@ -165,7 +197,6 @@ async function getCodeOutline(
     const outline: string[] = [];
 
     lines.forEach((line, index) => {
-      // 匹配前端常用的 export, function, class, interface, type, 以及主进程的 ipcMain 监听等关键行
       if (
         /^\s*(export\s+)?(function|class|interface|enum|type)\b/.test(line) ||
         /^\s*(export\s+)?const\s+\w+\s*=\s*(\(|async)/.test(line) ||
@@ -182,44 +213,12 @@ async function getCodeOutline(
     return `❌ 提取大纲失败: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
-// --------------------------------------------------------
-// 磁盘物理辅助操作
-// --------------------------------------------------------
-// async function proposeCodeChange(
-//   filePath: string,
-//   fileContent: string,
-//   workingDir: string
-// ): Promise<string> {
-//   try {
-//     const rootPath = workingDir || process.cwd();
-//     const safePath = path.join(
-//       rootPath,
-//       filePath.startsWith("./") ? filePath : path.join("./", filePath),
-//     );
-//     if (!fs.existsSync(safePath)) {
-//       fs.writeFileSync(safePath, fileContent, "utf-8");
-//       return JSON.stringify({ msg: `🆕 成功新建了文件：${filePath}` });
-//     }
-//     const pendingPath = `${safePath}.pending`;
-//     fs.writeFileSync(pendingPath, fileContent, "utf-8");
-//     return JSON.stringify({
-//       type: "DIFF_READY",
-//       payload: {
-//         original: filePath,
-//         pending: `${filePath}.pending`,
-//         message: "我已将修改生成在 .pending 文件中",
-//       },
-//     });
-//   } catch (error: unknown) {
-//     const errorMessage = error instanceof Error ? error.message : String(error);
-//     return `❌ 计算补丁失败: ${errorMessage}`;
-//   }
-// }
+
 async function getSafePath(
   filePath: string,
   workingDir: string,
 ): Promise<string> {
-  const rootPath = workingDir || process.cwd(); // ⚡ 核心替换
+  const rootPath = workingDir || process.cwd();
   const normalizedPath = filePath.replace(/^(\.\/|\/)/, "");
   return path.join(rootPath, normalizedPath);
 }
@@ -244,11 +243,9 @@ async function listDirectory(
   try {
     const rootPath = workingDir || process.cwd();
     const targetDir = path.join(rootPath, dirPath);
-
     const files = fs.readdirSync(targetDir, {
       withFileTypes: true,
     });
-
     return JSON.stringify(
       files.map((item) => ({
         name: item.name,
@@ -259,7 +256,6 @@ async function listDirectory(
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-
     return `❌ 读取目录失败: ${errorMessage}`;
   }
 }
@@ -269,12 +265,10 @@ async function searchCodebase(
 ): Promise<string> {
   try {
     const results: string[] = [];
-
     function walk(dir: string) {
       const entries = fs.readdirSync(dir, {
         withFileTypes: true,
       });
-
       for (const entry of entries) {
         if (
           ["node_modules", ".next", ".git", ".pnpm-store", "public"].includes(
@@ -283,15 +277,12 @@ async function searchCodebase(
         ) {
           continue;
         }
-
         const fullPath = path.join(dir, entry.name);
-
         if (entry.isDirectory()) {
           walk(fullPath);
         } else {
           try {
             const content = fs.readFileSync(fullPath, "utf8");
-
             if (content.includes(keyword)) {
               results.push(
                 path.relative(workingDir || process.cwd(), fullPath),
@@ -301,13 +292,10 @@ async function searchCodebase(
         }
       }
     }
-
     walk(workingDir || process.cwd());
-
     return JSON.stringify(results, null, 2);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-
     return `❌ 搜索失败: ${errorMessage}`;
   }
 }
@@ -317,7 +305,7 @@ async function runTerminalCommand(
 ): Promise<string> {
   try {
     const result = execSync(command, {
-      cwd: workingDir || process.cwd(), // ⚡ 核心替换
+      cwd: workingDir || process.cwd(),
       encoding: "buffer",
       timeout: 15000,
     });
@@ -329,24 +317,19 @@ async function runTerminalCommand(
 async function getDiff(filePath: string, workingDir: string): Promise<string> {
   try {
     const original = path.join(workingDir || process.cwd(), filePath);
-
     const pending = `${original}.pending`;
-
     if (!fs.existsSync(pending)) {
       return "No pending diff found";
     }
-
     const result = execSync(`git diff --no-index "${original}" "${pending}"`, {
       encoding: "utf8",
     });
-
     return result;
   } catch (error: unknown) {
     const err = error as {
       stdout?: string;
       message?: string;
     };
-
     return err.stdout ?? err.message ?? "Diff failed";
   }
 }
@@ -355,17 +338,12 @@ async function applyFileChange(
   workingDir: string,
 ): Promise<string> {
   const original = path.join(workingDir || process.cwd(), filePath);
-
   const pending = `${original}.pending`;
-
   if (!fs.existsSync(pending)) {
     return "❌ pending 文件不存在";
   }
-
   fs.copyFileSync(pending, original);
-
   fs.unlinkSync(pending);
-
   return "✅ 修改已应用";
 }
 async function proposeFileChange(
@@ -375,18 +353,14 @@ async function proposeFileChange(
 ): Promise<string> {
   try {
     const safePath = await getSafePath(filePath, workingDir);
-
-    // 如果父目录不存在，先创建父目录（防止报错）
     const dir = path.dirname(safePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-
     if (!fs.existsSync(safePath)) {
       fs.writeFileSync(safePath, fileContent, "utf-8");
       return JSON.stringify({ msg: `🆕 成功新建了文件：${filePath}` });
     }
-
     const pendingPath = `${safePath}.pending`;
     fs.writeFileSync(pendingPath, fileContent, "utf-8");
     return JSON.stringify({
@@ -401,9 +375,39 @@ async function proposeFileChange(
     return `❌ 操作失败: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
+
 // --------------------------------------------------------
-// 节点 B: 工具执行节点 (修复：返回标准 ToolMessage 实例)
+// 节点 B: 工具执行节点
 // --------------------------------------------------------
+async function executeSingleTool(
+  toolCall: { name: string; args: unknown; id?: string },
+  state: typeof AgentState.State,
+): Promise<ToolMessage[]> {
+  const args = toolCall.args as Record<string, string>;
+  const currentWorkingDir = state.workingDir || process.cwd();
+  const makeMessage = (content: string, name = toolCall.name, id = toolCall.id ?? "unknown_id") =>
+    new ToolMessage({ content, tool_call_id: id, name });
+  const filePath = args.filePath || "";
+
+  switch (toolCall.name) {
+    case "search_project_index":
+      if (!state.projectId) return [makeMessage("No project is selected for this Code Agent session.")];
+      return [makeMessage(JSON.stringify(searchProjectIndex(state.projectId, args.query || ""), null, 2))];
+    case "list_directory": return [makeMessage(await listDirectory(args.dirPath || ".", currentWorkingDir))];
+    case "search_codebase": return [makeMessage(await searchCodebase(args.keyword || "", currentWorkingDir))];
+    case "read_file_from_disk": return [makeMessage(await readFileFromLocalDisk(filePath, currentWorkingDir))];
+    case "get_code_outline": return [makeMessage(await getCodeOutline(filePath, currentWorkingDir))];
+    case "get_local_time": return [makeMessage(new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }))];
+    case "propose_file_change": {
+      const result = await proposeFileChange(filePath, args.fileContent || "", currentWorkingDir);
+      return [makeMessage(result), makeMessage(await getDiff(filePath, currentWorkingDir), "get_diff", `${toolCall.id}-diff`)];
+    }
+    case "apply_file_change": return [makeMessage(await applyFileChange(filePath, currentWorkingDir))];
+    case "run_terminal_command": return [makeMessage(await runTerminalCommand(args.command || "", currentWorkingDir))];
+    default: return [makeMessage(`Unknown tool: ${toolCall.name}`)];
+  }
+}
+
 export async function executeToolsNode(
   state: typeof AgentState.State,
 ): Promise<Record<string, unknown>> {
@@ -412,15 +416,29 @@ export async function executeToolsNode(
     "🔍 Execute Tools 节点被触发，当前最后一条消息类型:",
     lastMessage._getType(),
   );
-  console.log("🔍 当前总结内容:", state.summary);
 
   if (!AIMessage.isInstance(lastMessage) || !lastMessage.tool_calls) {
     return { messages: [] };
   }
 
+  const readOnlyTools = new Set([
+    "search_project_index",
+    "list_directory",
+    "search_codebase",
+    "read_file_from_disk",
+    "get_code_outline",
+    "get_local_time",
+  ]);
+  const readOnlyCalls = lastMessage.tool_calls.filter((call) => readOnlyTools.has(call.name));
+  const mutationCalls = lastMessage.tool_calls.filter((call) => !readOnlyTools.has(call.name));
+  const parallel = await Promise.all(readOnlyCalls.map((call) => executeSingleTool(call, state)));
+  const serial: ToolMessage[][] = [];
+  for (const call of mutationCalls) serial.push(await executeSingleTool(call, state));
+  return { messages: [...parallel.flat(), ...serial.flat()] };
+
   const toolOutputs: ToolMessage[] = [];
-  const currentWorkingDir = state.workingDir || process.cwd(); // 取出工作目录
-  for (const toolCall of lastMessage.tool_calls) {
+  const currentWorkingDir = state.workingDir || process.cwd();
+  for (const toolCall of (lastMessage as AIMessage).tool_calls ?? []) {
     const args = toolCall.args as Record<string, string>;
     const filePath = args.filePath || "";
     const fileContent = args.fileContent || "";
@@ -440,7 +458,6 @@ export async function executeToolsNode(
             name: toolCall.name,
           }),
         );
-        // 自动追加 Diff 检查
         const diff = await getDiff(filePath, currentWorkingDir);
         toolOutputs.push(
           new ToolMessage({
@@ -508,7 +525,6 @@ export async function executeToolsNode(
           }),
         );
         break;
-      // 💡 【核心补全 1】: 补全获取本地时间
       case "get_local_time":
         result = new Date().toLocaleString("zh-CN", {
           timeZone: "Asia/Shanghai",
@@ -521,8 +537,6 @@ export async function executeToolsNode(
           }),
         );
         break;
-
-      // 💡 【核心补全 3】: 新增大纲技能的物理响应
       case "get_code_outline":
         result = await getCodeOutline(filePath, currentWorkingDir);
         toolOutputs.push(
@@ -540,6 +554,7 @@ export async function executeToolsNode(
 
   return { messages: toolOutputs };
 }
+
 // --------------------------------------------------------
 // ⚡ 新增节点 C: Token 智能化压缩与滚动摘要节点
 // --------------------------------------------------------
@@ -547,22 +562,23 @@ export async function summarizeHistoryNode(
   state: typeof AgentState.State,
 ): Promise<Record<string, unknown>> {
   const modelel = state.model;
+  const apiKey = state.apiKey || process.env.DASHSCOPE_API_KEY;
   const messages = state.messages || [];
   const summary = state.summary || "";
-  const keepCount = 5; // 保留最近5条消息，确保文件读取内容不被删除
+  const keepCount = 5;
   if (messages.length <= keepCount) return {};
 
   if (state.messages.length < 5) {
     return { summary: state.summary };
   }
 
-  // 1. 策略：保留最近的 keepCount 条消息（包含最后一次工具调用的往返）
-  // 2. 策略：对 keepCount 条之前的消息进行摘要
   const messagesToSummarize = messages.slice(0, messages.length - keepCount);
 
-  // ⚡ 核心修复：保护 ToolMessage 不被删除，确保文件读取结果保留
-  if (messagesToSummarize.length === 0) return {};
-
+  // 3. 严格类型映射
+  const cleanedMessages: SimpleMessage[] = messagesToSummarize.map((msg) => ({
+    role: msg._getType(),
+    content: stripThinkContent(msg.content),
+  }));
   const summaryPrompt = `
     请精炼总结以下对话历史，重点保留：
     1. 文件读取的结果和关键内容
@@ -574,22 +590,14 @@ export async function summarizeHistoryNode(
     ${summary || "暂无历史摘要"}
 
     [需要加入的新对话历史]:
-    ${JSON.stringify(
-      messagesToSummarize.map((m) => ({
-        role: m._getType(),
-        content: m.content,
-      })),
-      null,
-      2,
-    )}
+    ${JSON.stringify(cleanedMessages, null, 2)}
   `;
-
   try {
     const res = await fetch(QWEN_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: modelel,
@@ -605,28 +613,36 @@ export async function summarizeHistoryNode(
     const nextSummary = result.choices?.[0]?.message?.content || state.summary;
     console.log("✅ 摘要生成成功:", nextSummary);
 
-    // 构造删除指令：删除被选中进行摘要的那些消息（包括 ToolMessage）
-    // ⚠️ 我们不再无差别保护 ToolMessage，而是在生成摘要时，让 AI 把 ToolMessage 的“结果”总结进去！
+    // 👇 提取并上报摘要节点的 token 消耗
+    const nodeUsage = result.usage
+      ? {
+          prompt: result.usage.prompt_tokens,
+          completion: result.usage.completion_tokens,
+          total: result.usage.total_tokens,
+        }
+      : { prompt: 0, completion: 0, total: 0 };
+
     const deletionMessages = messagesToSummarize
       .map((m) => (m.id ? new RemoveMessage({ id: m.id }) : null))
       .filter((m): m is RemoveMessage => m !== null);
-    console.log("📝 摘要节点执行完毕，新摘要长度:", nextSummary.length);
+
     return {
       messages: deletionMessages,
-      summary: nextSummary, // 工具执行结果的信息现在被塞进 summary 里了
+      summary: nextSummary,
+      tokenUsage: nodeUsage, // 👈 累加 Token
     };
   } catch (error) {
-    console.error("❌ 摘要节点炸了:", error); // 如果这里打印了错误，说明问题找到了！
+    console.error("❌ 摘要节点炸了:", error);
     return {};
   }
 }
+
 export async function reportNode(state: typeof AgentState.State) {
   const model = state.model;
+  const apiKey = state.apiKey || process.env.DASHSCOPE_API_KEY;
   const summary = state.summary;
-  // 增加防御性判断
   if (!summary) return { messages: [] };
 
-  // 💡 【核心修复点 1】：从整个消息历史中，精准捞出用户最后一次提问的真实内容
   const humanMessages = state.messages.filter((m) => m._getType() === "human");
   const lastUserQuery =
     humanMessages.length > 0
@@ -638,7 +654,7 @@ export async function reportNode(state: typeof AgentState.State) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model: model,
@@ -664,7 +680,7 @@ export async function reportNode(state: typeof AgentState.State) {
             content: `用户真实想问的问题是: "${lastUserQuery}"\n\n后台工具帮你扫描到的核心代码及结构摘要如下:\n${summary}`,
           },
         ],
-        stream: false, // 保持非流式（或根据你的流式架构调整）
+        stream: false,
       }),
     });
 
@@ -677,9 +693,18 @@ export async function reportNode(state: typeof AgentState.State) {
     const data = await res.json();
     const finalReply = data.choices?.[0]?.message?.content || "";
 
-    // 💡 【核心修复点 2】：把大模型真正解答用户问题的文本作为 AIMessage 返回，流向 END
+    // 👇 提取并上报 Report 节点的 token 消耗
+    const nodeUsage = data.usage
+      ? {
+          prompt: data.usage.prompt_tokens,
+          completion: data.usage.completion_tokens,
+          total: data.usage.total_tokens,
+        }
+      : { prompt: 0, completion: 0, total: 0 };
+
     return {
       messages: [new AIMessage({ content: finalReply })],
+      tokenUsage: nodeUsage, // 👈 累加 Token
     };
   } catch (error) {
     console.error("❌ 报告节点炸了:", error);

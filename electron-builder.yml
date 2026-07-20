@@ -1,0 +1,81 @@
+# electron-builder 配置文件
+# 文档：https://www.electron.build/configuration/configuration
+
+appId: com.white.myapp
+productName: MyApp
+copyright: Copyright © 2026 white
+
+# 国内镜像加速下载
+electronDownload:
+  mirror: https://registry.npmmirror.com/-/binary/electron/
+
+# 主进程入口
+directories:
+  output: out
+  buildResources: build
+
+# 打包进 asar 的文件
+files:
+  - .electron/**/*
+  - package.json
+  - node_modules/**/*
+  - "!node_modules/.pnpm/**/*"
+  - "!**/*.{md,txt,yml,yaml}"
+  - "!**/test/**"
+  - "!**/tests/**"
+  - "!**/__tests__/**"
+
+# 额外资源（Next.js standalone 服务）
+extraResources:
+  - from: out-server/standalone
+    to: standalone
+    filter:
+      - "**/*"
+      - "!**/.pnpm/**"
+      - "!**/node_modules/.pnpm/**"
+
+asar: true
+compression: maximum
+
+# Windows 配置
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: public/icon.ico
+  artifactName: "${productName} Setup ${version}.${ext}"
+
+# NSIS 安装包配置（类似豆包的安装向导）
+nsis:
+  oneClick: false              # 非一键安装，显示安装向导
+  perMachine: false            # 仅当前用户安装
+  allowElevation: true         # 允许提升权限
+  allowToChangeInstallationDirectory: true  # 允许修改安装目录
+  createDesktopShortcut: true  # 创建桌面快捷方式
+  createStartMenuShortcut: true # 创建开始菜单快捷方式
+  installerIcon: public/icon.ico
+  uninstallerIcon: public/icon.ico
+  installerHeaderIcon: public/icon.ico
+  shortcutName: "MyApp"
+  deleteAppDataOnUninstall: false
+  displayLanguageSelector: false
+  installerLanguages:
+    - zh_CN
+  language: 2052              # 中文简体
+  runAfterFinish: true
+  include: build/installer.nsh
+
+# macOS 配置（可选）
+mac:
+  target:
+    - dmg
+  icon: public/icon.png
+
+# Linux 配置（可选）
+linux:
+  target:
+    - deb
+    - AppImage
+  icon: public/icon.png
+  category: Utility

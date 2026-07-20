@@ -21,14 +21,22 @@ interface StreamDeltaResponse {
   choices?: Array<{
     delta?: {
       content?: string;
-      reasoning_content?: string; // 👈 必须加上这个，否则 TS 会报错
+      reasoning_content?: string; 
     };
   }>;
+  // 👇 补充流式响应中的 Usage 字段类型
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 interface AgentStateValues extends Record<string, unknown> {
   messages?: BaseMessage[];
   summary?: string;
+  // 👇 补充图流转状态模型
+  tokenUsage?: { prompt: number; completion: number; total: number };
 }
 
 interface ToolPayload extends Record<string, unknown> {
@@ -50,10 +58,10 @@ export async function POST(req: Request): Promise<Response> {
     const body = (await req.json()) as {
       messages?: FrontendMessage[];
       sessionId?: string;
-      workingDir?: string; // ⚡ 新增的参数放在这里
+      workingDir?: string; 
+      projectId?: string;
     };
 
-    // 2. 提取出你需要的所有变量
     const messages = body.messages || [];
     const sessionId = body.sessionId || "default-global-thread";
 
@@ -82,15 +90,12 @@ export async function POST(req: Request): Promise<Response> {
         let finalState: AgentStateValues | null = null;
 
         try {
-          // 检查 MemorySaver 中是否已有该会话的状态
           const graphSnapshot = await graph.getState({
             configurable: { thread_id: sessionId },
           });
           const hasExistingState =
             (graphSnapshot.values?.messages?.length || 0) > 0;
 
-          // 如果 MemorySaver 已有状态，只传入新消息（最后一条），避免消息重复
-          // 如果服务器重启后状态丢失，传入前端发送的所有消息恢复上下文
           let messagesToGraph = inputMessages;
           if (hasExistingState) {
             messagesToGraph = [inputMessages[inputMessages.length - 1]];
@@ -99,17 +104,20 @@ export async function POST(req: Request): Promise<Response> {
             }
           }
           const workingDir = body.workingDir || "";
+          const projectId = body.projectId || "";
 
           const graphStream = await graph.stream(
             {
               messages: messagesToGraph,
               model: customApiModel,
               workingDir: workingDir,
+              projectId,
+              apiKey,
             },
             {
               configurable: {
                 thread_id: sessionId,
-                working_dir: workingDir, // 👈 可以在这里传递给图上下文
+                working_dir: workingDir, 
               },
               recursionLimit: 50,
               streamMode: "updates",
@@ -163,9 +171,6 @@ export async function POST(req: Request): Promise<Response> {
             }
           }
 
-          // const graphSnapshot = await graph.getState({
-          //   configurable: { thread_id: sessionId },
-          // });
           const finalSnapshot = await graph.getState({
             configurable: { thread_id: sessionId },
           });
@@ -201,11 +206,12 @@ export async function POST(req: Request): Promise<Response> {
           ),
         );
 
+        // 👇 提前将后台流转积攒下来的所有 Token 提取备用
+        const backgroundTokens = finalState?.tokenUsage || { prompt: 0, completion: 0, total: 0 };
         const memorySummaryText = finalState?.summary
           ? `\n\n[此前久远的对话背景历史摘要]:\n${finalState.summary}`
           : "";
 
-        // 系统提示词：禁止模型在最终回复阶段输出任何内部 XML，并明确要求模型必须输出最终正文
         const systemPrompt = {
           role: "system",
           content: `你是一位顶级 AI 软件架构师与全栈编码代理。你的目标是高效、准确地协助用户完成项目开发。
@@ -275,13 +281,9 @@ ${memorySummaryText}`,
               messages: [
                 systemPrompt,
                 ...recentMessages,
-                // {
-                //   role: "user",
-                //   content:
-                //     "工具执行阶段已完毕。请直接给我最终的 Markdown 中文解答正文，不要带有任何思考过程或工具调用格式。",
-                // },
               ],
               stream: true,
+              stream_options: { include_usage: true }, // 👈 强制开启 Usage
             }),
           });
 
@@ -306,22 +308,28 @@ ${memorySummaryText}`,
           let isThinkingPhase = false;
           let hasFinishedThinking = false;
 
-          // ⚡ 实例化高级过滤器
-
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
               console.log("✅ 流式传输正常结束");
-              // 处理残留 buffer 中最后不完整的一行
               if (buffer) {
                 const trimmed = buffer.trim();
                 if (trimmed && trimmed.startsWith("data:")) {
                   const dataJson = trimmed.slice("data:".length).trim();
                   if (dataJson !== "[DONE]") {
                     try {
-                      const parsed = JSON.parse(
-                        dataJson,
-                      ) as StreamDeltaResponse;
+                      const parsed = JSON.parse(dataJson) as StreamDeltaResponse;
+                      
+                      // 👇 流结束时可能附带残余数据包包含 usage
+                      if (parsed.usage) {
+                        const finalPrompt = backgroundTokens.prompt + (parsed.usage.prompt_tokens || 0);
+                        const finalCompletion = backgroundTokens.completion + (parsed.usage.completion_tokens || 0);
+                        const finalTotal = backgroundTokens.total + (parsed.usage.total_tokens || 0);
+                        controller.enqueue(
+                          encoder.encode(`data: ${JSON.stringify({ type: "USAGE", content: { prompt: finalPrompt, completion: finalCompletion, total: finalTotal } })}\n\n`)
+                        );
+                      }
+
                       const delta = parsed.choices?.[0]?.delta;
                       const reasoning = delta?.reasoning_content || "";
                       const content = delta?.content || "";
@@ -351,7 +359,6 @@ ${memorySummaryText}`,
                   }
                 }
               }
-              // 如果流结束时 thinking 还没有关闭，自动关闭标签
               if (isThinkingPhase && !hasFinishedThinking) {
                 controller.enqueue(
                   encoder.encode(
@@ -374,6 +381,23 @@ ${memorySummaryText}`,
 
               try {
                 const parsed = JSON.parse(dataJson) as StreamDeltaResponse;
+                
+                // 👇 核心功能：如果在流中发现了 usage 数据包，执行后台累加合并，然后送给前端
+                if (parsed.usage) {
+                  const finalPrompt = backgroundTokens.prompt + (parsed.usage.prompt_tokens || 0);
+                  const finalCompletion = backgroundTokens.completion + (parsed.usage.completion_tokens || 0);
+                  const finalTotal = backgroundTokens.total + (parsed.usage.total_tokens || 0);
+
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ 
+                        type: "USAGE", 
+                        content: { prompt: finalPrompt, completion: finalCompletion, total: finalTotal } 
+                      })}\n\n`,
+                    ),
+                  );
+                }
+
                 const delta = parsed.choices?.[0]?.delta;
 
                 const reasoning = delta?.reasoning_content || "";
@@ -381,16 +405,14 @@ ${memorySummaryText}`,
 
                 let chunkToFrontend = "";
 
-                // 1. 处理推理阶段 (思考中)
                 if (reasoning) {
                   if (!isThinkingPhase) {
                     isThinkingPhase = true;
-                    chunkToFrontend += "<INTERNAL_THINK_START>"; // 首次收到推理内容，添加思考标签
+                    chunkToFrontend += "<INTERNAL_THINK_START>";
                   }
                   chunkToFrontend += reasoning;
                 }
 
-                // 2. 处理正文阶段 (思考结束闭合)
                 if (content) {
                   if (isThinkingPhase && !hasFinishedThinking) {
                     hasFinishedThinking = true;
@@ -399,7 +421,6 @@ ${memorySummaryText}`,
                   chunkToFrontend += content;
                 }
 
-                // 3. 将拼接好的流推给前端
                 if (chunkToFrontend) {
                   controller.enqueue(
                     encoder.encode(

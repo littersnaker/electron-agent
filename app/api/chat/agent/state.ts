@@ -24,4 +24,24 @@ export const AgentState = Annotation.Root({
     reducer: (x, y) => y ?? x,
     default: () => "",
   }),
+  projectId: Annotation<string>({
+    reducer: (x, y) => y ?? x,
+    default: () => "",
+  }),
+  apiKey: Annotation<string>({
+    reducer: (x, y) => y ?? x,
+    default: () => "",
+  }),
+  // ⚡ 新增全局 Token 累加器 (自动累加各节点的消耗)
+  tokenUsage: Annotation<{ prompt: number; completion: number; total: number }>({
+    reducer: (currentState, newValue) => {
+      if (!newValue) return currentState;
+      return {
+        prompt: currentState.prompt + (newValue.prompt || 0),
+        completion: currentState.completion + (newValue.completion || 0),
+        total: currentState.total + (newValue.total || 0),
+      };
+    },
+    default: () => ({ prompt: 0, completion: 0, total: 0 }),
+  }),
 });

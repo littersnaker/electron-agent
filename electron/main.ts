@@ -140,6 +140,9 @@ function startServer(): void {
     // 💡 关键：在这里显式注入！
     // 这样子进程启动时，就能拿到从 .env.local 读取到的这个值
     DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY,
+    // Keep local workspace data out of the application bundle. The Next.js
+    // server receives this path and owns the SQLite connection.
+    AGENT_DATA_DIR: path.join(app.getPath("userData"), "workspace-data"),
   };
 
   // 清理残留的 dev server 进程和锁文件

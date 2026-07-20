@@ -12,8 +12,8 @@
     "lint": "eslint",
     "electron:dev": "pnpm electron:compile && electron .",
     "electron:build": "tsx scripts/build-electron.ts",
-    "electron:package": "electron-forge package",
-    "electron:make": "electron-forge make",
+    "electron:package": "electron-builder --dir",
+    "electron:make": "electron-builder",
     "electron:compile": "tsx scripts/compile-electron.ts"
   },
   "dependencies": {
@@ -51,6 +51,7 @@
     "@types/react-dom": "^19.2.3",
     "cross-env": "^10.1.0",
     "electron": "^43.0.0",
+    "electron-builder": "^25.1.8",
     "electron-is-dev": "^3.0.1",
     "electron-squirrel-startup": "^1.0.1",
     "eslint": "^9",

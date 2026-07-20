@@ -3,6 +3,20 @@ export const tools = [
   {
     type: "function",
     function: {
+      name: "search_project_index",
+      description: "Search the selected project's SQLite code index before scanning files. Use it first for code, symbol, component, API, or configuration lookup.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Keywords, function names, filenames, or concepts to search for" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "propose_file_change",
       // 🌟 核心改动：在描述中加入极其强烈的命令，诱导大模型在生成概率上绝对倾向于调用工具
       description:
