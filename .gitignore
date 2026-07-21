@@ -46,5 +46,6 @@ next-env.d.ts
 
 # Electron
 .electron/
+.agent-data/
 out/
 out-server/

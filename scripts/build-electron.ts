@@ -35,6 +35,22 @@ try {
     fs.cpSync(sourcePublic, destPublic, { recursive: true });
   }
 
+  /*
+   * Electron 打包后不会天然带上项目根目录的 .env.local。
+   * 这里显式把它复制进 standalone 资源目录，供主进程启动时读取，
+   * 再把 DASHSCOPE_API_KEY 等变量注入给 Next 子进程。
+   */
+  const sourceEnvLocal = path.join(rootDir, '.env.local');
+  if (fs.existsSync(sourceEnvLocal)) {
+    fs.cpSync(sourceEnvLocal, path.join(outServerDir, '.env.local'));
+    console.log('已复制 .env.local 到 standalone 运行目录。');
+  } else {
+    console.warn('未找到项目根目录 .env.local，打包后的应用将只能依赖系统环境变量。');
+  }
+
+  console.log('\n=== Step 3.5: 同步 Electron 图标资源 ===');
+  execSync('pnpm electron:prepare-icons', { stdio: 'inherit', cwd: rootDir });
+
   // const symlinkPaths = [
   //   // path.join(outServerDir, 'node_modules'),
   //   // path.join(outServerDir, '.next', 'node_modules'),

@@ -35,9 +35,20 @@ type WorkspaceResponse = {
   projects: WorkspaceProject[];
   sessions: ChatSession[];
 };
+
+type InteractiveRequest = {
+  id: string;
+  command: string;
+  prompt: string;
+  mode: "normal" | "pty";
+  suggestedMode: "auto" | "llm" | "user";
+  options: Array<{ label: string; value: string }>;
+};
+
 type StreamPacket = {
-  type?: "TEXT" | "STATUS" | "TOOL_STATUS" | "USAGE";
+  type?: "TEXT" | "STATUS" | "TOOL_STATUS" | "USAGE" | "INTERACTIVE_REQUEST";
   content?: string | { prompt: number; completion: number; total: number };
+  payload?: InteractiveRequest;
 };
 
 export default function Home() {
@@ -58,6 +69,8 @@ export default function Home() {
     completion: number;
     total: number;
   } | null>(null);
+  const [interactiveRequest, setInteractiveRequest] =
+    useState<InteractiveRequest | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const finalTextRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -164,6 +177,7 @@ export default function Home() {
     setAttachedFile(null);
     setCurrentTool("");
     setTokenInfo(null);
+    setInteractiveRequest(null);
   };
 
   const deleteSession = async (id: string, event: React.MouseEvent) => {
@@ -253,14 +267,16 @@ export default function Home() {
     setShowKeyModal(false);
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitPrompt = async (
+    promptText: string,
+    fileOverride: AttachedFile | null = attachedFile,
+  ) => {
     if (!activeSession || isStreaming || isParsingFile) return;
-    const prompt = input.trim();
-    if (!prompt && !attachedFile) return;
+    const prompt = promptText.trim();
+    if (!prompt && !fileOverride) return;
     const userContent =
-      attachedFile && !attachedFile.type.startsWith("image/")
-        ? `${prompt || "请分析这份文件"}\n\n--- ${attachedFile.name} ---\n${attachedFile.textContent || ""}`
+      fileOverride && !fileOverride.type.startsWith("image/")
+        ? `${prompt || "请分析这份文件"}\n\n--- ${fileOverride.name} ---\n${fileOverride.textContent || ""}`
         : prompt;
     const history: Message[] = [
       ...messages,
@@ -269,7 +285,7 @@ export default function Home() {
     ];
     const title =
       activeSession.title === "新对话"
-        ? prompt.slice(0, 18) || attachedFile?.name || "新对话"
+        ? prompt.slice(0, 18) || fileOverride?.name || "新对话"
         : activeSession.title;
     const optimisticSession = { ...activeSession, title, messages: history };
     setSessions((current) =>
@@ -285,6 +301,7 @@ export default function Home() {
     setIsStreaming(true);
     setCurrentTool("");
     setTokenInfo(null);
+    let nextInteractiveRequest: InteractiveRequest | null = null;
     finalTextRef.current = "";
     const abortController = new AbortController();
     abortRef.current = abortController;
@@ -349,6 +366,9 @@ export default function Home() {
               typeof streamContent !== "string"
             ) {
               setTokenInfo(streamContent);
+            } else if (packet.type === "INTERACTIVE_REQUEST" && packet.payload) {
+              nextInteractiveRequest = packet.payload;
+              setInteractiveRequest(packet.payload);
             }
           } catch {
             /* Ignore incomplete SSE frames. */
@@ -375,7 +395,27 @@ export default function Home() {
       abortRef.current = null;
       setIsStreaming(false);
       setCurrentTool("");
+      setInteractiveRequest(nextInteractiveRequest);
     }
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitPrompt(input);
+  };
+
+  const handleInteractiveReply = async (
+    mode: "auto" | "llm" | "user",
+    answer?: string,
+  ) => {
+    if (!interactiveRequest || isStreaming) return;
+    const prompt = [
+      `[INTERACTIVE_REPLY] id=${interactiveRequest.id} mode=${mode}`,
+      answer ? `answer=${answer}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    await submitPrompt(prompt, null);
   };
 
   return (
@@ -450,6 +490,51 @@ export default function Home() {
             currentTool={currentTool}
           />
           <div className="border-t pt-4" style={{ borderColor: T.borderSoft }}>
+            {interactiveRequest && !isStreaming && (
+              <div
+                className="mb-3 rounded-xl border px-4 py-3 text-sm"
+                style={{ borderColor: T.border, background: T.surfaceHover }}
+              >
+                <div className="mb-1 font-medium">Interactive Manager</div>
+                <div className="mb-2 text-xs opacity-80">
+                  命令：{interactiveRequest.command}
+                </div>
+                <div className="mb-3 whitespace-pre-wrap text-xs opacity-80">
+                  提示：{interactiveRequest.prompt}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleInteractiveReply("auto")}
+                    className="rounded-lg border px-3 py-1.5 text-xs"
+                    style={{ borderColor: T.border }}
+                  >
+                    自动回答
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleInteractiveReply("llm")}
+                    className="rounded-lg border px-3 py-1.5 text-xs"
+                    style={{ borderColor: T.border }}
+                  >
+                    LLM 回答
+                  </button>
+                  {interactiveRequest.options.map((option) => (
+                    <button
+                      key={`${interactiveRequest.id}-${option.value}`}
+                      type="button"
+                      onClick={() =>
+                        void handleInteractiveReply("user", option.value)
+                      }
+                      className="rounded-lg border px-3 py-1.5 text-xs"
+                      style={{ borderColor: T.border }}
+                    >
+                      用户回答：{option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {attachedFile && (
               <div
                 className="mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
@@ -516,11 +601,7 @@ export default function Home() {
                   />
                   <button
                     type="submit"
-                    onClick={() => {
-                      handleSubmit(
-                        event as unknown as FormEvent<HTMLFormElement>,
-                      );
-                    }}
+                    onClick={() => void submitPrompt(input)}
                     disabled={
                       isStreaming ||
                       isParsingFile ||

@@ -105,11 +105,11 @@ export const tools = [
     type: "function",
     function: {
       name: "run_terminal_command",
-    description: 
-        "在当前工作目录下执行终端命令（如 npm, git, npx 等）。" +
-        "【⛔ 致命警告：当前是无头(Headless)环境，不支持任何交互！" +
-        "任何会触发 CLI 询问（Prompt/Select）的命令（如基础的 taro init, create-vue）都会导致系统死锁。" +
-        "创建项目必须使用所有非交互式 Flags（例如 --template, --typescript, -y, --force 等）跳过交互环节！】",
+      description:
+        "在当前工作目录下执行终端命令。系统会先自动路由：普通命令走短命令执行；" +
+        "创建脚手架、pnpm dlx、python manage.py 等可能出现交互的命令会走 PTY 交互管理层。" +
+        "Interactive Manager 会优先尝试自动回答（如 --yes / -y），必要时再转成 LLM 回答或等待用户按钮回答。" +
+        "【严格限制：command 参数必须是可直接执行的真实 CLI 命令，绝不能把用户的自然语言需求、角色设定、开发要求整段原样传进来。】",
       parameters: {
         type: "object",
         properties: {

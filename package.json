@@ -11,9 +11,10 @@
     "start": "next start",
     "lint": "eslint",
     "electron:dev": "pnpm electron:compile && electron .",
+    "electron:prepare-icons": "tsx scripts/prepare-electron-icons.ts",
     "electron:build": "tsx scripts/build-electron.ts",
-    "electron:package": "electron-builder --dir",
-    "electron:make": "electron-builder",
+    "electron:package": "pnpm electron:prepare-icons && electron-builder --dir",
+    "electron:make": "pnpm electron:prepare-icons && electron-builder",
     "electron:compile": "tsx scripts/compile-electron.ts"
   },
   "dependencies": {
@@ -57,6 +58,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "lodash": "^4.18.1",
+    "png-to-ico": "^3.0.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3"

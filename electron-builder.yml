@@ -31,6 +31,10 @@ extraResources:
     to: standalone
     filter:
       - "**/*"
+      # `**/*` 在不同打包链路里对点文件并不稳定，
+      # 这里显式把 `.env.local` 白名单进来，避免它被过滤掉。
+      - ".env.local"
+      - "**/.env.local"
       - "!**/.pnpm/**"
       - "!**/node_modules/.pnpm/**"
 
@@ -38,6 +42,7 @@ asar: true
 compression: maximum
 
 # Windows 配置
+# Windows 安装包实际仍使用 .ico，但该文件会在打包前由 public/icon.png 自动生成。
 win:
   target:
     - target: nsis

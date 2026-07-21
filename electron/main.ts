@@ -5,7 +5,51 @@ import { spawn, ChildProcess, execSync } from "child_process";
 import { nativeTheme } from "electron";
 import * as dotenv from "dotenv";
 nativeTheme.themeSource = "dark";
-dotenv.config({ path: path.join(__dirname, "../.env.local") });
+
+function maskSecret(secret?: string): string {
+  if (!secret) return "missing";
+  if (secret.length <= 8) return `${"*".repeat(secret.length)} (len:${secret.length})`;
+  return `${secret.slice(0, 4)}...${secret.slice(-4)} (len:${secret.length})`;
+}
+
+/*
+ * Electron 主进程不会像 Next.js 那样自动帮我们加载 `.env.local`。
+ * 这里手动尝试多个候选路径：
+ * - 开发态通常是项目根目录；
+ * - 打包后如果外部放置了 `.env.local`，则可能在 resources 或启动目录附近。
+ *
+ * 这样做的目的，是把“主进程能否读到 Key”这件事做成显式行为，避免后面子进程注入时悄悄丢失。
+ */
+function loadElectronEnv(): void {
+  const candidatePaths = [
+    path.join(process.cwd(), ".env.local"),
+    // 打包后如果构建脚本把 .env.local 一起复制进 standalone 资源目录，
+    // 主进程会优先从这里读取，再注入给 Next 子进程。
+    path.join(process.resourcesPath, "standalone", ".env.local"),
+    path.join(__dirname, "../.env.local"),
+    path.join(__dirname, "../../.env.local"),
+    path.join(process.resourcesPath, ".env.local"),
+  ];
+
+  for (const envPath of candidatePaths) {
+    if (!fs.existsSync(envPath)) continue;
+
+    const result = dotenv.config({ path: envPath, override: false });
+    if (!result.error) {
+      console.log(`[Electron] 已加载环境变量文件: ${envPath}`);
+      console.log(
+        `[Electron] DASHSCOPE_API_KEY 命中情况: ${maskSecret(process.env.DASHSCOPE_API_KEY)}`,
+      );
+      return;
+    }
+
+    console.warn(`[Electron] 读取环境变量文件失败: ${envPath}`, result.error);
+  }
+
+  console.warn("[Electron] 未找到可用的 .env.local，后续只能依赖系统环境变量。");
+}
+
+loadElectronEnv();
 // squirrel startup handler (Windows only)
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -27,8 +71,47 @@ let lastServerError = "";
 
 const isDev = !app.isPackaged;
 
-// 加载中页面 HTML（紫蓝渐变暗黑风）
-const LOADING_HTML = `
+// 运行时窗口图标统一来自 public/icon.png。
+function getRuntimeIconPath(): string | undefined {
+  const candidatePaths = isDev
+    ? [path.join(app.getAppPath(), "public", "icon.png")]
+    : [
+        path.join(process.resourcesPath, "standalone", "public", "icon.png"),
+        path.join(app.getAppPath(), "public", "icon.png"),
+      ];
+
+  return candidatePaths.find((candidatePath) => fs.existsSync(candidatePath));
+}
+
+// 启动页本身是 data:text/html 页面，直接引用 file:/// 本地资源容易被拦截。
+// 这里把图标文件转成 data URL 内联进 HTML，最稳。
+function getRuntimeIconDataUrl(iconPath?: string): string {
+  if (!iconPath) return "";
+
+  try {
+    const buffer = fs.readFileSync(iconPath);
+    const extension = path.extname(iconPath).toLowerCase();
+    const mimeType =
+      extension === ".jpg" || extension === ".jpeg"
+        ? "image/jpeg"
+        : extension === ".webp"
+          ? "image/webp"
+          : "image/png";
+
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  } catch (error) {
+    console.error("[Electron] 读取启动页图标失败:", error);
+    return "";
+  }
+}
+
+function buildLoadingHtml(iconPath?: string): string {
+  const iconUrl = getRuntimeIconDataUrl(iconPath);
+  const iconContent = iconUrl
+    ? `<img class="icon-image" src="${iconUrl}" alt="App Icon" />`
+    : `<div class="icon-fallback">A</div>`;
+
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -49,12 +132,28 @@ const LOADING_HTML = `
   .icon {
     width: 72px; height: 72px;
     border-radius: 18px;
-    background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 36px; font-weight: bold; color: white;
     box-shadow: 0 8px 32px -8px rgba(139, 92, 246, 0.5);
     margin-bottom: 24px;
     animation: pulse 2s ease-in-out infinite;
+    overflow: hidden;
+  }
+  .icon-image, .icon-fallback {
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+  }
+  .icon-image {
+    display: block;
+    object-fit: cover;
+  }
+  .icon-fallback {
+    background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: bold;
+    color: white;
   }
   .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
   .subtitle { font-size: 13px; color: #9a9ab0; margin-bottom: 32px; }
@@ -71,7 +170,7 @@ const LOADING_HTML = `
 </style>
 </head>
 <body>
-  <div class="icon">A</div>
+  <div class="icon">${iconContent}</div>
   <div class="title">智能助手</div>
   <div class="subtitle">正在启动服务，请稍候...</div>
   <div class="spinner"></div>
@@ -79,6 +178,7 @@ const LOADING_HTML = `
 </body>
 </html>
 `;
+}
 
 /**
  * Kill any stale "next dev" processes that may hold the lock.
@@ -131,6 +231,7 @@ function killStaleDevServer(): void {
  * Start the Next.js server as a child process.
  */
 function startServer(): void {
+  const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
   const env = {
     ...process.env, // 继承主进程的环境变量
     NEXT_PUBLIC_IS_ELECTRON: "1",
@@ -139,11 +240,15 @@ function startServer(): void {
 
     // 💡 关键：在这里显式注入！
     // 这样子进程启动时，就能拿到从 .env.local 读取到的这个值
-    DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY,
+    DASHSCOPE_API_KEY: dashscopeApiKey,
     // Keep local workspace data out of the application bundle. The Next.js
     // server receives this path and owns the SQLite connection.
     AGENT_DATA_DIR: path.join(app.getPath("userData"), "workspace-data"),
   };
+
+  console.log(
+    `[Electron] 准备启动 Next 子进程，DASHSCOPE_API_KEY=${maskSecret(dashscopeApiKey)}`,
+  );
 
   // 清理残留的 dev server 进程和锁文件
   if (isDev) {
@@ -243,6 +348,7 @@ function startServer(): void {
  * Create the main BrowserWindow.
  */
 function createWindow(): BrowserWindow {
+  const iconPath = getRuntimeIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -256,6 +362,7 @@ function createWindow(): BrowserWindow {
       symbolColor: "#ededf2", // 按钮颜色
       height: 42, // 工具栏高度
     },
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -267,7 +374,7 @@ function createWindow(): BrowserWindow {
 
   // 先显示加载中的 splash 页面
   win.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`,
+    `data:text/html;charset=utf-8,${encodeURIComponent(buildLoadingHtml(iconPath))}`,
   );
 
   // 显示窗口（splash 会立刻可见）
@@ -282,6 +389,9 @@ function createWindow(): BrowserWindow {
 
   win.on("closed", () => {
     mainWindow = null;
+  });
+  win.webContents.openDevTools({
+    mode: "detach", // 单独窗口
   });
 
   return win;

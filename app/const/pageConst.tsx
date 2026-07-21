@@ -28,7 +28,7 @@ export type WorkspaceProject = {
   lastOpenedAt: string;
 };
 export interface StreamPacket {
-  type?: "TEXT" | "STATUS" | "TOOL_STATUS" | "DIFF_READY";
+  type?: "TEXT" | "STATUS" | "TOOL_STATUS" | "DIFF_READY" | "INTERACTIVE_REQUEST";
   content?: string;
   payload?: unknown;
 }
@@ -38,7 +38,7 @@ export const ToolNameMap: Record<string, string> = {
   list_directory: "🔍 正在扫描文件目录...",
   propose_file_change: "✍️ 正在构思代码修改...",
   read_file_from_disk: "📖 正在读取文件内容...",
-  run_terminal_command: "⚙️ 正在执行终端指令...",
+  run_terminal_command: "⚙️ 正在路由终端指令...",
   apply_file_change: "✅ 正在应用代码修改...",
   get_diff: "📊 正在对比代码差异...",
   search_codebase: "🔎 正在搜索代码库...",

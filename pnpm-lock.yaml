@@ -123,6 +123,9 @@ importers:
       lodash:
         specifier: ^4.18.1
         version: 4.18.1
+      png-to-ico:
+        specifier: ^3.0.2
+        version: 3.0.2
       tailwindcss:
         specifier: ^4
         version: 4.3.2
@@ -4419,6 +4422,15 @@ packages:
   plist@3.1.1:
     resolution: {integrity: sha512-ZIfcLJC+7E7FBFnDxm9MPmt7D+DidyQ26lewieO75AdhA2ayMtsJSES0iWzqJQbcVRSrTufQoy0DR94xHue0oA==}
     engines: {node: '>=10.4.0'}
+
+  png-to-ico@3.0.2:
+    resolution: {integrity: sha512-36vvp3/YF7LPYkUEOj08/WgB1wI63qW391YfOhOWckgOtGkarr9+EhPBimcCmRP7fJaG4EaXQhTTaQ8qqdj8aA==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  pngjs@7.0.0:
+    resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
+    engines: {node: '>=14.19.0'}
 
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
@@ -10575,6 +10587,14 @@ snapshots:
       '@xmldom/xmldom': 0.9.10
       base64-js: 1.5.1
       xmlbuilder: 15.1.1
+
+  png-to-ico@3.0.2:
+    dependencies:
+      '@types/node': 25.9.5
+      minimist: 1.2.8
+      pngjs: 7.0.0
+
+  pngjs@7.0.0: {}
 
   possible-typed-array-names@1.1.0: {}
 
