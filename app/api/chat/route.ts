@@ -8,6 +8,7 @@ import {
 import { NextResponse } from "next/server";
 import { graph } from "./agent/graph";
 import { ToolNameMap } from "@/app/const/pageConst";
+import { systemPromptText } from "./prompt";
 
 const QWEN_STREAM_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
@@ -389,12 +390,39 @@ export async function POST(req: Request): Promise<Response> {
                 })}\n\n`,
               ),
             );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: "STATUS",
+                  content:
+                    "⏸ 终端会话已进入持久交互模式，当前轮次暂停在命令现场。请在下方继续输入，系统会直接向同一条进程写入 stdin。",
+                })}\n\n`,
+              ),
+            );
           }
         } catch (graphErr) {
           console.error("LangGraph 运行期异常:", graphErr);
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({ type: "TOOL_STATUS", content: "Agent 思考流中断" })}\n\n`,
+            ),
+          );
+          controller.close();
+          return;
+        }
+
+        if (finalState?.interactiveRequest) {
+          const backgroundTokens = finalState.tokenUsage || {
+            prompt: 0,
+            completion: 0,
+            total: 0,
+          };
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "USAGE",
+                content: backgroundTokens,
+              })}\n\n`,
             ),
           );
           controller.close();
@@ -427,21 +455,7 @@ export async function POST(req: Request): Promise<Response> {
          */
         const systemPrompt = {
           role: "system",
-          content: `你是一位顶级 AI 软件架构师与全栈编码代理。你的目标是高效、准确地协助用户完成项目开发。
-
-【协作原则与工作流】：
-1. 深入分析：在开始任何编码任务前，先理清需求。如有必要，使用 'read_file_from_disk' 或 'search_codebase' 获取上下文。
-2. 优先使用工具：涉及文件修改时，必须使用 'propose_file_change' 提交修改。提交后，利用 'get_diff' 检查差异，确保逻辑无误，最后使用 'apply_file_change' 正式落地。
-3. 动态调整：如果终端命令出现错误，请自行读取相关文件并分析错误日志，随后尝试修复。
-4. 明确的沟通：完成每一个阶段性目标后，使用简洁专业的中文进行总结，并汇报你的工作进度。
-
-【约束与协议】：
-- 编码修改：建议使用 'propose_file_change' -> 'get_diff' -> 'apply_file_change' 的闭环流程，确保每次修改都经过验证，并且编码习惯必须严格要求eslint+typescript格式。
-- 严禁输出xml代码块或任何内部标记语言，所有输出必须为标准 Markdown 格式。
-- 严禁在对话内容中输出超长的完整代码块，涉及文件更新请一律使用工具处理。
-- 如果用户需求模糊，请主动提问。
-- 在输出最终报告时，使用标准 Markdown 格式（支持代码块语法 \`\`\`）。
-- 始终保持 proactive（主动），如果发现代码可以优化或存在潜在 Bug，请直接向用户提出改进建议，并在得到许可后调用工具进行操作。
+          content: `${systemPromptText}
 
 【当前上下文】：
 ${memorySummaryText}`,

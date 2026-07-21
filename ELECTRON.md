@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-my-app/
+Agent Workspace/
 ├── electron/
 │   ├── main.ts        # Electron 主进程（启动 Next.js、创建窗口、自动更新）
 │   └── preload.ts     # 预加载脚本（通过 contextBridge 暴露安全 API）

@@ -1,20 +1,9 @@
-import { memo } from "react";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import AssistantMessageRow from "./AssistantMessageRow";
+import AssistantMessageRow, {
+  type ToolActivity,
+} from "./AssistantMessageRow";
 
-// 暗黑主题硬编码颜色
-const T = {
-  surface: "#16161f",
-  borderSoft: "#1f1f2e",
-  fg: "#ededf2",
-  accentFrom: "#a855f7",
-  accentTo: "#6366f1",
-  accentGlow: "rgba(139, 92, 246, 0.35)",
-  accentGrad: "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)",
-};
-
-// 1. 扩展 Message 类型，增加 tool_calls 字段
 type ToolCall = {
   id: string;
   name: string;
@@ -24,89 +13,153 @@ type ToolCall = {
 type Message = {
   role: "user" | "assistant";
   content: string;
-  tool_calls?: ToolCall[]; // 新增字段
+  tool_calls?: ToolCall[];
 };
 
 interface ChatListProps {
   messages: Message[];
   isStreaming: boolean;
-  currentTool?: string; // 新增：当前执行的工具名
+  toolActivities?: ToolActivity[];
+  agentStatus?: string;
 }
 
-// 为 Virtuoso 包装 memo 组件，减少不必要的重渲染
+const COLORS = {
+  text: "#f5f5f7",
+  textMuted: "rgba(235, 235, 245, 0.62)",
+  material: "rgba(255, 255, 255, 0.055)",
+  border: "rgba(255, 255, 255, 0.085)",
+  blue: "#0a84ff",
+};
+
 const MemoizedAssistantMessageRow = memo(AssistantMessageRow);
 
-export default function ChatList({ messages, isStreaming, currentTool }: ChatListProps) {
+function AssistantBadge() {
+  return (
+    <div
+      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border"
+      style={{
+        background:
+          "linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.055))",
+        borderColor: COLORS.border,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+      }}
+    >
+      <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+        <path
+          d="M10 2.5c.52 3.45 2.55 5.48 6 6-3.45.52-5.48 2.55-6 6-.52-3.45-2.55-5.48-6-6 3.45-.52 5.48-2.55 6-6Z"
+          fill="url(#assistant-gradient)"
+        />
+        <defs>
+          <linearGradient id="assistant-gradient" x1="4" y1="3" x2="16" y2="15">
+            <stop stopColor="#64b5ff" />
+            <stop offset="1" stopColor="#bf5af2" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  );
+}
+
+export default function ChatList({
+  messages,
+  isStreaming,
+  toolActivities = [],
+  agentStatus,
+}: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const hasInitialScrolled = useRef(false);
 
-  // 自动滚动到底部的逻辑
   useEffect(() => {
-    if (messages.length > 0 && virtuosoRef.current) {
-      // 首次加载时延迟滚动，确保 DOM 已渲染
-      if (!hasInitialScrolled.current) {
-        setTimeout(() => {
-          virtuosoRef.current?.scrollToIndex({
-            index: messages.length - 1,
-            align: "end",
-            behavior: "auto",
-          });
-          hasInitialScrolled.current = true;
-        }, 100);
-      } else {
-        // 后续消息更新时平滑滚动
+    if (!messages.length || !virtuosoRef.current) return;
+
+    if (!hasInitialScrolled.current) {
+      const timer = window.setTimeout(() => {
         virtuosoRef.current?.scrollToIndex({
           index: messages.length - 1,
           align: "end",
-          behavior: "smooth",
+          behavior: "auto",
         });
-      }
+        hasInitialScrolled.current = true;
+      }, 100);
+      return () => window.clearTimeout(timer);
     }
+
+    virtuosoRef.current.scrollToIndex({
+      index: messages.length - 1,
+      align: "end",
+      behavior: "smooth",
+    });
   }, [messages.length]);
 
   return (
-    <div className="min-h-0 flex-1 pb-4">
+    <div className="min-h-0 flex-1">
       <Virtuoso
         ref={virtuosoRef}
         data={messages}
         alignToBottom
         followOutput={isStreaming ? "smooth" : false}
-        // 扩大视口外预渲染区域（顶部和底部各 300px），减少快速滚动白屏
-        increaseViewportBy={{ top: 300, bottom: 300 }}
-        // 上下额外预渲染 8 行，比滚动方向更远
-        overscan={8}
+        increaseViewportBy={{ top: 360, bottom: 360 }}
+        overscan={10}
+        components={{
+          Footer: () => <div className="h-5" />,
+        }}
         itemContent={(index, message) => {
           const isUser = message.role === "user";
-          const isLastMessage = index === messages.length - 1; // 判断是否是最后一条消息
-          return (
-            <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
-              <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-                  isUser ? "text-white" : ""
-                }`}
-                style={
-                  isUser
-                    ? { background: T.accentGrad, boxShadow: `0 4px 14px -4px ${T.accentGlow}` }
-                    : { background: T.surface, border: `1px solid ${T.borderSoft}`, color: T.fg }
-                }
-              >
-                {/* 如果是用户消息 */}
-                {isUser && <div className="whitespace-pre-wrap break-words">{message.content}</div>}
+          const isLastMessage = index === messages.length - 1;
+          const shouldRenderAssistant =
+            !isUser &&
+            (Boolean(message.content) ||
+              (isLastMessage &&
+                (isStreaming || toolActivities.length > 0 || Boolean(agentStatus))));
 
-                {/* 如果是 AI 消息 */}
-                {!isUser && (
-                  <>
-                    {/* B. 渲染常规回复 */}
-                    {message.content && (
-                      <div className="whitespace-pre-wrap">
-                        <MemoizedAssistantMessageRow 
-                          content={message.content} 
-                          currentTool={isLastMessage ? currentTool : undefined} // 仅对最后一条消息传递 currentTool
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
+          if (isUser) {
+            return (
+              <div className="mb-5 flex justify-end px-1 sm:px-3">
+                <div
+                  className="max-w-[82%] rounded-[20px] rounded-br-[7px] px-4 py-3 text-[14px] leading-6 text-white sm:max-w-[72%]"
+                  style={{
+                    background:
+                      "linear-gradient(180deg, #168dff 0%, #0879eb 100%)",
+                    boxShadow:
+                      "0 10px 28px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.18)",
+                  }}
+                >
+                  <div className="whitespace-pre-wrap break-words">
+                    {message.content}
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (!shouldRenderAssistant) return <div className="h-1" />;
+
+          return (
+            <div className="mb-6 flex items-start gap-3 px-1 sm:px-3">
+              <AssistantBadge />
+              <div className="min-w-0 max-w-[calc(100%_-_40px)] flex-1 pt-0.5">
+                <div
+                  className="mb-1.5 text-[11px] font-medium tracking-wide"
+                  style={{ color: COLORS.textMuted }}
+                >
+                  Agent
+                </div>
+                <div
+                  className="min-w-0 rounded-[18px] border px-4 py-3.5"
+                  style={{
+                    color: COLORS.text,
+                    background: COLORS.material,
+                    borderColor: COLORS.border,
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
+                  }}
+                >
+                  <MemoizedAssistantMessageRow
+                    content={message.content}
+                    toolActivities={isLastMessage ? toolActivities : []}
+                    agentStatus={isLastMessage ? agentStatus : undefined}
+                    isStreaming={isLastMessage && isStreaming}
+                  />
+                </div>
               </div>
             </div>
           );

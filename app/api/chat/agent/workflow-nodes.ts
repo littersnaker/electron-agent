@@ -1,5 +1,5 @@
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
-import { execSync, spawn } from "child_process";
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { z } from "zod";
@@ -19,6 +19,12 @@ import {
   ReviewPayload,
 } from "./types";
 import { searchProjectIndex } from "@/app/lib/server/workspace-store";
+import {
+  getPersistentTerminalSession,
+  resumePersistentTerminalSession,
+  startPersistentTerminalSession,
+} from "./persistent-terminal-session";
+import { CliPromptText, PlannerPromptText, ReviewerPromptText } from "../prompt";
 
 /*
  * 这是整套多 Agent 工作流的“行为实现文件”。
@@ -225,27 +231,6 @@ function validateTerminalCommand(command: string): string | null {
   return null;
 }
 
-function createInteractiveRequestId(): string {
-  return `interactive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function normalizeCommandForAutoAnswer(command: string): string {
-  let nextCommand = command;
-  if (
-    /^(npm create|npx create-[\w-]+|pnpm dlx)\b/i.test(nextCommand) &&
-    !/\s(--yes|-y)\b/i.test(nextCommand)
-  ) {
-    nextCommand += " --yes";
-  }
-  if (
-    /\bcreate-next-app\b/i.test(nextCommand) &&
-    !/\s(--yes|-y)\b/i.test(nextCommand)
-  ) {
-    nextCommand += " --yes";
-  }
-  return nextCommand;
-}
-
 function extractInteractiveReplyInstruction(
   input: string,
 ): InteractiveReplyInstruction | null {
@@ -253,58 +238,13 @@ function extractInteractiveReplyInstruction(
   const modeMatch = input.match(/\bmode=(auto|llm|user)\b/i);
   if (!requestIdMatch || !modeMatch) return null;
 
-  const answerMatch = input.match(/\banswer=([^\n]+)$/i);
+  const answerMatch = input.match(/\banswer=([^\n]*)$/i);
+  const rawAnswer = answerMatch?.[1] ?? undefined;
   return {
     requestId: requestIdMatch[1].trim(),
     mode: modeMatch[1].toLowerCase() as InteractiveResponseMode,
-    answer: answerMatch?.[1]?.trim(),
+    answer: rawAnswer === "__ENTER__" ? "" : rawAnswer,
   };
-}
-
-function inferPromptOptions(prompt: string): Array<{ label: string; value: string }> {
-  if (/\((?:y\/n|Y\/n|yes\/no)\)/.test(prompt) || /\b(ok to proceed|continue)\b/i.test(prompt)) {
-    return [
-      { label: "是", value: "yes" },
-      { label: "否", value: "no" },
-    ];
-  }
-
-  const optionMatches = Array.from(prompt.matchAll(/["“](.+?)["”]/g))
-    .map((match) => match[1]?.trim())
-    .filter(Boolean);
-
-  return Array.from(new Set(optionMatches)).slice(0, 4).map((option) => ({
-    label: option,
-    value: option,
-  }));
-}
-
-function detectInteractivePrompt(output: string): string | null {
-  const trimmedOutput = output.trim();
-  if (!trimmedOutput) return null;
-
-  const promptPatterns = [
-    /\? [^\n\r]+/g,
-    /Ok to proceed\?[\s\S]{0,80}/gi,
-    /Would you like to continue\?[\s\S]{0,80}/gi,
-    /Need to install the following packages:[\s\S]{0,200}?Ok to proceed\?[\s\S]{0,40}/gi,
-    /Select an option[\s\S]{0,200}/gi,
-    /Pick an option[\s\S]{0,200}/gi,
-    /Would you like[\s\S]{0,120}\?/gi,
-  ];
-
-  for (const pattern of promptPatterns) {
-    const matches = trimmedOutput.match(pattern);
-    if (matches?.length) {
-      return matches[matches.length - 1].trim();
-    }
-  }
-
-  const lastLines = trimmedOutput
-    .split(/\r?\n/)
-    .slice(-8)
-    .join("\n");
-  return /\?$/.test(lastLines.trim()) ? lastLines.trim() : null;
 }
 
 async function buildInteractiveAnswerByLlm(
@@ -315,8 +255,7 @@ async function buildInteractiveAnswerByLlm(
   const response = await invokeQwen(state, [
     {
       role: "system",
-      content:
-        "你是 CLI Interactive Manager。请根据当前命令和交互提示，给出最短、最稳妥的一行回答。只输出回答本身，不要解释，不要 Markdown。",
+      content: CliPromptText,
     },
     {
       role: "user",
@@ -378,139 +317,65 @@ async function runPtyLikeCommand(
   const latestUserRequest = getLatestUserRequest(state);
   const replyInstruction = extractInteractiveReplyInstruction(latestUserRequest);
   const pendingRequest = state.interactiveRequest;
-  const effectiveCommand =
-    replyInstruction?.mode === "auto" ? normalizeCommandForAutoAnswer(command) : command;
+  const tokenUsage = createEmptyTokenUsage();
 
-  return new Promise((resolve) => {
-    const tokenUsage = createEmptyTokenUsage();
-    const child = spawn(effectiveCommand, {
-      cwd: workingDir || process.cwd(),
-      shell: process.platform === "win32" ? "powershell.exe" : true,
-      stdio: "pipe",
-      windowsHide: true,
-    });
+  if (
+    replyInstruction &&
+    pendingRequest &&
+    replyInstruction.requestId === pendingRequest.id
+  ) {
+    let answerToWrite = "";
+    if (replyInstruction.mode === "user") {
+      answerToWrite = replyInstruction.answer ?? "";
+    } else if (replyInstruction.mode === "auto") {
+      answerToWrite = pendingRequest.options[0]?.value || "yes";
+    } else if (replyInstruction.mode === "llm") {
+      const { answer, tokenUsage: llmUsage } = await buildInteractiveAnswerByLlm(
+        state,
+        pendingRequest.command,
+        pendingRequest.prompt,
+      );
+      const mergedUsage = mergeTokenUsage(tokenUsage, llmUsage);
+      tokenUsage.prompt = mergedUsage.prompt;
+      tokenUsage.completion = mergedUsage.completion;
+      tokenUsage.total = mergedUsage.total;
+      answerToWrite = answer || "yes";
+    }
 
-    let output = "";
-    let settled = false;
-    let answeredPrompt = false;
-    let timedOut = false;
-
-    const finish = (result: TerminalCommandOutcome) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
+    const resumed = await resumePersistentTerminalSession(
+      pendingRequest.id,
+      answerToWrite,
+    );
+    return {
+      output: truncateText(resumed.output, 4000),
+      mode: "pty",
+      interactiveRequest: resumed.interactiveRequest,
+      tokenUsage,
     };
+  }
 
-    const handlePromptIfNeeded = async () => {
-      if (answeredPrompt || settled) return;
-      const detectedPrompt = detectInteractivePrompt(output);
-      if (!detectedPrompt) return;
-
-      let answerToWrite = "";
-      if (
-        replyInstruction &&
-        pendingRequest &&
-        replyInstruction.requestId === pendingRequest.id
-      ) {
-        if (replyInstruction.mode === "user" && replyInstruction.answer) {
-          answerToWrite = replyInstruction.answer;
-        } else if (replyInstruction.mode === "auto") {
-          answerToWrite = inferPromptOptions(detectedPrompt)[0]?.value || "yes";
-        } else if (replyInstruction.mode === "llm") {
-          buildInteractiveAnswerByLlm(state, effectiveCommand, detectedPrompt)
-            .then(({ answer, tokenUsage: llmUsage }) => {
-              const mergedUsage = mergeTokenUsage(tokenUsage, llmUsage);
-              tokenUsage.prompt = mergedUsage.prompt;
-              tokenUsage.completion = mergedUsage.completion;
-              tokenUsage.total = mergedUsage.total;
-              answeredPrompt = true;
-              child.stdin?.write(`${answer}\n`);
-            })
-            .catch(() => {
-              child.kill();
-              finish({
-                output: truncateText(output, 4000),
-                mode: "pty",
-                interactiveRequest: {
-                  id: pendingRequest.id,
-                  command,
-                  prompt: detectedPrompt,
-                  mode: "pty",
-                  suggestedMode: "user",
-                  options: inferPromptOptions(detectedPrompt),
-                },
-                tokenUsage,
-              });
-            });
-          return;
-        }
-      }
-
-      if (answerToWrite) {
-        answeredPrompt = true;
-        child.stdin?.write(`${answerToWrite}\n`);
-        return;
-      }
-
-      child.kill();
-      finish({
-        output: truncateText(output, 4000),
+  if (pendingRequest?.id) {
+    const existingSession = getPersistentTerminalSession(pendingRequest.id);
+    if (existingSession && existingSession.command === command) {
+      return {
+        output: truncateText(
+          existingSession.recentOutput || pendingRequest.prompt,
+          4000,
+        ),
         mode: "pty",
-        interactiveRequest: {
-          id: pendingRequest?.id || createInteractiveRequestId(),
-          command,
-          prompt: detectedPrompt,
-          mode: "pty",
-          suggestedMode: inferPromptOptions(detectedPrompt).length ? "user" : "llm",
-          options: inferPromptOptions(detectedPrompt),
-        },
+        interactiveRequest: existingSession,
         tokenUsage,
-      });
-    };
+      };
+    }
+  }
 
-    child.stdout?.on("data", (chunk: Buffer) => {
-      output += chunk.toString();
-      void handlePromptIfNeeded();
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      output += chunk.toString();
-      void handlePromptIfNeeded();
-    });
-    child.on("error", (error) => {
-      finish({
-        output: `PTY 命令执行失败: ${error.message}`,
-        mode: "pty",
-        interactiveRequest: null,
-        tokenUsage,
-      });
-    });
-    child.on("close", () => {
-      if (timedOut || settled) return;
-      finish({
-        output: output || "PTY 命令执行完成，但没有输出。",
-        mode: "pty",
-        interactiveRequest: null,
-        tokenUsage,
-      });
-    });
-
-    setTimeout(() => {
-      if (settled) return;
-      timedOut = true;
-      child.kill();
-      finish({
-        output: truncateText(output || "PTY 命令执行超时。", 4000),
-        mode: "pty",
-        interactiveRequest: pendingRequest
-          ? {
-              ...pendingRequest,
-              command,
-            }
-          : null,
-        tokenUsage,
-      });
-    }, 60_000);
-  });
+  const started = await startPersistentTerminalSession(command, workingDir, "pty");
+  return {
+    output: truncateText(started.output, 4000),
+    mode: "pty",
+    interactiveRequest: started.interactiveRequest,
+    tokenUsage,
+  };
 }
 
 // 长期摘要只保留高价值结论，不保留所有细节。
@@ -1421,20 +1286,7 @@ export async function planningAgentNode(
   const response = await invokeQwen(state, [
     {
       role: "system",
-      content: `你是 Planning Agent。
-请基于上下文输出严格 JSON 数组，不要输出 Markdown，不要输出额外解释。
-格式必须类似：
-[
-  { "task": "修改登录页", "files": ["Login.tsx"] },
-  { "task": "修改API", "files": ["AuthService.ts"] },
-  { "task": "修改测试", "files": ["login.test.ts"] }
-]
-要求：
-1. 最多输出 ${MAX_PARALLEL_MODIFIERS} 个任务。
-2. 每个任务必须聚焦一个明确子目标。
-3. files 必须是最需要修改的文件路径数组。
-4. 尽量不要让多个任务修改同一个文件，优先按文件边界拆任务，避免后续 Merge Patch 冲突。
-5. 如果无需改代码，输出 []。`,
+      content: PlannerPromptText,
     },
     {
       role: "user",
@@ -1869,17 +1721,7 @@ export async function reviewerAgentNode(
   const response = await invokeQwen(state, [
     {
       role: "system",
-      content: `你是 Reviewer Agent。
-请根据 Planner 任务、Modify 结果和当前文件内容进行审查。
-只输出严格 JSON：
-{
-  "decision": "PASS" | "RETRY",
-  "feedback": "如果需要返工，给出明确、可执行的修改意见；如果通过，也请写简洁结论",
-  "risks": ["风险1", "风险2"],
-  "retryTasks": [0]
-}
-若任务没有完成、文件遗漏、修改方向错误或存在明显风险，请输出 RETRY。
-只有失败的任务才放进 retryTasks，例如只重跑 Task A 就输出 [0]。`,
+      content: ReviewerPromptText,
     },
     {
       role: "user",

@@ -49,3 +49,4 @@ next-env.d.ts
 .agent-data/
 out/
 out-server/
+.trae/*
