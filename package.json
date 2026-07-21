@@ -1,10 +1,14 @@
 {
-  "name": "Agent Workspace",
+  "name": "agent_workspace",
   "version": "1.0.0",
   "private": true,
   "main": ".electron/main.js",
   "author": "white",
   "description": "AI Chat Application",
+   "build": {
+    "productName": "Agent Workspace",
+    "appId": "com.agent.workspace"
+  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",

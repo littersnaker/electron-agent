@@ -1,8 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import {
-  CommandExecutionMode,
-  InteractiveRequest,
-} from "./types";
+import { CommandExecutionMode, InteractivePromptKind, InteractiveRequest } from "./types";
 
 type SessionEventType = "prompt" | "exit" | "error" | "timeout";
 
@@ -18,6 +15,8 @@ type SessionWaiter = {
 };
 
 type PersistentTerminalSession = {
+  allowMultiple: boolean;
+  kind: InteractivePromptKind;
   id: string;
   command: string;
   workingDir: string;
@@ -28,7 +27,7 @@ type PersistentTerminalSession = {
   prompt: string;
   promptRound: number;
   awaitingInput: boolean;
-  options: Array<{ label: string; value: string }>;
+  options: Array<{ label: string; value: string; index: number }>;
   exitCode: number | null;
   closed: boolean;
   waiters: SessionWaiter[];
@@ -51,16 +50,21 @@ function createSessionId(): string {
 }
 
 function truncateOutput(input: string, maxLength = MAX_OUTPUT_LENGTH): string {
-  return input.length > maxLength ? input.slice(input.length - maxLength) : input;
+  return input.length > maxLength
+    ? input.slice(input.length - maxLength)
+    : input;
 }
 
 function inferPromptOptions(
   prompt: string,
-): Array<{ label: string; value: string }> {
-  if (/\((?:y\/n|Y\/n|yes\/no)\)/.test(prompt) || /\b(ok to proceed|continue)\b/i.test(prompt)) {
+): Array<{ label: string; value: string, index: number }> {
+  if (
+    /\((?:y\/n|Y\/n|yes\/no)\)/.test(prompt) ||
+    /\b(ok to proceed|continue)\b/i.test(prompt)
+  ) {
     return [
-      { label: "是", value: "yes" },
-      { label: "否", value: "no" },
+      { label: "是", value: "yes", index: 0 },
+      { label: "否", value: "no", index: 1 },
     ];
   }
 
@@ -71,17 +75,23 @@ function inferPromptOptions(
     value: match[1].trim(),
   }));
   if (numberedOptions.length) {
-    return numberedOptions.slice(0, 6);
+    return numberedOptions.slice(0, 6).map((option, index) => ({
+      ...option,
+      index,
+    }));
   }
 
   const optionMatches = Array.from(prompt.matchAll(/["“](.+?)["”]/g))
     .map((match) => match[1]?.trim())
     .filter(Boolean);
 
-  return Array.from(new Set(optionMatches)).slice(0, 6).map((option) => ({
-    label: option,
-    value: option,
-  }));
+  return Array.from(new Set(optionMatches))
+    .slice(0, 6)
+    .map((option, index) => ({
+      label: option,
+      value: option,
+      index,
+    }));
 }
 
 function detectInteractivePrompt(output: string): string | null {
@@ -108,11 +118,7 @@ function detectInteractivePrompt(output: string): string | null {
     }
   }
 
-  const lastLines = trimmedOutput
-    .split(/\r?\n/)
-    .slice(-12)
-    .join("\n")
-    .trim();
+  const lastLines = trimmedOutput.split(/\r?\n/).slice(-12).join("\n").trim();
   if (/[?:：]\s*$/.test(lastLines) || /\?$/.test(lastLines)) {
     return lastLines;
   }
@@ -120,7 +126,10 @@ function detectInteractivePrompt(output: string): string | null {
   return null;
 }
 
-function notifyWaiters(session: PersistentTerminalSession, event: SessionEvent): void {
+function notifyWaiters(
+  session: PersistentTerminalSession,
+  event: SessionEvent,
+): void {
   const waiters = session.waiters.splice(0, session.waiters.length);
   waiters.forEach((waiter) => {
     if (waiter.timeoutHandle) clearTimeout(waiter.timeoutHandle);
@@ -174,6 +183,8 @@ function buildInteractiveRequest(
     options: session.options,
     promptRound: session.promptRound,
     recentOutput: deliveredOutput || session.prompt,
+    kind: session.kind,
+    allowMultiple: session.allowMultiple,
   };
 }
 
@@ -230,7 +241,9 @@ function waitForNextEvent(
 ): Promise<PersistentTerminalResult> {
   return new Promise((resolve) => {
     const timeoutHandle = setTimeout(() => {
-      session.waiters = session.waiters.filter((waiter) => waiter.resolve !== finish);
+      session.waiters = session.waiters.filter(
+        (waiter) => waiter.resolve !== finish,
+      );
       resolve(
         deliverSessionResult(
           session,
@@ -281,7 +294,9 @@ function attachSessionListeners(session: PersistentTerminalSession): void {
   });
   session.child.on("error", (error) => {
     session.closed = true;
-    session.output = truncateOutput(`${session.output}\nPTY 命令执行失败: ${error.message}`);
+    session.output = truncateOutput(
+      `${session.output}\nPTY 命令执行失败: ${error.message}`,
+    );
     notifyWaiters(session, { type: "error", message: error.message });
     closeSession(session);
   });
@@ -331,6 +346,8 @@ export async function startPersistentTerminalSession(
     waiters: [],
     idleTimeoutHandle: null,
     updatedAt: Date.now(),
+    allowMultiple: false,
+    kind: "multiselect",
   };
 
   sessions.set(sessionId, session);

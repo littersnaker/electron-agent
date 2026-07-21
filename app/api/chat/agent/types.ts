@@ -74,7 +74,7 @@ export interface InteractiveRequest {
   mode: CommandExecutionMode;
   kind: InteractivePromptKind;
   suggestedMode: InteractiveResponseMode;
-  options: InteractiveOption[];
+  options: Array<{ label: string; value: string }>;
   allowMultiple: boolean;
   promptRound: number;
   recentOutput: string;
