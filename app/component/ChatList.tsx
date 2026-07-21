@@ -1,8 +1,7 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import { memo, useEffect, useRef } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import AssistantMessageRow, {
-  type ToolActivity,
-} from "./AssistantMessageRow";
+import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 
 type ToolCall = {
   id: string;
@@ -67,29 +66,18 @@ export default function ChatList({
   agentStatus,
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  const hasInitialScrolled = useRef(false);
 
   useEffect(() => {
-    if (!messages.length || !virtuosoRef.current) return;
+    if (!virtuosoRef.current) return;
 
-    if (!hasInitialScrolled.current) {
-      const timer = window.setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({
-          index: messages.length - 1,
-          align: "end",
-          behavior: "auto",
-        });
-        hasInitialScrolled.current = true;
-      }, 100);
-      return () => window.clearTimeout(timer);
+    if (isStreaming) {
+      virtuosoRef.current.scrollToIndex({
+        index: messages.length - 1,
+        align: "end",
+        behavior: "smooth",
+      });
     }
-
-    virtuosoRef.current.scrollToIndex({
-      index: messages.length - 1,
-      align: "end",
-      behavior: "smooth",
-    });
-  }, [messages.length]);
+  }, [messages.length, messages[messages.length - 1]?.content, isStreaming]);
 
   return (
     <div className="min-h-0 flex-1">
@@ -97,7 +85,7 @@ export default function ChatList({
         ref={virtuosoRef}
         data={messages}
         alignToBottom
-        followOutput={isStreaming ? "smooth" : false}
+        followOutput="smooth"
         increaseViewportBy={{ top: 360, bottom: 360 }}
         overscan={10}
         components={{
@@ -110,7 +98,9 @@ export default function ChatList({
             !isUser &&
             (Boolean(message.content) ||
               (isLastMessage &&
-                (isStreaming || toolActivities.length > 0 || Boolean(agentStatus))));
+                (isStreaming ||
+                  toolActivities.length > 0 ||
+                  Boolean(agentStatus))));
 
           if (isUser) {
             return (
@@ -137,7 +127,7 @@ export default function ChatList({
           return (
             <div className="mb-6 flex items-start gap-3 px-1 sm:px-3">
               <AssistantBadge />
-              <div className="min-w-0 max-w-[calc(100%_-_40px)] flex-1 pt-0.5">
+              <div className="min-w-0 max-w-[calc(100%-40px)] flex-1 pt-0.5">
                 <div
                   className="mb-1.5 text-[11px] font-medium tracking-wide"
                   style={{ color: COLORS.textMuted }}
@@ -164,6 +154,7 @@ export default function ChatList({
             </div>
           );
         }}
+        computeItemKey={(index, item) => `${item.role}-${index}`}
       />
     </div>
   );

@@ -215,6 +215,7 @@ function ToolActivityPanel({
   isStreaming?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
+  // eslint-disable-next-line react-hooks/purity
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -226,7 +227,9 @@ function ToolActivityPanel({
   const completedCount = activities.filter(
     (activity) => activity.status === "completed",
   ).length;
-  const hasRunning = activities.some((activity) => activity.status === "running");
+  const hasRunning = activities.some(
+    (activity) => activity.status === "running",
+  );
   const visibleActivities = activities.slice(-8);
 
   return (
@@ -265,7 +268,10 @@ function ToolActivityPanel({
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-semibold" style={{ color: COLORS.text }}>
+              <span
+                className="text-[13px] font-semibold"
+                style={{ color: COLORS.text }}
+              >
                 Agent 活动
               </span>
               {hasRunning && isStreaming ? (
@@ -276,12 +282,18 @@ function ToolActivityPanel({
                   运行中
                 </span>
               ) : (
-                <span className="text-[10px]" style={{ color: COLORS.textSubtle }}>
+                <span
+                  className="text-[10px]"
+                  style={{ color: COLORS.textSubtle }}
+                >
                   {completedCount}/{activities.length} 已完成
                 </span>
               )}
             </div>
-            <p className="mt-0.5 truncate text-[11px]" style={{ color: COLORS.textMuted }}>
+            <p
+              className="mt-0.5 truncate text-[11px]"
+              style={{ color: COLORS.textMuted }}
+            >
               {agentStatus ||
                 (hasRunning ? "正在执行代码任务" : "本轮工具调用已结束")}
             </p>
@@ -321,7 +333,9 @@ function ToolActivityPanel({
                 key={activity.id}
                 className="activity-enter relative flex gap-3 rounded-[14px] px-2.5 py-2.5"
                 style={{
-                  background: running ? "rgba(10, 132, 255, 0.075)" : "transparent",
+                  background: running
+                    ? "rgba(10, 132, 255, 0.075)"
+                    : "transparent",
                   border: running
                     ? "1px solid rgba(10, 132, 255, 0.16)"
                     : "1px solid transparent",
@@ -438,7 +452,10 @@ function ThinkingSkeleton({ statusText }: { statusText?: string }) {
             style={{ background: COLORS.blue }}
           />
         </span>
-        <span className="text-[12px] font-medium" style={{ color: COLORS.textMuted }}>
+        <span
+          className="text-[12px] font-medium"
+          style={{ color: COLORS.textMuted }}
+        >
           {statusText || "正在分析请求…"}
         </span>
       </div>
@@ -462,10 +479,31 @@ export default function AssistantMessageRow({
   isStreaming = false,
 }: AssistantMessageRowProps) {
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+  const [userCollapsedThinking, setUserCollapsedThinking] = useState(false);
+
   const { thinking, finalText, isThinking } = useMemo(
     () => parseThinkingStream(content),
     [content],
   );
+  useEffect(() => {
+    const thinkIsClose = () => {
+      // 用户自己关闭过，不再自动打开
+      if (userCollapsedThinking) {
+        return;
+      }
+
+      // 正在输出推理
+      if (isThinking && thinking) {
+        setIsThinkingExpanded(true);
+      }
+
+      // 推理结束，有正式答案
+      if (!isThinking && finalText.trim()) {
+        setIsThinkingExpanded(false);
+      }
+    };
+    thinkIsClose();
+  }, [isThinking, thinking, finalText, userCollapsedThinking]);
 
   const hasToolActivity = toolActivities.length > 0;
   const hasVisibleContent = Boolean(thinking || finalText.trim());
@@ -475,7 +513,7 @@ export default function AssistantMessageRow({
   }
 
   return (
-    <div className="flex w-full flex-col gap-3.5">
+    <div className="flex w-full flex-col gap-3.5 ">
       {hasToolActivity && (
         <ToolActivityPanel
           activities={toolActivities}
@@ -486,18 +524,25 @@ export default function AssistantMessageRow({
 
       {thinking && (
         <section
-          className="overflow-hidden rounded-[16px] border"
+          className="overflow-hidden rounded-2xl border transition-[max-height,opacity] duration-300"
           style={{ background: COLORS.material, borderColor: COLORS.border }}
         >
           <button
             type="button"
-            onClick={() => setIsThinkingExpanded((value) => !value)}
+            onClick={() => {
+              setIsThinkingExpanded((value) => !value);
+              // 用户主动操作后锁定
+              setUserCollapsedThinking(true);
+            }}
             className="flex w-full items-center justify-between px-3.5 py-2.5 text-left transition-colors hover:bg-white/[0.035]"
           >
             <div className="flex items-center gap-2">
               <span
                 className="flex h-6 w-6 items-center justify-center rounded-lg"
-                style={{ background: COLORS.materialStrong, color: COLORS.textMuted }}
+                style={{
+                  background: COLORS.materialStrong,
+                  color: COLORS.textMuted,
+                }}
               >
                 <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none">
                   <path
@@ -515,7 +560,10 @@ export default function AssistantMessageRow({
               </span>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-medium" style={{ color: COLORS.text }}>
+                  <span
+                    className="text-[12px] font-medium"
+                    style={{ color: COLORS.text }}
+                  >
                     推理概要
                   </span>
                   {isThinking && (
@@ -525,8 +573,15 @@ export default function AssistantMessageRow({
                     />
                   )}
                 </div>
-                <span className="text-[10px]" style={{ color: COLORS.textSubtle }}>
-                  {isThinkingExpanded ? "收起详情" : "展开查看"}
+                <span
+                  className="text-[10px]"
+                  style={{ color: COLORS.textSubtle }}
+                >
+                  {isThinking
+                    ? "正在思考..."
+                    : isThinkingExpanded
+                      ? "收起详情"
+                      : "查看思考过程"}
                 </span>
               </div>
             </div>
@@ -550,8 +605,11 @@ export default function AssistantMessageRow({
 
           {isThinkingExpanded && (
             <div
-              className="max-h-56 overflow-y-auto border-t px-4 py-3 text-[12px] leading-6"
-              style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
+              className="border-t px-4 py-3 text-[12px] leading-6"
+              style={{
+                borderColor: COLORS.border,
+                color: COLORS.textMuted,
+              }}
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -593,7 +651,10 @@ export default function AssistantMessageRow({
               unwrapDisallowed
               components={{
                 p: ({ children }) => (
-                  <p className="my-2.5 leading-7" style={{ color: COLORS.text }}>
+                  <p
+                    className="my-2.5 leading-7"
+                    style={{ color: COLORS.text }}
+                  >
                     {children}
                   </p>
                 ),

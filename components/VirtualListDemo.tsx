@@ -121,7 +121,7 @@ export default function VirtualListDemo() {
         containerHeight={500}
         renderItem={(item) => (
           <div className="flex items-center gap-4 w-full">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm">
+            <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm">
               {item.name.charAt(item.name.length - 1)}
             </div>
             <div className="flex-1">

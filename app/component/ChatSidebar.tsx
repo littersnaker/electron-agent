@@ -175,7 +175,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
     >
       <div className="px-4 pb-3 pt-4">
         <div className="flex items-center gap-3">
-          <div
+          {/* <div
             className="flex h-9 w-9 items-center justify-center rounded-[11px] border"
             style={{
               background:
@@ -196,7 +196,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                 </linearGradient>
               </defs>
             </svg>
-          </div>
+          </div> */}
           <div className="min-w-0">
             <div className="text-[14px] font-semibold tracking-[-0.01em]" style={{ color: COLORS.text }}>
               Agent Workspace
