@@ -1,22 +1,42 @@
-import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
+import { BaseMessage, ToolMessage } from "@langchain/core/messages";
 import { execSync } from "child_process";
+import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import { z } from "zod";
+import { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { tools } from "../tools";
-import { AgentState } from "./state";
+import { AgentState, ModifyWorkerState } from "./state";
 import {
+  AgentLifecycleEvent,
+  AgentLifecycleSnapshot,
+  AgentLifecycleStatus,
+  AgentRole,
+  DEFAULT_HIGH_LEVEL_PLAN,
+  DEFAULT_MERGE_RESULT,
   DEFAULT_PLANNER_PAYLOAD,
   DEFAULT_REVIEW_PAYLOAD,
+  DEFAULT_VERIFICATION_RESULT,
   CommandExecutionMode,
-  formatPlannerPayload,
+  HighLevelPlanItem,
+  HighLevelPlanPayload,
   InteractiveRequest,
   InteractiveResponseMode,
+  MergeConflict,
+  MergeResult,
   ModifyTaskResult,
+  ModifyWorkerInput,
   PlannerPayload,
   PlanTask,
   PlannerValidationStatus,
   ReviewPayload,
+  VerificationCheckResult,
+  VerificationResult,
+  WorkerFileChange,
+  WorkerMemory,
+  createDefaultWorkerMemory,
+  formatHighLevelPlan,
+  formatPlannerPayload,
 } from "./types";
 import { searchProjectIndex } from "@/app/lib/server/workspace-store";
 import {
@@ -24,7 +44,13 @@ import {
   resumePersistentTerminalSession,
   startPersistentTerminalSession,
 } from "./persistent-terminal-session";
-import { CliPromptText, PlannerPromptText, ReviewerPromptText } from "../prompt";
+import {
+  CliPromptText,
+  HighLevelPlannerPromptText,
+  PlannerPromptText,
+  ReviewerPromptText,
+  WorkerMemoryPromptText,
+} from "../prompt";
 
 /*
  * 这是整套多 Agent 工作流的“行为实现文件”。
@@ -42,20 +68,45 @@ import { CliPromptText, PlannerPromptText, ReviewerPromptText } from "../prompt"
  */
 const QWEN_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-// Planner 最多拆出 3 个子任务，对应 A/B/C 三个并行 Modify 槽位。
-const MAX_PARALLEL_MODIFIERS = 3;
-// Planner 在文件冲突或 schema 失败时最多再重试 2 次。
+// Planner 最多拆出 6 个独立任务，通过 Send 动态并发执行。
+const MAX_PARALLEL_MODIFIERS = 6;
+const MAX_HIGH_LEVEL_ITEMS = 4;
 const MAX_PLANNER_RETRIES = 2;
-// Reviewer 最多允许打回两轮，避免图无限循环。
 const MAX_REVIEW_RETRIES = 2;
-const plannerPayloadSchema = z.array(
-  z.object({
-    task: z.string().min(1),
-    files: z.array(z.string().min(1)).min(1),
-  }),
-).max(MAX_PARALLEL_MODIFIERS);
+const MAX_WORKER_TOOL_ROUNDS = 10;
+const WORKER_MEMORY_COMPRESS_EVERY_ROUNDS = 3;
+const WORKER_MEMORY_MAX_CONTEXT_CHARS = 14_000;
+
+const prioritySchema = z.enum(["high", "medium", "low"]);
+const highLevelPlanSchema = z
+  .array(
+    z.object({
+      id: z.string().min(1),
+      objective: z.string().min(1),
+      scope: z.array(z.string().min(1)).min(1),
+      rationale: z.string().min(1),
+      dependencies: z.array(z.string().min(1)),
+      priority: prioritySchema,
+    }),
+  )
+  .max(MAX_HIGH_LEVEL_ITEMS);
+
+const plannerPayloadSchema = z
+  .array(
+    z.object({
+      id: z.string().min(1),
+      parentId: z.string().min(1),
+      task: z.string().min(1),
+      files: z.array(z.string().min(1)).min(1),
+      reason: z.string().min(1),
+      acceptanceCriteria: z.array(z.string().min(1)).min(1),
+      priority: prioritySchema,
+    }),
+  )
+  .max(MAX_PARALLEL_MODIFIERS);
 
 type AgentRuntimeState = typeof AgentState.State;
+type ModifyWorkerRuntimeState = typeof ModifyWorkerState.State;
 type TokenUsage = { prompt: number; completion: number; total: number };
 type ToolCall = { id?: string; name: string; args: unknown };
 type ToolExecutionResult = {
@@ -63,6 +114,16 @@ type ToolExecutionResult = {
   touchedFiles: string[];
   interactiveRequest: InteractiveRequest | null;
   tokenUsage: TokenUsage;
+};
+
+type WorkerToolRuntime = {
+  workerId: string;
+  slot: number;
+  proposals: Map<string, WorkerFileChange>;
+};
+
+type ToolRuntimeState = AgentRuntimeState & {
+  workerRuntime?: WorkerToolRuntime;
 };
 type InteractiveReplyInstruction = {
   requestId: string;
@@ -72,6 +133,8 @@ type InteractiveReplyInstruction = {
 type TerminalCommandOutcome = {
   output: string;
   mode: CommandExecutionMode;
+  success: boolean;
+  exitCode: number | null;
   interactiveRequest: InteractiveRequest | null;
   tokenUsage: TokenUsage;
 };
@@ -95,6 +158,94 @@ interface QwenChatResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+  };
+}
+
+type LifecycleTracker = {
+  events: AgentLifecycleEvent[];
+  getSnapshot: () => AgentLifecycleSnapshot;
+  transition: (
+    status: AgentLifecycleStatus,
+    detail: string,
+    toolName?: string,
+  ) => AgentLifecycleEvent;
+};
+
+function createLifecycleTracker(
+  agentId: string,
+  role: AgentRole,
+  iteration: number,
+  config?: LangGraphRunnableConfig,
+  slot?: number,
+): LifecycleTracker {
+  const events: AgentLifecycleEvent[] = [];
+  const startedAt = new Date().toISOString();
+  let sequence = 0;
+  let snapshot: AgentLifecycleSnapshot = {
+    agentId,
+    role,
+    status: "CREATED",
+    slot,
+    iteration,
+    detail: "Agent 已创建。",
+    startedAt,
+    updatedAt: startedAt,
+  };
+
+  const transition = (
+    status: AgentLifecycleStatus,
+    detail: string,
+    toolName?: string,
+  ): AgentLifecycleEvent => {
+    const previousStatus = snapshot.status;
+    const createdAt = new Date().toISOString();
+    sequence += 1;
+    const event: AgentLifecycleEvent = {
+      id: `${agentId}:${iteration}:${sequence}:${createdAt}`,
+      agentId,
+      role,
+      status,
+      previousStatus,
+      slot,
+      iteration,
+      sequence,
+      detail,
+      toolName,
+      createdAt,
+    };
+    events.push(event);
+    snapshot = {
+      ...snapshot,
+      status,
+      detail,
+      updatedAt: createdAt,
+      completedAt: status === "COMPLETED" ? createdAt : snapshot.completedAt,
+      failedAt: status === "FAILED" ? createdAt : snapshot.failedAt,
+    };
+    config?.writer?.({ type: "AGENT_LIFECYCLE", payload: event });
+    return event;
+  };
+
+  // CREATED 也作为可观测事件发出。
+  transition("CREATED", "Agent 已创建并进入调度队列。");
+
+  return {
+    events,
+    getSnapshot: () => snapshot,
+    transition,
+  };
+}
+
+function buildLifecycleStateUpdate(
+  tracker: LifecycleTracker,
+): {
+  agentLifecycles: Record<string, AgentLifecycleSnapshot>;
+  agentLifecycleEvents: AgentLifecycleEvent[];
+} {
+  const snapshot = tracker.getSnapshot();
+  return {
+    agentLifecycles: { [snapshot.agentId]: snapshot },
+    agentLifecycleEvents: [...tracker.events],
   };
 }
 
@@ -276,6 +427,7 @@ async function buildInteractiveAnswerByLlm(
 async function runNormalTerminalCommand(
   command: string,
   workingDir: string,
+  timeoutMs = 20_000,
 ): Promise<TerminalCommandOutcome> {
   try {
     return {
@@ -283,9 +435,11 @@ async function runNormalTerminalCommand(
         cwd: workingDir || process.cwd(),
         encoding: "utf-8",
         stdio: "pipe",
-        timeout: 20_000,
+        timeout: timeoutMs,
       }),
       mode: "normal",
+      success: true,
+      exitCode: 0,
       interactiveRequest: null,
       tokenUsage: createEmptyTokenUsage(),
     };
@@ -293,9 +447,12 @@ async function runNormalTerminalCommand(
     if (error instanceof Error && "stdout" in error) {
       const stdout = String((error as { stdout?: string }).stdout || "");
       const stderr = String((error as { stderr?: string }).stderr || "");
+      const status = (error as { status?: number }).status;
       return {
         output: [stdout, stderr].filter(Boolean).join("\n"),
         mode: "normal",
+        success: false,
+        exitCode: typeof status === "number" ? status : 1,
         interactiveRequest: null,
         tokenUsage: createEmptyTokenUsage(),
       };
@@ -303,6 +460,8 @@ async function runNormalTerminalCommand(
     return {
       output: `命令执行失败: ${error instanceof Error ? error.message : String(error)}`,
       mode: "normal",
+      success: false,
+      exitCode: 1,
       interactiveRequest: null,
       tokenUsage: createEmptyTokenUsage(),
     };
@@ -349,6 +508,8 @@ async function runPtyLikeCommand(
     return {
       output: truncateText(resumed.output, 4000),
       mode: "pty",
+      success: resumed.interactiveRequest === null,
+      exitCode: resumed.interactiveRequest === null ? 0 : null,
       interactiveRequest: resumed.interactiveRequest,
       tokenUsage,
     };
@@ -363,6 +524,8 @@ async function runPtyLikeCommand(
           4000,
         ),
         mode: "pty",
+        success: false,
+        exitCode: null,
         interactiveRequest: existingSession,
         tokenUsage,
       };
@@ -373,6 +536,8 @@ async function runPtyLikeCommand(
   return {
     output: truncateText(started.output, 4000),
     mode: "pty",
+    success: started.interactiveRequest === null,
+    exitCode: started.interactiveRequest === null ? 0 : null,
     interactiveRequest: started.interactiveRequest,
     tokenUsage,
   };
@@ -412,6 +577,126 @@ function toConversationText(messages: BaseMessage[], limit = 6): string {
 // 统一截断长文本，避免提示词或最终输出被超长文件内容淹没。
 function truncateText(input: string, maxLength = 5000): string {
   return input.length > maxLength ? `${input.slice(0, maxLength)}\n...` : input;
+}
+
+
+function normalizeMemoryItems(value: unknown, maxItems = 8): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, maxItems);
+}
+
+function parseWorkerMemoryPayload(
+  content: string,
+  previousMemory: WorkerMemory,
+  round: number,
+): WorkerMemory {
+  const trimmed = content.trim();
+  const candidates = [trimmed];
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch) candidates.push(objectMatch[0]);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      return {
+        summary: truncateText(String(parsed.summary || previousMemory.summary), 1200),
+        completedActions: normalizeMemoryItems(parsed.completedActions),
+        pendingActions: normalizeMemoryItems(parsed.pendingActions),
+        keyFiles: normalizeMemoryItems(parsed.keyFiles),
+        recentObservations: normalizeMemoryItems(parsed.recentObservations),
+        compressionCount: previousMemory.compressionCount + 1,
+        lastCompressedRound: round,
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    ...previousMemory,
+    summary: truncateText(
+      [previousMemory.summary, stripThinkContent(content)].filter(Boolean).join("\n"),
+      1200,
+    ),
+    compressionCount: previousMemory.compressionCount + 1,
+    lastCompressedRound: round,
+  };
+}
+
+function shouldCompressWorkerMemory(
+  runtimeMessages: Array<Record<string, unknown>>,
+  toolRound: number,
+  memory: WorkerMemory,
+): boolean {
+  if (toolRound <= memory.lastCompressedRound) return false;
+  const contextSize = JSON.stringify(runtimeMessages).length;
+  return (
+    toolRound - memory.lastCompressedRound >=
+      WORKER_MEMORY_COMPRESS_EVERY_ROUNDS ||
+    contextSize >= WORKER_MEMORY_MAX_CONTEXT_CHARS
+  );
+}
+
+async function compressWorkerMemory(
+  state: AgentRuntimeState,
+  task: PlanTask,
+  currentMemory: WorkerMemory,
+  runtimeMessages: Array<Record<string, unknown>>,
+  toolRound: number,
+): Promise<{ memory: WorkerMemory; tokenUsage: TokenUsage }> {
+  const response = await invokeQwen(state, [
+    { role: "system", content: WorkerMemoryPromptText },
+    {
+      role: "user",
+      content: [
+        `当前任务:\n${JSON.stringify(task, null, 2)}`,
+        `已有 Worker Memory:\n${JSON.stringify(currentMemory, null, 2)}`,
+        `待压缩执行历史:\n${truncateText(
+          runtimeMessages
+            .map(
+              (message) =>
+                `${String(message.role || "unknown")}: ${truncateText(
+                  normalizeContent(message.content),
+                  2500,
+                )}`,
+            )
+            .join("\n\n"),
+          10_000,
+        )}`,
+      ].join("\n\n"),
+    },
+  ]);
+
+  const content = response.choices?.[0]?.message?.content || "";
+  return {
+    memory: parseWorkerMemoryPayload(content, currentMemory, toolRound),
+    tokenUsage: buildTokenUsage(response.usage),
+  };
+}
+
+function buildWorkerContinuationMessage(
+  task: PlanTask,
+  sharedMemory: ModifyWorkerInput["sharedMemory"],
+  workerMemory: WorkerMemory,
+  reviewFeedback: string,
+): Record<string, unknown> {
+  return {
+    role: "user",
+    content: [
+      `继续执行当前独立任务:\n${JSON.stringify(task, null, 2)}`,
+      `只读共享上下文摘要:\n${truncateText(sharedMemory.mergedContext, 3500)}`,
+      `当前 Worker 压缩记忆:\n${JSON.stringify(workerMemory, null, 2)}`,
+      `Reviewer 反馈:\n${reviewFeedback || "暂无"}`,
+      "继续遵守 read -> propose -> get_diff -> apply_file_change 闭环。",
+      "不要声称未调用工具的操作已经完成。",
+    ].join("\n\n"),
+  };
 }
 
 /*
@@ -476,7 +761,123 @@ function extractPlannerJsonArray(content: string): unknown | null {
  *
  * 只有通过这里，后面的并发 Modify 才有意义。
  */
-function parsePlannerPayloadWithSchema(content: string): {
+
+function findHighLevelDependencyCycle(
+  plan: HighLevelPlanPayload,
+): string[] | null {
+  const dependencies = new Map(
+    plan.map((item) => [item.id, item.dependencies]),
+  );
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+
+  const visit = (id: string): string[] | null => {
+    if (visiting.has(id)) {
+      const cycleStart = stack.indexOf(id);
+      return [...stack.slice(cycleStart), id];
+    }
+    if (visited.has(id)) return null;
+
+    visiting.add(id);
+    stack.push(id);
+    for (const dependency of dependencies.get(id) || []) {
+      const cycle = visit(dependency);
+      if (cycle) return cycle;
+    }
+    stack.pop();
+    visiting.delete(id);
+    visited.add(id);
+    return null;
+  };
+
+  for (const item of plan) {
+    const cycle = visit(item.id);
+    if (cycle) return cycle;
+  }
+  return null;
+}
+
+function parseHighLevelPlanWithSchema(content: string): {
+  success: boolean;
+  plan: HighLevelPlanPayload;
+  message: string;
+} {
+  const extracted = extractPlannerJsonArray(content);
+  if (extracted === null) {
+    return {
+      success: false,
+      plan: DEFAULT_HIGH_LEVEL_PLAN,
+      message: "High-Level Planner 输出中未提取到合法 JSON 数组。",
+    };
+  }
+
+  const parsed = highLevelPlanSchema.safeParse(extracted);
+  if (!parsed.success) {
+    return {
+      success: false,
+      plan: DEFAULT_HIGH_LEVEL_PLAN,
+      message: `High-Level Plan Schema 校验失败: ${parsed.error.issues
+        .map((issue) => issue.message)
+        .join("; ")}`,
+    };
+  }
+
+  const ids = new Set(parsed.data.map((item) => item.id.trim()));
+  const duplicatedIds = parsed.data
+    .map((item) => item.id.trim())
+    .filter((id, index, all) => all.indexOf(id) !== index);
+  if (duplicatedIds.length) {
+    return {
+      success: false,
+      plan: DEFAULT_HIGH_LEVEL_PLAN,
+      message: `High-Level Plan 存在重复 id: ${Array.from(
+        new Set(duplicatedIds),
+      ).join(", ")}`,
+    };
+  }
+
+  const invalidDependency = parsed.data.find((item) =>
+    item.dependencies.some((dependency) => !ids.has(dependency)),
+  );
+  if (invalidDependency) {
+    return {
+      success: false,
+      plan: DEFAULT_HIGH_LEVEL_PLAN,
+      message: `High-Level Plan 的依赖引用无效: ${invalidDependency.id}`,
+    };
+  }
+
+  const plan = parsed.data.map((item) => ({
+    id: item.id.trim(),
+    objective: item.objective.trim(),
+    scope: item.scope.map((value) => value.trim()).filter(Boolean),
+    rationale: item.rationale.trim(),
+    dependencies: item.dependencies.map((value) => value.trim()).filter(Boolean),
+    priority: item.priority,
+  }));
+  const dependencyCycle = findHighLevelDependencyCycle(plan);
+  if (dependencyCycle) {
+    return {
+      success: false,
+      plan: DEFAULT_HIGH_LEVEL_PLAN,
+      message: `High-Level Plan 存在循环依赖: ${dependencyCycle.join(" -> ")}`,
+    };
+  }
+
+  return {
+    success: true,
+    plan,
+    message: plan.length
+      ? "High-Level Plan Schema 校验通过。"
+      : "High-Level Planner 判断当前请求无需代码修改。",
+  };
+}
+
+function parsePlannerPayloadWithSchema(
+  content: string,
+  highLevelPlan: HighLevelPlanPayload,
+): {
   success: boolean;
   tasks: PlannerPayload;
   message: string;
@@ -486,7 +887,7 @@ function parsePlannerPayloadWithSchema(content: string): {
     return {
       success: false,
       tasks: DEFAULT_PLANNER_PAYLOAD,
-      message: "Planner 输出中未提取到合法 JSON 数组。",
+      message: "Task Planner 输出中未提取到合法 JSON 数组。",
     };
   }
 
@@ -495,40 +896,74 @@ function parsePlannerPayloadWithSchema(content: string): {
     return {
       success: false,
       tasks: DEFAULT_PLANNER_PAYLOAD,
-      message: `Planner JSON Schema 校验失败: ${parsedResult.error.issues
+      message: `Task Planner JSON Schema 校验失败: ${parsedResult.error.issues
         .map((issue) => issue.message)
         .join("; ")}`,
     };
   }
 
-  const tasks = parsedResult.data
-    .map((task) => ({
-      task: task.task.trim(),
-      files: task.files.map((file) => file.trim()).filter(Boolean),
-    }))
-    .filter((task) => task.task && (task.files.length > 0 || parsedResult.data.length === 0))
-    .slice(0, MAX_PARALLEL_MODIFIERS);
-
   if (parsedResult.data.length === 0) {
     return {
       success: true,
       tasks: DEFAULT_PLANNER_PAYLOAD,
-      message: "Planner JSON Schema 校验通过，当前请求无需拆分修改任务。",
+      message: "Task Planner Schema 校验通过，当前请求无需拆分修改任务。",
     };
   }
 
-  if (!tasks.length) {
+  const highLevelIds = new Set(highLevelPlan.map((item) => item.id));
+  if (highLevelIds.size === 0) {
     return {
       success: false,
       tasks: DEFAULT_PLANNER_PAYLOAD,
-      message: "Planner JSON 通过解析，但没有得到可执行任务。",
+      message: "High-Level Plan 为空，但 Task Planner 返回了修改任务。",
+    };
+  }
+
+  const normalizedTasks = parsedResult.data.map((task) => ({
+    id: task.id.trim(),
+    parentId: task.parentId.trim(),
+    task: task.task.trim(),
+    files: Array.from(
+      new Set(task.files.map((file) => file.trim()).filter(Boolean)),
+    ),
+    reason: task.reason.trim(),
+    acceptanceCriteria: task.acceptanceCriteria
+      .map((item) => item.trim())
+      .filter(Boolean),
+    priority: task.priority,
+  }));
+
+  const duplicatedTaskIds = normalizedTasks
+    .map((task) => task.id)
+    .filter((id, index, all) => all.indexOf(id) !== index);
+  if (duplicatedTaskIds.length) {
+    return {
+      success: false,
+      tasks: DEFAULT_PLANNER_PAYLOAD,
+      message: `Task Planner 存在重复任务 id: ${Array.from(
+        new Set(duplicatedTaskIds),
+      ).join(", ")}`,
+    };
+  }
+
+  const invalidParent = normalizedTasks.find(
+    (task) =>
+      task.parentId !== "fallback" &&
+      highLevelIds.size > 0 &&
+      !highLevelIds.has(task.parentId),
+  );
+  if (invalidParent) {
+    return {
+      success: false,
+      tasks: DEFAULT_PLANNER_PAYLOAD,
+      message: `Task Planner 的 parentId 无法对应 High-Level Plan: ${invalidParent.id}`,
     };
   }
 
   return {
     success: true,
-    tasks,
-    message: "Planner JSON Schema 校验通过。",
+    tasks: normalizedTasks.slice(0, MAX_PARALLEL_MODIFIERS),
+    message: "Task Planner JSON Schema 校验通过。",
   };
 }
 
@@ -564,7 +999,11 @@ function safeParseReviewPayload(content: string): ReviewPayload {
     try {
       const parsed = JSON.parse(candidate) as Partial<ReviewPayload>;
       const decision =
-        parsed.decision === "RETRY" ? "RETRY" : DEFAULT_REVIEW_PAYLOAD.decision;
+        parsed.decision === "RETRY"
+          ? "RETRY"
+          : parsed.decision === "FAIL"
+            ? "FAIL"
+            : DEFAULT_REVIEW_PAYLOAD.decision;
       const feedback = typeof parsed.feedback === "string" ? parsed.feedback : "";
       const risks = Array.isArray(parsed.risks)
         ? parsed.risks.map(String)
@@ -598,7 +1037,7 @@ function normalizePlannerTasks(tasks: PlannerPayload): PlannerPayload {
         return true;
       });
       return {
-        task: task.task,
+        ...task,
         files: uniqueFiles,
       };
     })
@@ -612,6 +1051,7 @@ function buildSingleAgentFallbackPlan(state: AgentRuntimeState): PlannerPayload 
   const collectedFiles = [
     ...(state.plannerOutput || []).flatMap((task: { files: string[] }) => task.files),
     ...extractCandidatePaths(getLatestUserRequest(state)),
+    ...extractCandidatePaths(state.mergedContext || ""),
   ];
   const uniqueFiles = Array.from(
     new Set(collectedFiles.map((file) => file.trim()).filter(Boolean)),
@@ -619,8 +1059,13 @@ function buildSingleAgentFallbackPlan(state: AgentRuntimeState): PlannerPayload 
 
   return [
     {
+      id: "fallback_single_agent",
+      parentId: "fallback",
       task: `单 Agent 降级执行：${getLatestUserRequest(state)}`,
       files: uniqueFiles,
+      reason: "Planner 多次无法生成安全的并发任务，降级为单 Worker 串行处理。",
+      acceptanceCriteria: ["在单个 Worker 内完成用户需求并通过统一 Review"],
+      priority: "high",
     },
   ];
 }
@@ -682,65 +1127,192 @@ function extractCandidatePaths(input: string): string[] {
   );
 }
 
-// 按槽位取出 Planner 分配好的任务。
-function getPlanTask(state: AgentRuntimeState, slot: number): PlanTask | null {
-  return state.plannerOutput?.[slot] || null;
-}
-
-// 把单个 Modify 槽位的执行结果收敛成统一结构，便于后续 Merge / Review / Verify。
+// 把单个并发 Worker 的执行结果收敛成统一结构。
 function buildModifyResult(
+  workerId: string,
   slot: number,
-  task: PlanTask | null,
+  task: PlanTask,
   summary: string,
-  status: "pending" | "done" | "skipped" | "blocked",
-  touchedFiles: string[] = [],
+  status: ModifyTaskResult["status"],
+  fileChanges: WorkerFileChange[],
+  workerMemory: WorkerMemory,
+  lifecycle: AgentLifecycleSnapshot,
+  lifecycleEvents: AgentLifecycleEvent[],
+  interactiveRequest: InteractiveRequest | null = null,
 ): ModifyTaskResult {
   return {
+    workerId,
     slot,
-    task: task?.task || `空任务槽位 ${slot + 1}`,
-    files: task?.files || [],
+    task: task.task,
+    taskId: task.id,
+    files: task.files,
     summary,
-    touchedFiles,
+    touchedFiles: Array.from(
+      new Set(fileChanges.map((change) => change.filePath)),
+    ),
+    fileChanges,
+    workerMemory,
+    lifecycle,
+    lifecycleEvents,
+    interactiveRequest,
     status,
   };
 }
 
-// 给 Merge Patch、Reviewer、Final Report 提供统一的人类可读结果文本。
+// 给 Merge、Reviewer、Final Report 提供统一的人类可读结果文本。
 function formatModifyResults(results: ModifyTaskResult[]): string {
-  if (!results.length) return "暂无 Modify 结果。";
+  if (!results.length) return "暂无 Modify Worker 结果。";
 
-  return results
-    .map(
-      (result) =>
-        `槽位 ${result.slot + 1}: ${result.task}\n状态: ${result.status}\n文件: ${
-          result.files.length ? result.files.join(", ") : "未指定"
-        }\n总结: ${result.summary}`,
-    )
+  return [...results]
+    .sort((left, right) => left.slot - right.slot)
+    .map((result) => {
+      const readyCount = result.fileChanges.filter((item) => item.ready).length;
+      return [
+        `Worker: ${result.workerId}`,
+        `槽位 ${result.slot + 1}: ${result.task}`,
+        `状态: ${result.status}`,
+        `计划文件: ${result.files.length ? result.files.join(", ") : "未指定"}`,
+        `实际提案: ${result.touchedFiles.length ? result.touchedFiles.join(", ") : "无"}`,
+        `待合并变更: ${readyCount}/${result.fileChanges.length}`,
+        `Memory 压缩次数: ${result.workerMemory.compressionCount}`,
+        `生命周期: ${result.lifecycle.status}`,
+        `总结: ${result.summary}`,
+      ].join("\n");
+    })
     .join("\n\n");
 }
 
-// 把相对路径转成当前工作目录下的绝对路径。
-// 同时兼容用户直接传进来的 Windows 绝对路径。
-async function getSafePath(filePath: string, workingDir: string): Promise<string> {
-  const rootPath = workingDir || process.cwd();
-  if (path.isAbsolute(filePath)) return path.normalize(filePath);
-  const normalizedPath = filePath.replace(/^(\.\/|\/)/, "");
-  return path.join(rootPath, normalizedPath);
+function normalizeFileKey(filePath: string): string {
+  const normalized = path.normalize(filePath).replace(/\\/g, "/").replace(/^\.\//, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-// 从本地磁盘安全读取文件。
-// 这里不抛异常，而是返回“可读错误文本”，方便继续喂给模型判断下一步。
+function hashContent(content: string | null): string {
+  return createHash("sha256")
+    .update(content === null ? "<FILE_NOT_EXISTS>" : content)
+    .digest("hex");
+}
+
+// 把路径限制在当前项目工作目录内，避免 Worker 通过 ../ 或绝对路径越界写入。
+async function getSafePath(filePath: string, workingDir: string): Promise<string> {
+  const rootPath = path.resolve(workingDir || process.cwd());
+  const normalizedInput = filePath.trim();
+  const candidatePath = path.isAbsolute(normalizedInput)
+    ? path.resolve(normalizedInput)
+    : path.resolve(rootPath, normalizedInput.replace(/^(\.\/|\/)/, ""));
+  const relativePath = path.relative(rootPath, candidatePath);
+  const outsideRoot =
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath);
+
+  if (outsideRoot) {
+    throw new Error(`路径越界，拒绝访问项目目录之外的文件: ${filePath}`);
+  }
+  return candidatePath;
+}
+
+async function readRawFile(
+  filePath: string,
+  workingDir: string,
+): Promise<{ exists: boolean; content: string | null }> {
+  const safePath = await getSafePath(filePath, workingDir);
+  if (!fs.existsSync(safePath)) return { exists: false, content: null };
+  return { exists: true, content: fs.readFileSync(safePath, "utf-8") };
+}
+
+// Worker 读取文件时优先读取自己的内存提案，避免同一 Worker 多轮修改丢失上下文。
 async function readFileFromLocalDisk(
   filePath: string,
   workingDir: string,
+  proposals?: Map<string, WorkerFileChange>,
 ): Promise<string> {
   try {
-    const safePath = await getSafePath(filePath, workingDir);
-    if (!fs.existsSync(safePath)) return `未找到文件: ${filePath}`;
-    return fs.readFileSync(safePath, "utf-8");
+    const staged = proposals?.get(normalizeFileKey(filePath));
+    if (staged) return staged.proposedContent;
+
+    const file = await readRawFile(filePath, workingDir);
+    return file.exists ? file.content || "" : `未找到文件: ${filePath}`;
   } catch (error) {
     return `读取失败: ${error instanceof Error ? error.message : String(error)}`;
   }
+}
+
+function buildSimpleDiff(oldText: string, newText: string): string {
+  const oldContent = oldText.split("\n");
+  const newContent = newText.split("\n");
+  const maxLen = Math.max(oldContent.length, newContent.length);
+  const diffLines: string[] = [];
+
+  for (let index = 0; index < maxLen; index += 1) {
+    const oldLine = oldContent[index];
+    const newLine = newContent[index];
+    if (oldLine === newLine) continue;
+    if (oldLine !== undefined) diffLines.push(`- ${index + 1}: ${oldLine}`);
+    if (newLine !== undefined) diffLines.push(`+ ${index + 1}: ${newLine}`);
+  }
+
+  return diffLines.length ? truncateText(diffLines.join("\n"), 8000) : "无差异";
+}
+
+async function stageWorkerFileChange(
+  filePath: string,
+  fileContent: string,
+  workingDir: string,
+  runtime: WorkerToolRuntime,
+): Promise<string> {
+  const key = normalizeFileKey(filePath);
+  const existing = runtime.proposals.get(key);
+  const base = existing
+    ? {
+        exists: existing.baseExists,
+        content: existing.baseContent,
+        contentHash: existing.baseContentHash,
+      }
+    : await readRawFile(filePath, workingDir).then((file) => ({
+        exists: file.exists,
+        content: file.content,
+        contentHash: hashContent(file.content),
+      }));
+
+  runtime.proposals.set(key, {
+    workerId: runtime.workerId,
+    slot: runtime.slot,
+    filePath,
+    baseExists: base.exists,
+    baseContent: base.content,
+    baseContentHash: base.contentHash,
+    proposedContentHash: hashContent(fileContent),
+    proposedContent: fileContent,
+    ready: existing?.ready || false,
+    sourceWorkerIds: [runtime.workerId],
+    sourceSlots: [runtime.slot],
+    mergeStrategy: "single",
+  });
+
+  return `已在 ${runtime.workerId} 独立上下文中暂存变更: ${filePath}。正式文件尚未写入，将由 Merge 节点统一处理。`;
+}
+
+async function getWorkerDiff(
+  filePath: string,
+  workingDir: string,
+  runtime: WorkerToolRuntime,
+): Promise<string> {
+  const change = runtime.proposals.get(normalizeFileKey(filePath));
+  if (!change) return `当前 Worker 未找到待合并变更: ${filePath}`;
+  return buildSimpleDiff(change.baseContent || "", change.proposedContent);
+}
+
+function markWorkerFileReady(
+  filePath: string,
+  runtime: WorkerToolRuntime,
+): string {
+  const key = normalizeFileKey(filePath);
+  const change = runtime.proposals.get(key);
+  if (!change) return `当前 Worker 未找到待应用变更: ${filePath}`;
+
+  runtime.proposals.set(key, { ...change, ready: true });
+  return `已将 ${filePath} 加入 Merge 队列；并发 Worker 不直接覆盖正式工作区。`;
 }
 
 // 目录预览工具，给 FileAgent / Modify Agent 一个快速“看目录结构”的能力。
@@ -825,12 +1397,15 @@ async function runTerminalCommand(
   command: string,
   workingDir: string,
   state: AgentRuntimeState,
+  timeoutMs = 20_000,
 ): Promise<TerminalCommandOutcome> {
   const validationError = validateTerminalCommand(command);
   if (validationError) {
     return {
       output: validationError,
       mode: "normal",
+      success: false,
+      exitCode: null,
       interactiveRequest: null,
       tokenUsage: createEmptyTokenUsage(),
     };
@@ -840,7 +1415,7 @@ async function runTerminalCommand(
   if (mode === "pty") {
     return runPtyLikeCommand(command, workingDir, state);
   }
-  return runNormalTerminalCommand(command, workingDir);
+  return runNormalTerminalCommand(command, workingDir, timeoutMs);
 }
 
 // 对 `.pending` 版本和正式文件做简化 diff。
@@ -922,7 +1497,7 @@ async function buildFilePreview(
  */
 async function executeSingleTool(
   toolCall: ToolCall,
-  state: AgentRuntimeState,
+  state: ToolRuntimeState,
 ): Promise<ToolExecutionResult> {
   const args = (toolCall.args as Record<string, string>) || {};
   const currentWorkingDir = state.workingDir || process.cwd();
@@ -979,7 +1554,13 @@ async function executeSingleTool(
     case "read_file_from_disk":
       return {
         messages: [
-          makeMessage(await readFileFromLocalDisk(filePath, currentWorkingDir)),
+          makeMessage(
+            await readFileFromLocalDisk(
+              filePath,
+              currentWorkingDir,
+              state.workerRuntime?.proposals,
+            ),
+          ),
         ],
         touchedFiles: [],
         interactiveRequest: null,
@@ -988,9 +1569,7 @@ async function executeSingleTool(
     case "read_pdf_from_disk":
       return {
         messages: [
-          makeMessage(
-            "当前版本未接入 PDF 解析器，请改用文件文本或后续补充实现。",
-          ),
+          makeMessage("当前版本未接入 PDF 解析器，请改用文件文本或后续补充实现。"),
         ],
         touchedFiles: [],
         interactiveRequest: null,
@@ -1009,20 +1588,26 @@ async function executeSingleTool(
       };
     case "propose_file_change": {
       touchedFiles.add(filePath);
+      const proposalMessage = state.workerRuntime
+        ? await stageWorkerFileChange(
+            filePath,
+            args.fileContent || "",
+            currentWorkingDir,
+            state.workerRuntime,
+          )
+        : await proposeFileChange(
+            filePath,
+            args.fileContent || "",
+            currentWorkingDir,
+          );
+      const diffMessage = state.workerRuntime
+        ? await getWorkerDiff(filePath, currentWorkingDir, state.workerRuntime)
+        : await getDiff(filePath, currentWorkingDir);
+
       return {
         messages: [
-          makeMessage(
-            await proposeFileChange(
-              filePath,
-              args.fileContent || "",
-              currentWorkingDir,
-            ),
-          ),
-          makeMessage(
-            await getDiff(filePath, currentWorkingDir),
-            "get_diff",
-            `${toolCall.id}-diff`,
-          ),
+          makeMessage(proposalMessage),
+          makeMessage(diffMessage, "get_diff", `${toolCall.id}-diff`),
         ],
         touchedFiles: [...touchedFiles],
         interactiveRequest: null,
@@ -1031,7 +1616,13 @@ async function executeSingleTool(
     }
     case "get_diff":
       return {
-        messages: [makeMessage(await getDiff(filePath, currentWorkingDir))],
+        messages: [
+          makeMessage(
+            state.workerRuntime
+              ? await getWorkerDiff(filePath, currentWorkingDir, state.workerRuntime)
+              : await getDiff(filePath, currentWorkingDir),
+          ),
+        ],
         touchedFiles: [],
         interactiveRequest: null,
         tokenUsage: createEmptyTokenUsage(),
@@ -1039,12 +1630,33 @@ async function executeSingleTool(
     case "apply_file_change":
       touchedFiles.add(filePath);
       return {
-        messages: [makeMessage(await applyFileChange(filePath, currentWorkingDir))],
+        messages: [
+          makeMessage(
+            state.workerRuntime
+              ? markWorkerFileReady(filePath, state.workerRuntime)
+              : await applyFileChange(filePath, currentWorkingDir),
+          ),
+        ],
         touchedFiles: [...touchedFiles],
         interactiveRequest: null,
         tokenUsage: createEmptyTokenUsage(),
       };
     case "run_terminal_command": {
+      // 并发 Worker 阶段不允许直接在共享工作区执行终端修改或校验，
+      // 否则 Merge 节点无法保证隔离性和冲突检测的准确性。
+      if (state.workerRuntime) {
+        return {
+          messages: [
+            makeMessage(
+              "并发 Modify Worker 阶段禁止直接执行终端命令。请完成文件提案，Merge 落盘后系统会统一执行 Lint / Build / Test。",
+            ),
+          ],
+          touchedFiles: [],
+          interactiveRequest: null,
+          tokenUsage: createEmptyTokenUsage(),
+        };
+      }
+
       const outcome = await runTerminalCommand(
         args.command || "",
         currentWorkingDir,
@@ -1087,7 +1699,7 @@ async function executeSingleTool(
  */
 async function executeToolBatch(
   toolCalls: ToolCall[],
-  state: AgentRuntimeState,
+  state: ToolRuntimeState,
 ): Promise<ToolExecutionResult> {
   // 只读工具可以并行，写工具保持串行，避免多个改动互相覆盖。
   const readOnlyTools = new Set([
@@ -1097,7 +1709,6 @@ async function executeToolBatch(
     "read_file_from_disk",
     "read_pdf_from_disk",
     "get_local_time",
-    "get_diff",
   ]);
 
   const readOnlyCalls = toolCalls.filter((call) => readOnlyTools.has(call.name));
@@ -1139,12 +1750,17 @@ export async function routerNode(
 ): Promise<Record<string, unknown>> {
   const userRequest = getLatestUserRequest(state);
   return {
+    currentUserRequest: userRequest,
+    verificationResult: DEFAULT_VERIFICATION_RESULT,
     lintSummary: "",
     finalReportSummary: "",
     mergedContext: "",
     searchContext: "",
     memoryContext: "",
     fileContext: "",
+    highLevelPlanRawOutput: "",
+    highLevelPlan: DEFAULT_HIGH_LEVEL_PLAN,
+    highLevelPlanSummary: "",
     plannerOutput: DEFAULT_PLANNER_PAYLOAD,
     plannerRawOutput: "",
     plannerValidationStatus: "pending" as PlannerValidationStatus,
@@ -1152,6 +1768,7 @@ export async function routerNode(
     plannerRetryCount: 0,
     plannerRetryReason: "",
     modifyResults: [],
+    mergeResult: DEFAULT_MERGE_RESULT,
     mergedPatchSummary: "",
     structuredTaskListSummary: "",
     reviewPayload: DEFAULT_REVIEW_PAYLOAD,
@@ -1160,6 +1777,9 @@ export async function routerNode(
     retryTaskSlots: [],
     reviewIteration: 0,
     interactiveRequest: null,
+    touchedFiles: [],
+    agentLifecycles: {},
+    agentLifecycleEvents: [],
     requiresChanges:
       /(改|修改|重构|优化|修复|实现|新增|持久化|planner|agent)/i.test(
         userRequest,
@@ -1171,41 +1791,78 @@ export async function routerNode(
 // 它会结合项目索引和代码库扫描，先告诉后面的 Planner：相关代码可能在哪些地方。
 export async function searchAgentNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  const userRequest = getLatestUserRequest(state);
-  const searchResults = state.projectId
-    ? JSON.stringify(
-        searchProjectIndex(state.projectId, userRequest).slice(0, 8),
-        null,
-        2,
-      )
-    : "当前会话未绑定项目索引。";
-  const codebaseResults = await searchCodebase(
-    userRequest,
-    state.workingDir || process.cwd(),
+  const tracker = createLifecycleTracker(
+    "search_agent",
+    "search_agent",
+    state.reviewIteration || 0,
+    config,
   );
+  tracker.transition("EXECUTING", "正在检索项目索引与代码库。" );
 
-  return {
-    searchContext: [
-      `用户请求:\n${userRequest}`,
-      `项目索引检索:\n${truncateText(searchResults, 3000)}`,
-      `代码库扫描:\n${truncateText(codebaseResults, 3000)}`,
-    ].join("\n\n"),
-  };
+  try {
+    const userRequest = getLatestUserRequest(state);
+    const searchResults = state.projectId
+      ? JSON.stringify(
+          searchProjectIndex(state.projectId, userRequest).slice(0, 8),
+          null,
+          2,
+        )
+      : "当前会话未绑定项目索引。";
+    const codebaseResults = await searchCodebase(
+      userRequest,
+      state.workingDir || process.cwd(),
+    );
+    tracker.transition("COMPLETED", "项目索引与代码库检索完成。" );
+
+    return {
+      searchContext: [
+        `用户请求:\n${userRequest}`,
+        `项目索引检索:\n${truncateText(searchResults, 3000)}`,
+        `代码库扫描:\n${truncateText(codebaseResults, 3000)}`,
+      ].join("\n\n"),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `Search Agent 执行失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      searchContext: tracker.getSnapshot().detail,
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
 }
 
 // MemoryAgent 负责把“历史记忆”和“最近几轮上下文”整理出来。
 // 这样 Planner 不会只看当前一句话，而是知道前面做过什么。
 export async function memoryAgentNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
+  const tracker = createLifecycleTracker(
+    "memory_agent",
+    "memory_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("EXECUTING", "正在整理长期摘要与近期对话上下文。" );
+
+  const memoryContext = [
+    `长期对话记忆:\n${state.summary || "暂无长期记忆。"}`,
+    `近期会话摘要:\n${
+      toConversationText(state.messages, 8) || "暂无近期上下文。"
+    }`,
+  ].join("\n\n");
+  tracker.transition("COMPLETED", "Memory Agent 已完成上下文整理。" );
+
   return {
-    memoryContext: [
-      `长期对话记忆:\n${state.summary || "暂无长期记忆。"}`,
-      `近期会话摘要:\n${
-        toConversationText(state.messages, 8) || "暂无近期上下文。"
-      }`,
-    ].join("\n\n"),
+    memoryContext,
+    ...buildLifecycleStateUpdate(tracker),
   };
 }
 
@@ -1213,106 +1870,263 @@ export async function memoryAgentNode(
 // 如果用户没有给路径，就退回到目录概览，至少让后续节点对项目结构有个感知。
 export async function fileAgentNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  const userRequest = getLatestUserRequest(state);
-  const workingDir = state.workingDir || process.cwd();
-  const candidatePaths = extractCandidatePaths(userRequest).slice(0, 5);
+  const tracker = createLifecycleTracker(
+    "file_agent",
+    "file_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("EXECUTING", "正在读取用户点名路径或项目目录概览。" );
 
-  if (candidatePaths.length === 0) {
-    return {
-      fileContext: `未在用户请求中检测到明确文件路径。\n工作目录结构预览:\n${await listDirectory(
+  try {
+    const userRequest = getLatestUserRequest(state);
+    const workingDir = state.workingDir || process.cwd();
+    const candidatePaths = extractCandidatePaths(userRequest).slice(0, 5);
+
+    if (candidatePaths.length === 0) {
+      const fileContext = `未在用户请求中检测到明确文件路径。\n工作目录结构预览:\n${await listDirectory(
         ".",
         workingDir,
-      )}`,
+      )}`;
+      tracker.transition("COMPLETED", "未检测到明确路径，已返回项目根目录概览。" );
+      return {
+        fileContext,
+        ...buildLifecycleStateUpdate(tracker),
+      };
+    }
+
+    const sections: string[] = [];
+    for (const candidatePath of candidatePaths) {
+      const safePath = await getSafePath(candidatePath, workingDir);
+      if (!fs.existsSync(safePath)) {
+        sections.push(`路径不存在: ${candidatePath}`);
+        continue;
+      }
+
+      const stat = fs.statSync(safePath);
+      if (stat.isDirectory()) {
+        sections.push(
+          `目录 ${candidatePath}:\n${await listDirectory(candidatePath, workingDir)}`,
+        );
+        continue;
+      }
+
+      const content = await readFileFromLocalDisk(candidatePath, workingDir);
+      const preview = content.split("\n").slice(0, 120).join("\n");
+      sections.push(`文件 ${candidatePath} 预览:\n${preview}`);
+    }
+
+    tracker.transition(
+      "COMPLETED",
+      `File Agent 已处理 ${candidatePaths.length} 个候选路径。`,
+    );
+    return {
+      fileContext: sections.join("\n\n"),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `File Agent 执行失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      fileContext: tracker.getSnapshot().detail,
+      ...buildLifecycleStateUpdate(tracker),
     };
   }
-
-  const sections: string[] = [];
-  for (const candidatePath of candidatePaths) {
-    const safePath = await getSafePath(candidatePath, workingDir);
-    if (!fs.existsSync(safePath)) {
-      sections.push(`路径不存在: ${candidatePath}`);
-      continue;
-    }
-
-    const stat = fs.statSync(safePath);
-    if (stat.isDirectory()) {
-      sections.push(
-        `目录 ${candidatePath}:\n${await listDirectory(candidatePath, workingDir)}`,
-      );
-      continue;
-    }
-
-    const content = await readFileFromLocalDisk(candidatePath, workingDir);
-    const preview = content.split("\n").slice(0, 120).join("\n");
-    sections.push(`文件 ${candidatePath} 预览:\n${preview}`);
-  }
-
-  return {
-    fileContext: sections.join("\n\n"),
-  };
 }
 
 // 三个上下文 Agent 的结果会在这里汇总成一份 mergedContext。
 // 后面的 Planner、Modify、Reviewer 基本都吃这份汇总文本。
 export async function mergeContextNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
+  const tracker = createLifecycleTracker(
+    "context_merge",
+    "context_merge",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("EXECUTING", "正在合并 Search、Memory 与 File 上下文。" );
+
   const userRequest = getLatestUserRequest(state);
+  const mergedContext = [
+    `用户请求:\n${userRequest}`,
+    `SearchAgent:\n${state.searchContext || "暂无搜索上下文。"}`,
+    `MemoryAgent:\n${state.memoryContext || "暂无记忆上下文。"}`,
+    `FileAgent:\n${state.fileContext || "暂无文件上下文。"}`,
+  ].join("\n\n");
+  tracker.transition("COMPLETED", "多路上下文合并完成。" );
+
   return {
-    mergedContext: [
-      `用户请求:\n${userRequest}`,
-      `SearchAgent:\n${state.searchContext || "暂无搜索上下文。"}`,
-      `MemoryAgent:\n${state.memoryContext || "暂无记忆上下文。"}`,
-      `FileAgent:\n${state.fileContext || "暂无文件上下文。"}`,
-    ].join("\n\n"),
+    mergedContext,
+    ...buildLifecycleStateUpdate(tracker),
   };
 }
 
 /*
- * Planning Agent 只负责拆任务，不直接动文件。
- *
- * 这里特别强调严格 JSON 输出，是因为它后面要经过：
- * 1. Schema 校验；
- * 2. 文件唯一性检查；
- * 3. 可能的重试、修复、降级。
- *
- * 也就是说，Planner 在这套架构里更像“任务编排器”，不是自由发挥的聊天助手。
+ * Hierarchical Planner 第一层：先形成模块级工作流，不直接猜文件级细节。
+ */
+export async function highLevelPlanningAgentNode(
+  state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
+): Promise<Record<string, unknown>> {
+  const tracker = createLifecycleTracker(
+    "high_level_planner",
+    "high_level_planner",
+    state.plannerRetryCount || 0,
+    config,
+  );
+  tracker.transition("PLANNING", "正在生成模块级 High-Level Plan。");
+
+  try {
+    const response = await invokeQwen(state, [
+      { role: "system", content: HighLevelPlannerPromptText },
+      {
+        role: "user",
+        content: state.mergedContext || getLatestUserRequest(state),
+      },
+    ]);
+    const highLevelPlanRawOutput =
+      response.choices?.[0]?.message?.content || "";
+    const parsed = parseHighLevelPlanWithSchema(highLevelPlanRawOutput);
+
+    if (!parsed.success) {
+      // 第一层失败时保守生成一个 fallback 工作项，让第二层仍可尝试规划。
+      const fallbackPlan: HighLevelPlanPayload = [
+        {
+          id: "fallback",
+          objective: getLatestUserRequest(state),
+          scope: ["用户明确提出的修改范围"],
+          rationale: parsed.message,
+          dependencies: [],
+          priority: "high",
+        },
+      ];
+      tracker.transition(
+        "COMPLETED",
+        "High-Level Plan 解析失败，已生成保守 fallback 工作项。",
+      );
+      return {
+        highLevelPlanRawOutput,
+        highLevelPlan: fallbackPlan,
+        highLevelPlanSummary: [
+          parsed.message,
+          formatHighLevelPlan(fallbackPlan),
+        ].join("\n\n"),
+        tokenUsage: buildTokenUsage(response.usage),
+        ...buildLifecycleStateUpdate(tracker),
+      };
+    }
+
+    tracker.transition(
+      "COMPLETED",
+      `High-Level Planner 已生成 ${parsed.plan.length} 个模块级工作项。`,
+    );
+    return {
+      highLevelPlanRawOutput,
+      highLevelPlan: parsed.plan,
+      highLevelPlanSummary: [parsed.message, formatHighLevelPlan(parsed.plan)].join(
+        "\n\n",
+      ),
+      tokenUsage: buildTokenUsage(response.usage),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `High-Level Planner 执行失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    const fallbackPlan: HighLevelPlanPayload = [
+      {
+        id: "fallback",
+        objective: getLatestUserRequest(state),
+        scope: ["用户明确提出的修改范围"],
+        rationale: "High-Level Planner 调用失败，使用保守降级计划。",
+        dependencies: [],
+        priority: "high",
+      },
+    ];
+    return {
+      highLevelPlan: fallbackPlan,
+      highLevelPlanSummary: formatHighLevelPlan(fallbackPlan),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
+}
+
+/*
+ * Hierarchical Planner 第二层：把 High-Level Plan 转换为可安全并发的叶子任务。
  */
 export async function planningAgentNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  // Planner 只做任务拆分，不直接修改文件。
-  const response = await invokeQwen(state, [
-    {
-      role: "system",
-      content: PlannerPromptText,
-    },
-    {
-      role: "user",
-      content: [
-        state.mergedContext || getLatestUserRequest(state),
-        state.plannerRetryReason
-          ? `上一次规划失败原因:\n${state.plannerRetryReason}`
-          : "",
-        state.plannerRawOutput
-          ? `上一次 Planner 原始输出:\n${state.plannerRawOutput}`
-          : "",
-        `当前已重试次数: ${state.plannerRetryCount || 0}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-    },
-  ]);
+  const tracker = createLifecycleTracker(
+    "task_planner",
+    "task_planner",
+    state.plannerRetryCount || 0,
+    config,
+  );
+  tracker.transition("PLANNING", "正在生成文件级并发叶子任务。");
 
-  const plannerRawOutput = response.choices?.[0]?.message?.content || "";
+  try {
+    const response = await invokeQwen(state, [
+      { role: "system", content: PlannerPromptText },
+      {
+        role: "user",
+        content: [
+          `用户与项目上下文:\n${
+            state.mergedContext || getLatestUserRequest(state)
+          }`,
+          `High-Level Plan:\n${JSON.stringify(
+            state.highLevelPlan || [],
+            null,
+            2,
+          )}`,
+          state.plannerRetryReason
+            ? `上一次规划失败原因:\n${state.plannerRetryReason}`
+            : "",
+          state.plannerRawOutput
+            ? `上一次 Task Planner 原始输出:\n${state.plannerRawOutput}`
+            : "",
+          `当前已重试次数: ${state.plannerRetryCount || 0}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      },
+    ]);
 
-  return {
-    plannerRawOutput,
-    plannerValidationStatus: "pending" as PlannerValidationStatus,
-    plannerValidationMessage: "等待进入 JSON Schema 校验。",
-    tokenUsage: buildTokenUsage(response.usage),
-  };
+    const plannerRawOutput = response.choices?.[0]?.message?.content || "";
+    tracker.transition("COMPLETED", "Task Planner 已生成待校验叶子任务。");
+    return {
+      plannerRawOutput,
+      plannerValidationStatus: "pending" as PlannerValidationStatus,
+      plannerValidationMessage: "等待进入 Task Planner JSON Schema 校验。",
+      tokenUsage: buildTokenUsage(response.usage),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `Task Planner 执行失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return {
+      plannerRawOutput: "",
+      plannerValidationStatus: "schema_invalid" as PlannerValidationStatus,
+      plannerValidationMessage: tracker.getSnapshot().detail,
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
 }
 
 // Planner 第一层正式校验节点。
@@ -1320,7 +2134,10 @@ export async function planningAgentNode(
 export async function plannerSchemaValidationNode(
   state: AgentRuntimeState,
 ): Promise<Record<string, unknown>> {
-  const validationResult = parsePlannerPayloadWithSchema(state.plannerRawOutput || "");
+  const validationResult = parsePlannerPayloadWithSchema(
+    state.plannerRawOutput || "",
+    state.highLevelPlan || [],
+  );
 
   return {
     plannerOutput: validationResult.success ? validationResult.tasks : DEFAULT_PLANNER_PAYLOAD,
@@ -1416,6 +2233,9 @@ export async function structuredTaskListNode(
       `Planner 说明: ${state.plannerValidationMessage || "暂无"}`,
       `Planner 重试次数: ${state.plannerRetryCount || 0}`,
       "",
+      "High-Level Plan:",
+      JSON.stringify(state.highLevelPlan || [], null, 2),
+      "",
       "Structured Task List:",
       JSON.stringify(state.plannerOutput || [], null, 2),
       "",
@@ -1436,88 +2256,123 @@ export async function retryDispatchNode(
 }
 
 /*
- * 这是 Modify A / B / C 的工厂函数。
+ * 动态 Modify Worker。
  *
- * 为什么用工厂？
- * 因为三路 Modify 的逻辑几乎完全一样，唯一差别只是“自己负责哪个槽位”。
- * 用工厂可以保证三路行为一致，避免复制三份大段重复代码。
+ * 每次调用都来自一个独立 Send：
+ * - 只接收自己的 task 和只读 SharedWorkerMemory；
+ * - AI/Tool 消息仅保存在本函数的 runtimeMessages 中；
+ * - 不向主图 messages 写入任何 Worker 消息；
+ * - 文件修改只暂存在 proposals Map，最终由 Merge 节点统一落盘。
  */
-function createModifyAgentNode(slot: number) {
-  return async function modifyAgentNode(
-    state: AgentRuntimeState,
-  ): Promise<Record<string, unknown>> {
-    // 每个 Modify 节点只处理一个 task 槽位，互不抢任务。
-    const task = getPlanTask(state, slot);
-    const isRetryRound = state.reviewDecision === "RETRY";
-    const retryTaskSlots = state.retryTaskSlots || [];
+export async function modifyWorkerNode(
+  state: ModifyWorkerRuntimeState,
+  config?: LangGraphRunnableConfig,
+): Promise<Record<string, unknown>> {
+  const input = state as unknown as ModifyWorkerInput;
+  const { workerId, slot, task, sharedMemory } = input;
+  const tracker = createLifecycleTracker(
+    workerId,
+    "modify_worker",
+    input.reviewIteration || 0,
+    config,
+    slot,
+  );
+  tracker.transition("PLANNING", `正在准备任务 ${task.id} 的独立执行上下文。`);
 
-    if (!state.requiresChanges || !task) {
-      return {
-        modifyResults: [
-          buildModifyResult(
-            slot,
-            task,
-            "当前槽位没有分配任务，跳过执行。",
-            "skipped",
-          ),
-        ],
-      };
-    }
+  const proposals = new Map<string, WorkerFileChange>();
+  const workerRuntime: WorkerToolRuntime = { workerId, slot, proposals };
+  let workerMemory: WorkerMemory = {
+    ...(input.previousMemory || createDefaultWorkerMemory()),
+    completedActions: [...(input.previousMemory?.completedActions || [])],
+    pendingActions: [...(input.previousMemory?.pendingActions || [])],
+    keyFiles: [...(input.previousMemory?.keyFiles || [])],
+    recentObservations: [...(input.previousMemory?.recentObservations || [])],
+  };
 
-    if (isRetryRound && retryTaskSlots.length > 0 && !retryTaskSlots.includes(slot)) {
-      return {
-        modifyResults: [
-          buildModifyResult(
-            slot,
-            task,
-            "本轮 Reviewer 未要求该槽位返工，直接沿用上一轮结果。",
-            "skipped",
-            task.files,
-          ),
-        ],
-      };
-    }
+  const runtimeState = {
+    model: input.model,
+    apiKey: input.apiKey,
+    workingDir: input.workingDir,
+    projectId: input.projectId,
+    interactiveRequest: input.interactiveRequest,
+    messages: [],
+    summary: sharedMemory.summary,
+    mergedContext: sharedMemory.mergedContext,
+    workerRuntime,
+  } as unknown as ToolRuntimeState;
 
-    const graphMessages: BaseMessage[] = [];
-    const runtimeMessages: Array<Record<string, unknown>> = [
-      {
-        role: "user",
-        content: [
-          `用户请求:\n${getLatestUserRequest(state)}`,
-          `整体计划:\n${JSON.stringify(state.plannerOutput || [], null, 2)}`,
-          `当前负责槽位: ${slot + 1}`,
-          `当前任务:\n${JSON.stringify(task, null, 2)}`,
-          `可读计划:\n${formatPlannerPayload(state.plannerOutput || [])}`,
-          `合并上下文:\n${state.mergedContext || "暂无"}`,
-          `Review 轮次: ${state.reviewIteration || 0}`,
-          `Reviewer 反馈:\n${state.reviewFeedback || "暂无反馈"}`,
-          `本轮需返工槽位: ${formatRetryTasks(retryTaskSlots)}`,
-          `待恢复交互请求:\n${
-            state.interactiveRequest
-              ? JSON.stringify(state.interactiveRequest, null, 2)
-              : "当前没有挂起的交互请求"
-          }`,
-          "要求:",
-          "1. 只聚焦当前任务与当前文件列表。",
-          "2. 必须先读后改，不要臆测文件内容。",
-          "3. 尽量限制在当前任务文件内完成，如必须扩散请谨慎说明。",
-          "4. 修改闭环优先走 propose_file_change -> get_diff -> apply_file_change。",
-          "5. 如果终端工具提示需要交互，优先让 Tool Router 处理，不要自己假装已完成。",
-          "6. 完成后输出简洁中文总结。",
-        ].join("\n\n"),
-      },
-    ];
-    const touchedFiles = new Set<string>(task.files);
-    const totalUsage: TokenUsage = { prompt: 0, completion: 0, total: 0 };
+  let runtimeMessages: Array<Record<string, unknown>> = [
+    {
+      role: "user",
+      content: [
+        `用户原始需求:\n${sharedMemory.latestUserRequest}`,
+        `当前 Worker: ${workerId}`,
+        `当前槽位: ${slot + 1}`,
+        `当前独立任务:\n${JSON.stringify(task, null, 2)}`,
+        `High-Level Plan 摘要:\n${
+          sharedMemory.highLevelPlanSummary || "暂无"
+        }`,
+        `共享只读 Memory:\n${sharedMemory.summary || "暂无长期记忆"}`,
+        `合并上下文:\n${truncateText(
+          sharedMemory.mergedContext || "暂无",
+          5000,
+        )}`,
+        `前序 Worker 压缩记忆:\n${JSON.stringify(workerMemory, null, 2)}`,
+        `Review 轮次: ${input.reviewIteration || 0}`,
+        `Reviewer 反馈:\n${input.reviewFeedback || "暂无反馈"}`,
+        "执行要求:",
+        "1. 只处理当前任务，不读取或推测其他 Worker 的消息和执行过程。",
+        "2. 必须先定位并读取真实文件，再生成完整文件内容。",
+        "3. 文件闭环使用 propose_file_change -> get_diff -> apply_file_change。",
+        "4. apply_file_change 只表示加入 Merge 队列，不会立即覆盖正式文件。",
+        "5. 并发 Worker 阶段不要执行终端命令，验证会在 Merge 后统一运行。",
+        "6. 尽量只修改 Planner 分配的文件；确需扩散时必须说明原因。",
+        "7. 达到上下文阈值后系统会压缩本 Worker 历史，不影响其他 Worker。",
+      ].join("\n\n"),
+    },
+  ];
+  const totalUsage = createEmptyTokenUsage();
+  let toolRound = workerMemory.lastCompressedRound || 0;
+  tracker.transition("EXECUTING", `开始执行并发任务 ${task.id}。`);
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+  const buildResultUpdate = (
+    summary: string,
+    status: ModifyTaskResult["status"],
+    interactiveRequest: InteractiveRequest | null = null,
+  ): Record<string, unknown> => {
+    const changes = Array.from(proposals.values()).sort((left, right) =>
+      left.filePath.localeCompare(right.filePath),
+    );
+    const lifecycleUpdate = buildLifecycleStateUpdate(tracker);
+    return {
+      modifyResults: [
+        buildModifyResult(
+          workerId,
+          slot,
+          task,
+          summary,
+          status,
+          changes,
+          workerMemory,
+          tracker.getSnapshot(),
+          [...tracker.events],
+          interactiveRequest,
+        ),
+      ],
+      tokenUsage: totalUsage,
+      ...lifecycleUpdate,
+    };
+  };
+
+  try {
+    for (let attempt = 0; attempt < MAX_WORKER_TOOL_ROUNDS; attempt += 1) {
       const response = await invokeQwen(
-        state,
+        runtimeState,
         [
           {
             role: "system",
             content:
-              "你是 Modify Agent。你只负责被分配到的单个任务槽位，并且需要持续调用工具直到当前槽位任务可以收尾。",
+              "你是独立 Modify Worker。只负责当前 Send 分配的任务，持续调用工具直到形成可交给 Merge Patch Manager 的完整文件提案。禁止引用其他 Worker 的工具消息。",
           },
           ...runtimeMessages,
         ],
@@ -1533,18 +2388,12 @@ function createModifyAgentNode(slot: number) {
       const toolCalls = assistantMessage?.tool_calls || [];
 
       if (toolCalls.length > 0) {
-        const aiMessage = new AIMessage({
-          content: assistantMessage?.content || "",
-          tool_calls: toolCalls.map((toolCall) => ({
-            id: toolCall.id,
-            name: toolCall.function.name,
-            args: JSON.parse(
-              toolCall.function.arguments || "{}",
-            ) as Record<string, unknown>,
-            type: "tool_call" as const,
-          })),
-        });
-        graphMessages.push(aiMessage);
+        const toolNames = toolCalls.map((item) => item.function.name);
+        tracker.transition(
+          "WAITING_TOOL",
+          `正在执行工具: ${toolNames.join(", ")}`,
+          toolNames.join(","),
+        );
         runtimeMessages.push({
           role: "assistant",
           content: assistantMessage?.content || "",
@@ -1559,118 +2408,653 @@ function createModifyAgentNode(slot: number) {
         });
 
         const executed = await executeToolBatch(
-          toolCalls.map((toolCall) => ({
-            id: toolCall.id,
-            name: toolCall.function.name,
-            args: JSON.parse(
-              toolCall.function.arguments || "{}",
-            ) as Record<string, unknown>,
-          })),
-          state,
+          toolCalls.map((toolCall) => {
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(toolCall.function.arguments || "{}") as Record<
+                string,
+                unknown
+              >;
+            } catch {
+              args = {};
+            }
+            return {
+              id: toolCall.id,
+              name: toolCall.function.name,
+              args,
+            };
+          }),
+          runtimeState,
         );
 
-        executed.touchedFiles.forEach((file) => {
-          if (file) touchedFiles.add(file);
-        });
         const mergedToolUsage = mergeTokenUsage(totalUsage, executed.tokenUsage);
         totalUsage.prompt = mergedToolUsage.prompt;
         totalUsage.completion = mergedToolUsage.completion;
         totalUsage.total = mergedToolUsage.total;
 
         executed.messages.forEach((message) => {
-          graphMessages.push(message);
           runtimeMessages.push({
             role: "tool",
             content: normalizeContent(message.content),
             tool_call_id: message.tool_call_id,
           });
         });
+        toolRound += 1;
+        tracker.transition(
+          "EXECUTING",
+          `第 ${toolRound} 轮工具执行完成，继续判断下一步。`,
+        );
 
         if (executed.interactiveRequest) {
-          const blockedSummary = [
-            `槽位 ${slot + 1} 的命令执行被交互式 Prompt 暂停。`,
-            `命令: ${executed.interactiveRequest.command}`,
-            `提示: ${executed.interactiveRequest.prompt}`,
-            "请使用前端按钮选择自动回答、LLM 回答或用户自定义回答后，再继续本轮 Code Agent。",
-          ].join("\n");
-
-          graphMessages.push(new AIMessage({ content: blockedSummary }));
-          return {
-            messages: graphMessages,
-            modifyResults: [
-              buildModifyResult(
-                slot,
-                task,
-                blockedSummary,
-                "blocked",
-                [...touchedFiles],
-              ),
-            ],
-            interactiveRequest: executed.interactiveRequest,
-            touchedFiles: [...touchedFiles],
-            tokenUsage: totalUsage,
+          const decoratedRequest: InteractiveRequest = {
+            ...executed.interactiveRequest,
+            workerId,
+            slot,
           };
+          tracker.transition("BLOCKED", "Worker 正在等待交互式终端输入。");
+          return buildResultUpdate(
+            [
+              `${workerId} 被交互式命令暂停。`,
+              `命令: ${decoratedRequest.command}`,
+              `提示: ${decoratedRequest.prompt}`,
+            ].join("\n"),
+            "blocked",
+            decoratedRequest,
+          );
+        }
+
+        if (
+          shouldCompressWorkerMemory(runtimeMessages, toolRound, workerMemory)
+        ) {
+          tracker.transition(
+            "COMPRESSING",
+            `正在压缩 ${workerId} 的独立工具上下文。`,
+          );
+          try {
+            const compressed = await compressWorkerMemory(
+              runtimeState,
+              task,
+              workerMemory,
+              runtimeMessages,
+              toolRound,
+            );
+            workerMemory = compressed.memory;
+            const mergedCompressionUsage = mergeTokenUsage(
+              totalUsage,
+              compressed.tokenUsage,
+            );
+            totalUsage.prompt = mergedCompressionUsage.prompt;
+            totalUsage.completion = mergedCompressionUsage.completion;
+            totalUsage.total = mergedCompressionUsage.total;
+            runtimeMessages = [
+              buildWorkerContinuationMessage(
+                task,
+                sharedMemory,
+                workerMemory,
+                input.reviewFeedback,
+              ),
+            ];
+            tracker.transition(
+              "EXECUTING",
+              `Worker Memory 第 ${workerMemory.compressionCount} 次压缩完成。`,
+            );
+          } catch (compressionError) {
+            workerMemory = {
+              ...workerMemory,
+              recentObservations: [
+                ...workerMemory.recentObservations,
+                `上下文压缩失败: ${
+                  compressionError instanceof Error
+                    ? compressionError.message
+                    : String(compressionError)
+                }`,
+              ].slice(-8),
+            };
+            tracker.transition(
+              "EXECUTING",
+              "Worker Memory 压缩失败，保留当前上下文继续执行。",
+            );
+          }
         }
         continue;
       }
 
-      const finalContent =
-        assistantMessage?.content?.trim() || `槽位 ${slot + 1} 修改已完成。`;
-      graphMessages.push(new AIMessage({ content: finalContent }));
+      const changes = Array.from(proposals.values()).sort((left, right) =>
+        left.filePath.localeCompare(right.filePath),
+      );
+      const unreadyChanges = changes.filter((change) => !change.ready);
+      const baseSummary =
+        assistantMessage?.content?.trim() || `${workerId} 已完成当前任务。`;
 
-      return {
-        messages: graphMessages,
-        modifyResults: [
-          buildModifyResult(slot, task, finalContent, "done", [...touchedFiles]),
-        ],
-        interactiveRequest: null,
-        touchedFiles: [...touchedFiles],
-        tokenUsage: totalUsage,
-      };
+      if (changes.length === 0) {
+        tracker.transition(
+          "FAILED",
+          "Worker 未生成任何文件提案，无法证明当前修改任务已经完成。",
+        );
+        return buildResultUpdate(
+          `${baseSummary}\n当前任务未产生文件提案。`,
+          "failed",
+        );
+      }
+
+      if (unreadyChanges.length) {
+        tracker.transition(
+          "FAILED",
+          `存在 ${unreadyChanges.length} 个提案未加入 Merge 队列。`,
+        );
+        return buildResultUpdate(
+          `${baseSummary}\n存在 ${unreadyChanges.length} 个提案未调用 apply_file_change，暂不允许 Merge 落盘。`,
+          "failed",
+        );
+      }
+
+      tracker.transition(
+        "READY_TO_MERGE",
+        `已生成 ${changes.length} 个可合并文件提案。`,
+      );
+      tracker.transition(
+        "COMPLETED",
+        `Worker ${workerId} 执行完成，等待 Merge。`,
+      );
+      return buildResultUpdate(baseSummary, "done");
     }
 
-    return {
-      messages: graphMessages,
-      modifyResults: [
-        buildModifyResult(
-          slot,
-          task,
-          "达到最大工具轮次，请结合当前 Reviewer 反馈继续人工复查。",
-          "done",
-          [...touchedFiles],
-        ),
-      ],
-      interactiveRequest: null,
-      touchedFiles: [...touchedFiles],
-      tokenUsage: totalUsage,
-    };
+    tracker.transition("FAILED", "达到最大工具轮次，Worker 未能稳定收尾。");
+    return buildResultUpdate(
+      "达到最大工具轮次，Worker 未能稳定收尾。",
+      "failed",
+    );
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `Worker 执行失败: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return buildResultUpdate(tracker.getSnapshot().detail, "failed");
+  }
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return Array.from(new Set(values)).sort((left, right) => left - right);
+}
+
+type ContiguousLineEdit = {
+  start: number;
+  end: number;
+  replacement: string[];
+};
+
+function computeContiguousLineEdit(
+  baseContent: string,
+  proposedContent: string,
+): ContiguousLineEdit | null {
+  if (baseContent === proposedContent) return null;
+  const baseLines = baseContent.split("\n");
+  const proposedLines = proposedContent.split("\n");
+
+  let prefix = 0;
+  while (
+    prefix < baseLines.length &&
+    prefix < proposedLines.length &&
+    baseLines[prefix] === proposedLines[prefix]
+  ) {
+    prefix += 1;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < baseLines.length - prefix &&
+    suffix < proposedLines.length - prefix &&
+    baseLines[baseLines.length - 1 - suffix] ===
+      proposedLines[proposedLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+
+  return {
+    start: prefix,
+    end: baseLines.length - suffix,
+    replacement: proposedLines.slice(prefix, proposedLines.length - suffix),
   };
 }
 
-// 这三个导出只是把“同一套 Modify 逻辑”绑定到不同槽位。
-// A -> slot 0，B -> slot 1，C -> slot 2。
-export const modifyAgentANode = createModifyAgentNode(0);
-export const modifyAgentBNode = createModifyAgentNode(1);
-export const modifyAgentCNode = createModifyAgentNode(2);
+function lineEditsOverlap(
+  left: ContiguousLineEdit,
+  right: ContiguousLineEdit,
+): boolean {
+  const leftInsertion = left.start === left.end;
+  const rightInsertion = right.start === right.end;
 
-// Merge Patch 在这版架构里不是传统意义的 patch 合并器。
-// 它只负责把三路 Modify 结果汇总起来，交给 Reviewer 做统一审查。
-export async function mergePatchNode(
-  state: AgentRuntimeState,
-): Promise<Record<string, unknown>> {
-  // Merge Patch 不直接改文件，也不尝试自动合并同文件 diff，只负责汇总三路执行结果。
-  const mergedPatchSummary = [
-    `Planner 任务数组:\n${JSON.stringify(state.plannerOutput || [], null, 2)}`,
-    `Modify 汇总:\n${formatModifyResults(state.modifyResults || [])}`,
-    `交互状态:\n${
-      state.interactiveRequest
-        ? JSON.stringify(state.interactiveRequest, null, 2)
-        : "当前没有挂起的交互请求"
-    }`,
-  ].join("\n\n");
+  // 对插入点采用保守判断：只要落在另一修改区间的边界或内部，就拒绝自动合并。
+  if (leftInsertion) {
+    return left.start >= right.start && left.start <= right.end;
+  }
+  if (rightInsertion) {
+    return right.start >= left.start && right.start <= left.end;
+  }
+  return !(left.end <= right.start || right.end <= left.start);
+}
+
+function tryThreeWayMergeChanges(
+  changes: WorkerFileChange[],
+): { merged: WorkerFileChange | null; conflict: MergeConflict | null } {
+  const filePath = changes[0]?.filePath;
+  const workerIds = Array.from(
+    new Set(changes.flatMap((change) => change.sourceWorkerIds)),
+  );
+  const slots = uniqueNumbers(
+    changes.flatMap((change) => change.sourceSlots),
+  );
+
+  if (!filePath || !changes.length) {
+    return {
+      merged: null,
+      conflict: {
+        type: "invalid_patch",
+        filePath,
+        workerIds,
+        slots,
+        message: "Merge 收到空文件提案组。",
+      },
+    };
+  }
+
+  const baseHashes = new Set(changes.map((change) => change.baseContentHash));
+  const baseContents = new Set(
+    changes.map((change) => change.baseContent ?? "<FILE_NOT_EXISTS>"),
+  );
+  if (baseHashes.size !== 1 || baseContents.size !== 1) {
+    return {
+      merged: null,
+      conflict: {
+        type: "base_mismatch",
+        filePath,
+        workerIds,
+        slots,
+        message: `多个 Worker 对 ${filePath} 使用了不同基线，无法三方合并。`,
+      },
+    };
+  }
+
+  const baseContent = changes[0].baseContent;
+  if (baseContent === null) {
+    return {
+      merged: null,
+      conflict: {
+        type: "same_file",
+        filePath,
+        workerIds,
+        slots,
+        message: `多个 Worker 同时创建新文件且内容不同: ${filePath}`,
+      },
+    };
+  }
+
+  const edits = changes
+    .map((change) => ({
+      change,
+      edit: computeContiguousLineEdit(baseContent, change.proposedContent),
+    }))
+    .filter(
+      (item): item is { change: WorkerFileChange; edit: ContiguousLineEdit } =>
+        item.edit !== null,
+    );
+
+  for (let leftIndex = 0; leftIndex < edits.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < edits.length;
+      rightIndex += 1
+    ) {
+      if (lineEditsOverlap(edits[leftIndex].edit, edits[rightIndex].edit)) {
+        return {
+          merged: null,
+          conflict: {
+            type: "overlapping_patch",
+            filePath,
+            workerIds,
+            slots,
+            message: `多个 Worker 对 ${filePath} 的修改区间重叠，拒绝自动合并。`,
+          },
+        };
+      }
+    }
+  }
+
+  const mergedLines = baseContent.split("\n");
+  [...edits]
+    .sort((left, right) => right.edit.start - left.edit.start)
+    .forEach(({ edit }) => {
+      mergedLines.splice(
+        edit.start,
+        edit.end - edit.start,
+        ...edit.replacement,
+      );
+    });
+  const proposedContent = mergedLines.join("\n");
 
   return {
+    merged: {
+      workerId: "merge_agent",
+      slot: Math.min(...slots),
+      filePath,
+      baseExists: changes[0].baseExists,
+      baseContent,
+      baseContentHash: changes[0].baseContentHash,
+      proposedContentHash: hashContent(proposedContent),
+      proposedContent,
+      ready: true,
+      sourceWorkerIds: workerIds,
+      sourceSlots: slots,
+      mergeStrategy: "three_way_disjoint",
+    },
+    conflict: null,
+  };
+}
+
+function resolveSameFileGroups(
+  results: ModifyTaskResult[],
+): {
+  selectedChanges: WorkerFileChange[];
+  conflicts: MergeConflict[];
+  autoMergedFiles: string[];
+  deduplicatedFiles: string[];
+} {
+  const groups = new Map<string, WorkerFileChange[]>();
+  results
+    .flatMap((result) => result.fileChanges.filter((change) => change.ready))
+    .forEach((change) => {
+      const key = normalizeFileKey(change.filePath);
+      groups.set(key, [...(groups.get(key) || []), change]);
+    });
+
+  const selectedChanges: WorkerFileChange[] = [];
+  const conflicts: MergeConflict[] = [];
+  const autoMergedFiles: string[] = [];
+  const deduplicatedFiles: string[] = [];
+
+  groups.forEach((changes) => {
+    if (changes.length === 1) {
+      selectedChanges.push(changes[0]);
+      return;
+    }
+
+    const uniqueByProposedHash = Array.from(
+      new Map(
+        changes.map((change) => [change.proposedContentHash, change]),
+      ).values(),
+    );
+    if (uniqueByProposedHash.length === 1) {
+      const selected = uniqueByProposedHash[0];
+      selectedChanges.push({
+        ...selected,
+        sourceWorkerIds: Array.from(
+          new Set(changes.flatMap((change) => change.sourceWorkerIds)),
+        ),
+        sourceSlots: uniqueNumbers(
+          changes.flatMap((change) => change.sourceSlots),
+        ),
+        mergeStrategy: "identical_deduplicated",
+      });
+      deduplicatedFiles.push(selected.filePath);
+      return;
+    }
+
+    const resolved = tryThreeWayMergeChanges(uniqueByProposedHash);
+    if (resolved.merged) {
+      selectedChanges.push(resolved.merged);
+      autoMergedFiles.push(resolved.merged.filePath);
+      return;
+    }
+    if (resolved.conflict) conflicts.push(resolved.conflict);
+  });
+
+  return {
+    selectedChanges,
+    conflicts,
+    autoMergedFiles,
+    deduplicatedFiles,
+  };
+}
+
+async function detectWorkspaceConflicts(
+  changes: WorkerFileChange[],
+  workingDir: string,
+): Promise<{
+  changesToApply: WorkerFileChange[];
+  alreadyAppliedFiles: string[];
+  conflicts: MergeConflict[];
+}> {
+  const changesToApply: WorkerFileChange[] = [];
+  const alreadyAppliedFiles: string[] = [];
+  const conflicts: MergeConflict[] = [];
+
+  for (const change of changes) {
+    const current = await readRawFile(change.filePath, workingDir);
+    const currentHash = hashContent(current.content);
+
+    if (currentHash === change.proposedContentHash) {
+      alreadyAppliedFiles.push(change.filePath);
+      continue;
+    }
+
+    if (currentHash !== change.baseContentHash) {
+      conflicts.push({
+        type: "workspace_changed",
+        filePath: change.filePath,
+        workerIds: change.sourceWorkerIds,
+        slots: change.sourceSlots,
+        message: `Worker 执行期间正式文件发生变化，拒绝覆盖: ${change.filePath}`,
+      });
+      continue;
+    }
+
+    changesToApply.push(change);
+  }
+
+  return { changesToApply, alreadyAppliedFiles, conflicts };
+}
+
+async function applyMergedChanges(
+  changes: WorkerFileChange[],
+  workingDir: string,
+): Promise<{ appliedFiles: string[]; error: Error | null }> {
+  const backups = new Map<
+    string,
+    { safePath: string; existed: boolean; content: string | null }
+  >();
+  const appliedFiles: string[] = [];
+
+  try {
+    for (const change of changes) {
+      const safePath = await getSafePath(change.filePath, workingDir);
+      const existed = fs.existsSync(safePath);
+      backups.set(change.filePath, {
+        safePath,
+        existed,
+        content: existed ? fs.readFileSync(safePath, "utf-8") : null,
+      });
+
+      fs.mkdirSync(path.dirname(safePath), { recursive: true });
+      fs.writeFileSync(safePath, change.proposedContent, "utf-8");
+      appliedFiles.push(change.filePath);
+    }
+    return { appliedFiles, error: null };
+  } catch (error) {
+    // 尽可能回滚本次 Merge 已写入的文件，避免半合并状态。
+    for (const [filePath, backup] of Array.from(backups.entries()).reverse()) {
+      try {
+        if (backup.existed) {
+          fs.writeFileSync(backup.safePath, backup.content || "", "utf-8");
+        } else if (fs.existsSync(backup.safePath)) {
+          fs.unlinkSync(backup.safePath);
+        }
+      } catch {
+        // 回滚错误会在最终 apply_failed 冲突中体现。
+      }
+      if (!appliedFiles.includes(filePath)) continue;
+    }
+    return {
+      appliedFiles: [],
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+async function mergeParallelWorkerResults(
+  state: AgentRuntimeState,
+): Promise<{ mergeResult: MergeResult; interactiveRequest: InteractiveRequest | null }> {
+  const results = [...(state.modifyResults || [])].sort(
+    (left, right) => left.slot - right.slot,
+  );
+  const blockedResult = results.find((result) => result.status === "blocked");
+  if (blockedResult) {
+    const mergeResult: MergeResult = {
+      ...DEFAULT_MERGE_RESULT,
+      status: "blocked",
+      summary: `并发 Worker 尚未全部完成，${blockedResult.workerId} 正在等待交互。`,
+    };
+    return {
+      mergeResult,
+      interactiveRequest: blockedResult.interactiveRequest || null,
+    };
+  }
+
+  const failedResults = results.filter((result) => result.status === "failed");
+  const workerFailures: MergeConflict[] = failedResults.map((result) => ({
+    type: "worker_failed",
+    workerIds: [result.workerId],
+    slots: [result.slot],
+    message: `${result.workerId} 未能产生可安全合并的完整结果: ${result.summary}`,
+  }));
+
+  const sameFileCheck = resolveSameFileGroups(results);
+  const workspaceCheck = await detectWorkspaceConflicts(
+    sameFileCheck.selectedChanges,
+    state.workingDir || process.cwd(),
+  );
+  const conflicts = [
+    ...workerFailures,
+    ...sameFileCheck.conflicts,
+    ...workspaceCheck.conflicts,
+  ];
+
+  if (conflicts.length) {
+    return {
+      mergeResult: {
+        status: "conflict",
+        appliedFiles: [],
+        alreadyAppliedFiles: workspaceCheck.alreadyAppliedFiles,
+        autoMergedFiles: sameFileCheck.autoMergedFiles,
+        deduplicatedFiles: sameFileCheck.deduplicatedFiles,
+        skippedFiles: sameFileCheck.selectedChanges.map((item) => item.filePath),
+        conflicts,
+        summary: `检测到 ${conflicts.length} 个冲突/失败项，本轮未写入新的正式文件。`,
+      },
+      interactiveRequest: null,
+    };
+  }
+
+  const applyResult = await applyMergedChanges(
+    workspaceCheck.changesToApply,
+    state.workingDir || process.cwd(),
+  );
+  if (applyResult.error) {
+    const slots = uniqueNumbers(
+      workspaceCheck.changesToApply.flatMap(
+        (change) => change.sourceSlots,
+      ),
+    );
+    return {
+      mergeResult: {
+        status: "failed",
+        appliedFiles: [],
+        alreadyAppliedFiles: workspaceCheck.alreadyAppliedFiles,
+        autoMergedFiles: sameFileCheck.autoMergedFiles,
+        deduplicatedFiles: sameFileCheck.deduplicatedFiles,
+        skippedFiles: workspaceCheck.changesToApply.map((item) => item.filePath),
+        conflicts: [
+          {
+            type: "apply_failed",
+            workerIds: Array.from(
+              new Set(
+                workspaceCheck.changesToApply.flatMap(
+                  (change) => change.sourceWorkerIds,
+                ),
+              ),
+            ),
+            slots,
+            message: `Merge 写入失败并已尝试回滚: ${applyResult.error.message}`,
+          },
+        ],
+        summary: "Merge 写入正式工作区失败。",
+      },
+      interactiveRequest: null,
+    };
+  }
+
+  return {
+    mergeResult: {
+      status: "success",
+      appliedFiles: applyResult.appliedFiles,
+      alreadyAppliedFiles: workspaceCheck.alreadyAppliedFiles,
+      autoMergedFiles: sameFileCheck.autoMergedFiles,
+      deduplicatedFiles: sameFileCheck.deduplicatedFiles,
+      skippedFiles: [],
+      conflicts: [],
+      summary: `并发 Merge 完成：新写入 ${applyResult.appliedFiles.length} 个文件，自动三方合并 ${sameFileCheck.autoMergedFiles.length} 个文件，相同提案去重 ${sameFileCheck.deduplicatedFiles.length} 个文件，已处于目标内容 ${workspaceCheck.alreadyAppliedFiles.length} 个文件。`,
+    },
+    interactiveRequest: null,
+  };
+}
+
+// Merge 节点统一负责：合并提案、检测冲突、写入正式文件、汇总结果。
+export async function mergePatchNode(
+  state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
+): Promise<Record<string, unknown>> {
+  const tracker = createLifecycleTracker(
+    `merge_agent_${state.reviewIteration || 0}`,
+    "merge_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition(
+    "MERGING",
+    `正在合并 ${(state.modifyResults || []).length} 个 Worker 结果。`,
+  );
+
+  const { mergeResult, interactiveRequest } =
+    await mergeParallelWorkerResults(state);
+  const touchedFiles = Array.from(
+    new Set([
+      ...mergeResult.appliedFiles,
+      ...mergeResult.alreadyAppliedFiles,
+    ]),
+  );
+  const mergedPatchSummary = [
+    `High-Level Plan:\n${JSON.stringify(state.highLevelPlan || [], null, 2)}`,
+    `Planner 任务数组:\n${JSON.stringify(state.plannerOutput || [], null, 2)}`,
+    `Modify Worker 汇总:\n${formatModifyResults(state.modifyResults || [])}`,
+    `Merge 结果:\n${JSON.stringify(mergeResult, null, 2)}`,
+  ].join("\n\n");
+
+  if (mergeResult.status === "blocked") {
+    tracker.transition("BLOCKED", mergeResult.summary);
+  } else if (
+    mergeResult.status === "conflict" ||
+    mergeResult.status === "failed"
+  ) {
+    tracker.transition("FAILED", mergeResult.summary);
+  } else {
+    tracker.transition("COMPLETED", mergeResult.summary);
+  }
+
+  return {
+    mergeResult,
     mergedPatchSummary,
+    touchedFiles,
+    interactiveRequest,
+    ...buildLifecycleStateUpdate(tracker),
   };
 }
 
@@ -1682,180 +3066,491 @@ export async function mergePatchNode(
  * 2. 具体哪里不够好；
  * 3. 如果要返工，到底返工哪一个任务槽位。
  *
- * 这样就能做到局部返工，而不是让 Modify A/B/C 每次都全量重跑。
+ * 这样就能做到动态 Worker 的局部返工，而不是让全部任务重新执行。
  */
 export async function reviewerAgentNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  // Reviewer 只负责把关：完成度、遗漏文件、方向错误、明显风险。
+  const tracker = createLifecycleTracker(
+    `reviewer_agent_${state.reviewIteration || 0}`,
+    "reviewer_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("REVIEWING", "正在统一审查并发 Worker 与 Merge 结果。" );
+
+  const complete = (update: Record<string, unknown>, detail: string) => {
+    tracker.transition("COMPLETED", detail);
+    return { ...update, ...buildLifecycleStateUpdate(tracker) };
+  };
+  const fail = (update: Record<string, unknown>, detail: string) => {
+    tracker.transition("FAILED", detail);
+    return { ...update, ...buildLifecycleStateUpdate(tracker) };
+  };
+
   if (!state.requiresChanges || !(state.plannerOutput || []).length) {
-    return {
-      reviewPayload: DEFAULT_REVIEW_PAYLOAD,
-      reviewFeedback: "",
-      reviewDecision: "PASS",
-    };
+    return complete(
+      {
+        reviewPayload: DEFAULT_REVIEW_PAYLOAD,
+        reviewFeedback: "",
+        reviewDecision: "PASS",
+        retryTaskSlots: [],
+      },
+      "当前请求无需代码修改，Reviewer 直接通过。",
+    );
   }
 
-  if (state.interactiveRequest) {
+  if (state.interactiveRequest || state.mergeResult?.status === "blocked") {
+    tracker.transition("BLOCKED", "存在待处理交互请求，Reviewer 暂停。" );
     return {
       reviewPayload: {
         decision: "PASS",
-        feedback: "存在待处理的交互式命令请求，本轮先暂停 Reviewer 打回逻辑，等待用户选择继续方式。",
-        risks: ["交互式命令尚未真正完成，当前结果仅为中间态。"],
+        feedback: "存在待处理的交互式命令请求，本轮暂停统一 Review，等待用户继续。",
+        risks: ["至少一个并发 Worker 尚未真正完成，当前结果仅为中间态。"],
         retryTasks: [],
       },
       reviewFeedback: "存在挂起的交互请求，Reviewer 暂不继续返工判断。",
       reviewDecision: "PASS",
+      retryTaskSlots: [],
+      ...buildLifecycleStateUpdate(tracker),
     };
   }
 
-  const reviewFiles = Array.from(new Set(state.touchedFiles || []));
-  const filePreview = await buildFilePreview(
-    reviewFiles.length
-      ? reviewFiles
-      : (state.plannerOutput || []).flatMap((task: PlanTask) => task.files),
-    state.workingDir || process.cwd(),
-    80,
-  );
+  if (
+    state.mergeResult?.status === "conflict" ||
+    state.mergeResult?.status === "failed"
+  ) {
+    const retryTaskSlots = uniqueNumbers(
+      (state.mergeResult.conflicts || []).flatMap((conflict) => conflict.slots),
+    );
+    const feedback = [
+      "Merge 阶段检测到并发冲突或 Worker 失败。",
+      ...(state.mergeResult.conflicts || []).map((item) => item.message),
+    ].join("\n");
 
-  const response = await invokeQwen(state, [
-    {
-      role: "system",
-      content: ReviewerPromptText,
-    },
-    {
-      role: "user",
-      content: [
-        `用户请求:\n${getLatestUserRequest(state)}`,
-        `Planner 任务数组:\n${JSON.stringify(state.plannerOutput || [], null, 2)}`,
-        `Modify 结果:\n${formatModifyResults(state.modifyResults || [])}`,
-        `Merged Patch:\n${state.mergedPatchSummary || "暂无"}`,
-        `当前 Review 轮次: ${state.reviewIteration || 0}`,
-        `当前文件快照:\n${filePreview || "暂无文件快照"}`,
-      ].join("\n\n"),
-    },
-  ]);
+    if (
+      (state.reviewIteration || 0) < MAX_REVIEW_RETRIES &&
+      retryTaskSlots.length
+    ) {
+      return complete(
+        {
+          reviewPayload: {
+            decision: "RETRY",
+            feedback,
+            risks: (state.mergeResult.conflicts || []).map(
+              (item) => item.message,
+            ),
+            retryTasks: retryTaskSlots,
+          },
+          reviewFeedback: feedback,
+          reviewDecision: "RETRY",
+          retryTaskSlots,
+          reviewIteration: (state.reviewIteration || 0) + 1,
+        },
+        `Reviewer 要求返工槽位: ${formatRetryTasks(retryTaskSlots)}`,
+      );
+    }
 
-  const payload = safeParseReviewPayload(
-    response.choices?.[0]?.message?.content || "",
-  );
-
-  if (payload.decision === "RETRY" && (state.reviewIteration || 0) < MAX_REVIEW_RETRIES) {
-    const retryTaskSlots = payload.retryTasks.length
-      ? payload.retryTasks
-      : resolveRetryTaskSlots(state);
-    return {
-      reviewPayload: {
-        ...payload,
-        retryTasks: retryTaskSlots,
+    return fail(
+      {
+        reviewPayload: {
+          decision: "FAIL",
+          feedback: `${feedback}\nMerge 冲突尚未解决，自动流程不会把本轮标记为成功。`,
+          risks: (state.mergeResult.conflicts || []).map(
+            (item) => item.message,
+          ),
+          retryTasks: [],
+        },
+        reviewFeedback: feedback,
+        reviewDecision: "FAIL",
+        retryTaskSlots: [],
       },
-      reviewFeedback: payload.feedback,
-      reviewDecision: "RETRY",
-      retryTaskSlots,
-      reviewIteration: (state.reviewIteration || 0) + 1,
-      tokenUsage: buildTokenUsage(response.usage),
-    };
+      retryTaskSlots.length
+        ? "已达到最大返工轮次，Merge 冲突仍未解决。"
+        : "Merge 冲突无法映射到可返工 Worker，需人工处理。",
+    );
   }
 
-  const normalizedPayload =
-    payload.decision === "RETRY"
-      ? {
-          ...payload,
-          decision: "PASS" as const,
-          feedback: [
-            payload.feedback,
-            "已达到最大返工轮次，带着剩余风险进入最终总结。",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        }
-      : payload;
+  try {
+    const reviewFiles = Array.from(new Set(state.touchedFiles || []));
+    const filePreview = await buildFilePreview(
+      reviewFiles.length
+        ? reviewFiles
+        : (state.plannerOutput || []).flatMap((task: PlanTask) => task.files),
+      state.workingDir || process.cwd(),
+      80,
+    );
 
-  return {
-    reviewPayload: normalizedPayload,
-    reviewFeedback: normalizedPayload.feedback,
-    reviewDecision: "PASS",
-    retryTaskSlots: [],
-    tokenUsage: buildTokenUsage(response.usage),
-  };
+    const response = await invokeQwen(state, [
+      { role: "system", content: ReviewerPromptText },
+      {
+        role: "user",
+        content: [
+          `用户请求:\n${getLatestUserRequest(state)}`,
+          `High-Level Plan:\n${JSON.stringify(
+            state.highLevelPlan || [],
+            null,
+            2,
+          )}`,
+          `Planner 任务数组:\n${JSON.stringify(
+            state.plannerOutput || [],
+            null,
+            2,
+          )}`,
+          `Modify 结果:\n${formatModifyResults(state.modifyResults || [])}`,
+          `Merged Patch:\n${state.mergedPatchSummary || "暂无"}`,
+          `工程验证:
+${JSON.stringify(
+            state.verificationResult || DEFAULT_VERIFICATION_RESULT,
+            null,
+            2,
+          )}`,
+          `当前 Review 轮次: ${state.reviewIteration || 0}`,
+          `当前文件快照:\n${filePreview || "暂无文件快照"}`,
+        ].join("\n\n"),
+      },
+    ]);
+
+    const payload = safeParseReviewPayload(
+      response.choices?.[0]?.message?.content || "",
+    );
+    const tokenUsage = buildTokenUsage(response.usage);
+
+    if (payload.decision === "FAIL") {
+      return fail(
+        {
+          reviewPayload: payload,
+          reviewFeedback: payload.feedback,
+          reviewDecision: "FAIL",
+          retryTaskSlots: [],
+          tokenUsage,
+        },
+        payload.feedback || "Reviewer 判断当前修改不可安全通过。",
+      );
+    }
+
+    if (payload.decision === "RETRY") {
+      const retryTaskSlots = payload.retryTasks.length
+        ? uniqueNumbers(payload.retryTasks)
+        : state.verificationResult?.overall === "failed"
+          ? (state.plannerOutput || []).map((_task: PlanTask, slot: number) => slot)
+          : resolveRetryTaskSlots(state);
+
+      if (
+        (state.reviewIteration || 0) < MAX_REVIEW_RETRIES &&
+        retryTaskSlots.length
+      ) {
+        return complete(
+          {
+            reviewPayload: { ...payload, retryTasks: retryTaskSlots },
+            reviewFeedback: payload.feedback,
+            reviewDecision: "RETRY",
+            retryTaskSlots,
+            reviewIteration: (state.reviewIteration || 0) + 1,
+            tokenUsage,
+          },
+          `Reviewer 要求定向返工: ${formatRetryTasks(retryTaskSlots)}`,
+        );
+      }
+
+      return fail(
+        {
+          reviewPayload: {
+            ...payload,
+            decision: "FAIL",
+            feedback: [
+              payload.feedback,
+              retryTaskSlots.length
+                ? "已达到最大返工轮次。"
+                : "Reviewer 未能给出有效返工槽位。",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            retryTasks: [],
+          },
+          reviewFeedback: payload.feedback,
+          reviewDecision: "FAIL",
+          retryTaskSlots: [],
+          tokenUsage,
+        },
+        "Reviewer 返工请求无法继续安全执行。",
+      );
+    }
+
+    return complete(
+      {
+        reviewPayload: payload,
+        reviewFeedback: payload.feedback,
+        reviewDecision: "PASS",
+        retryTaskSlots: [],
+        tokenUsage,
+      },
+      "Unified Reviewer 已完成审查并通过。",
+    );
+  } catch (error) {
+    const detail = `Reviewer 调用失败: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    return fail(
+      {
+        reviewPayload: {
+          decision: "FAIL",
+          feedback: detail,
+          risks: ["Reviewer 模型调用失败，需要人工复查。"],
+          retryTasks: [],
+        },
+        reviewFeedback: detail,
+        reviewDecision: "FAIL",
+        retryTaskSlots: [],
+      },
+      detail,
+    );
+  }
 }
 
 // 这个节点负责真实工程校验，而不是模型主观判断。
 // 也就是常说的“最后再跑一遍 lint / build / test 看看有没有真炸”。
+function detectProjectPackageManager(workingDir: string): {
+  name: "pnpm" | "npm" | "yarn" | "bun";
+  runScript: (script: string) => string;
+  runBinary: (binary: string, args: string) => string;
+} {
+  if (fs.existsSync(path.join(workingDir, "pnpm-lock.yaml"))) {
+    return {
+      name: "pnpm",
+      runScript: (script) => `pnpm run ${script}`,
+      runBinary: (binary, args) => `pnpm exec ${binary} ${args}`.trim(),
+    };
+  }
+  if (
+    fs.existsSync(path.join(workingDir, "bun.lockb")) ||
+    fs.existsSync(path.join(workingDir, "bun.lock"))
+  ) {
+    return {
+      name: "bun",
+      runScript: (script) => `bun run ${script}`,
+      runBinary: (binary, args) => `bunx ${binary} ${args}`.trim(),
+    };
+  }
+  if (fs.existsSync(path.join(workingDir, "yarn.lock"))) {
+    return {
+      name: "yarn",
+      runScript: (script) => `yarn ${script}`,
+      runBinary: (binary, args) => `yarn ${binary} ${args}`.trim(),
+    };
+  }
+  return {
+    name: "npm",
+    runScript: (script) => `npm run ${script}`,
+    runBinary: (binary, args) => `npx ${binary} ${args}`.trim(),
+  };
+}
+
 export async function lintBuildTestNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  // 这个节点负责真实校验，不直接生成最终用户报告。
+  const tracker = createLifecycleTracker(
+    "verification_agent",
+    "verification_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("VERIFYING", "正在执行 Lint / Build / Test 工程验证。" );
+
+  const buildCheck = (
+    status: VerificationCheckResult["status"],
+    command: string | null,
+    output: string,
+  ): VerificationCheckResult => ({ status, command, output });
+
+  const formatVerification = (result: VerificationResult): string =>
+    [
+      `Package Manager:\n${result.packageManager}`,
+      `Overall:\n${result.overall}`,
+      `Lint [${result.lint.status}]${
+        result.lint.command ? ` (${result.lint.command})` : ""
+      }:\n${truncateText(result.lint.output, 3000)}`,
+      `Build [${result.build.status}]${
+        result.build.command ? ` (${result.build.command})` : ""
+      }:\n${truncateText(result.build.output, 3000)}`,
+      `Test [${result.test.status}]${
+        result.test.command ? ` (${result.test.command})` : ""
+      }:\n${truncateText(result.test.output, 3000)}`,
+      `Summary:\n${result.summary}`,
+    ].join("\n\n");
+
   if (state.interactiveRequest) {
+    const verificationResult: VerificationResult = {
+      ...DEFAULT_VERIFICATION_RESULT,
+      lint: buildCheck("blocked", null, "存在挂起交互请求，暂不执行 lint。"),
+      build: buildCheck("blocked", null, "存在挂起交互请求，暂不执行 build。"),
+      test: buildCheck("blocked", null, "存在挂起交互请求，暂不执行 test。"),
+      overall: "blocked",
+      summary: "存在挂起交互请求，工程验证已暂停。",
+    };
+    tracker.transition("BLOCKED", verificationResult.summary);
     return {
-      lintSummary: [
-        "Lint:",
-        "存在挂起的交互式命令请求，暂不执行。",
-        "",
-        "Build:",
-        "存在挂起的交互式命令请求，暂不执行。",
-        "",
-        "Test:",
-        "存在挂起的交互式命令请求，暂不执行。",
-      ].join("\n"),
+      verificationResult,
+      lintSummary: formatVerification(verificationResult),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
+
+  if (
+    state.mergeResult?.status === "conflict" ||
+    state.mergeResult?.status === "failed"
+  ) {
+    const verificationResult: VerificationResult = {
+      ...DEFAULT_VERIFICATION_RESULT,
+      lint: buildCheck("blocked", null, "Merge 未成功，未执行 lint。"),
+      build: buildCheck("blocked", null, "Merge 未成功，未执行 build。"),
+      test: buildCheck("blocked", null, "Merge 未成功，未执行 test。"),
+      overall: "blocked",
+      summary: "Merge 冲突或写入失败，工程验证不会在不确定工作区上运行。",
+    };
+    tracker.transition("BLOCKED", verificationResult.summary);
+    return {
+      verificationResult,
+      lintSummary: formatVerification(verificationResult),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
+
+  if (!state.requiresChanges) {
+    const verificationResult: VerificationResult = {
+      ...DEFAULT_VERIFICATION_RESULT,
+      summary: "当前请求无需代码修改，跳过工程验证。",
+    };
+    tracker.transition("COMPLETED", verificationResult.summary);
+    return {
+      verificationResult,
+      lintSummary: formatVerification(verificationResult),
+      ...buildLifecycleStateUpdate(tracker),
     };
   }
 
   const touchedFiles = state.touchedFiles || [];
   const workingDir = state.workingDir || process.cwd();
   const packageJsonPath = path.join(workingDir, "package.json");
+  const packageManager = detectProjectPackageManager(workingDir);
   const lintableFiles = touchedFiles.filter((file: string) =>
     [".ts", ".tsx", ".js", ".jsx"].includes(path.extname(file)),
   );
 
-  let lintResult = "未执行 lint。";
-  if (lintableFiles.length > 0) {
-    const quotedFiles = lintableFiles.map((file: string) => `"${file}"`).join(" ");
-    lintResult = (
-      await runTerminalCommand(
-      `pnpm eslint ${quotedFiles}`,
-      workingDir,
-      state,
-    )
-    ).output;
-  }
-
-  let buildResult = "未执行 build。";
-  let testResult = "未执行 test。";
-  let hasBuildScript = false;
-  let hasTestScript = false;
-
+  let scripts: Record<string, string> = {};
+  let packageJsonError = "";
   if (fs.existsSync(packageJsonPath)) {
     try {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
-        scripts?: Record<string, string>;
-      };
-      hasBuildScript = Boolean(packageJson.scripts?.build);
-      hasTestScript = Boolean(packageJson.scripts?.test);
-    } catch {
-      buildResult = "package.json 解析失败，跳过 build。";
-      testResult = "package.json 解析失败，跳过 test。";
+      const packageJson = JSON.parse(
+        fs.readFileSync(packageJsonPath, "utf-8"),
+      ) as { scripts?: Record<string, string> };
+      scripts = packageJson.scripts || {};
+    } catch (error) {
+      packageJsonError = `package.json 解析失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
+  } else {
+    packageJsonError = "未找到 package.json。";
   }
 
-  if (hasBuildScript) {
-    buildResult = (await runTerminalCommand("pnpm build", workingDir, state)).output;
-  } else if (buildResult === "未执行 build。") {
-    buildResult = "未配置 build 脚本，跳过。";
+  let lint = buildCheck(
+    "skipped",
+    null,
+    lintableFiles.length
+      ? "尚未执行 lint。"
+      : "没有需要单文件 lint 的 JS/TS 变更。",
+  );
+  if (lintableFiles.length > 0) {
+    const quotedFiles = lintableFiles.map((file: string) => `"${file}"`).join(" ");
+    const command = packageManager.runBinary("eslint", quotedFiles);
+    const outcome = await runTerminalCommand(
+      command,
+      workingDir,
+      state,
+      120_000,
+    );
+    lint = buildCheck(
+      outcome.success ? "passed" : "failed",
+      command,
+      outcome.output || (outcome.success ? "Lint 成功。" : "Lint 失败。"),
+    );
   }
 
-  if (hasTestScript) {
-    testResult = (await runTerminalCommand("pnpm test", workingDir, state)).output;
-  } else if (testResult === "未执行 test。") {
-    testResult = "未配置 test 脚本，跳过。";
+  let build = buildCheck(
+    "skipped",
+    null,
+    packageJsonError || "未配置 build 脚本，跳过。",
+  );
+  if (scripts.build) {
+    const command = packageManager.runScript("build");
+    const outcome = await runTerminalCommand(
+      command,
+      workingDir,
+      state,
+      120_000,
+    );
+    build = buildCheck(
+      outcome.success ? "passed" : "failed",
+      command,
+      outcome.output || (outcome.success ? "Build 成功。" : "Build 失败。"),
+    );
+  }
+
+  let test = buildCheck(
+    "skipped",
+    null,
+    packageJsonError || "未配置 test 脚本，跳过。",
+  );
+  if (scripts.test) {
+    const command = packageManager.runScript("test");
+    const outcome = await runTerminalCommand(
+      command,
+      workingDir,
+      state,
+      120_000,
+    );
+    test = buildCheck(
+      outcome.success ? "passed" : "failed",
+      command,
+      outcome.output || (outcome.success ? "Test 成功。" : "Test 失败。"),
+    );
+  }
+
+  const checks = [lint, build, test];
+  const overall: VerificationResult["overall"] = checks.some(
+    (item) => item.status === "failed",
+  )
+    ? "failed"
+    : checks.some((item) => item.status === "passed")
+      ? "passed"
+      : "skipped";
+  const verificationResult: VerificationResult = {
+    packageManager: packageManager.name,
+    lint,
+    build,
+    test,
+    overall,
+    summary:
+      overall === "failed"
+        ? "工程验证存在失败项，必须由最终 Reviewer 决定返工或终止。"
+        : overall === "passed"
+          ? "已执行的工程验证全部通过。"
+          : "项目未提供可执行的验证项，本轮验证已跳过。",
+  };
+
+  if (overall === "failed") {
+    tracker.transition("FAILED", verificationResult.summary);
+  } else {
+    tracker.transition("COMPLETED", verificationResult.summary);
   }
 
   return {
-    lintSummary: [
-      `Lint:\n${truncateText(lintResult, 3000)}`,
-      `Build:\n${truncateText(buildResult, 3000)}`,
-      `Test:\n${truncateText(testResult, 3000)}`,
-    ].join("\n\n"),
+    verificationResult,
+    lintSummary: formatVerification(verificationResult),
+    ...buildLifecycleStateUpdate(tracker),
   };
 }
 
@@ -1871,44 +3566,97 @@ export async function lintBuildTestNode(
  */
 export async function finalReportNode(
   state: AgentRuntimeState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Record<string, unknown>> {
-  const response = await invokeQwen(state, [
-    {
-      role: "system",
-      content:
-        "你是 Final Report Agent。请根据 Planner、Modify、Reviewer 与 Lint/Build/Test 输出，给出简洁的中文 Markdown 最终结论，说明完成情况、涉及文件、返工情况、校验结果与剩余风险。",
-    },
-    {
-      role: "user",
-      content: [
-        `用户请求:\n${getLatestUserRequest(state)}`,
-        `Planner 任务数组:\n${JSON.stringify(state.plannerOutput || [], null, 2)}`,
-        `Planner 可读版:\n${formatPlannerPayload(state.plannerOutput || [])}`,
-        `Structured Task List:\n${state.structuredTaskListSummary || "暂无"}`,
-        `Modify 结果:\n${formatModifyResults(state.modifyResults || [])}`,
-        `Merged Patch:\n${state.mergedPatchSummary || "暂无"}`,
-        `Reviewer 结果:\n${JSON.stringify(state.reviewPayload || DEFAULT_REVIEW_PAYLOAD, null, 2)}`,
-        `挂起交互请求:\n${
-          state.interactiveRequest
-            ? JSON.stringify(state.interactiveRequest, null, 2)
-            : "当前没有挂起的交互请求"
-        }`,
-        `校验输出:\n${truncateText(state.lintSummary || "暂无", 4000)}`,
-      ].join("\n\n"),
-    },
-  ]);
+  const tracker = createLifecycleTracker(
+    "final_report_agent",
+    "final_report_agent",
+    state.reviewIteration || 0,
+    config,
+  );
+  tracker.transition("EXECUTING", "正在汇总完整 Agent 执行结果。" );
 
-  const finalReportSummary =
-    response.choices?.[0]?.message?.content?.trim() ||
-    "Final Report Agent 未生成额外结论。";
+  try {
+    const response = await invokeQwen(state, [
+      {
+        role: "system",
+        content:
+          "你是 Final Report Agent。根据 High-Level Plan、动态 Worker、Worker Memory、Merge、Reviewer 与 Lint/Build/Test 输出，给出简洁中文 Markdown 结论。必须说明完成情况、涉及文件、自动合并/冲突、上下文压缩、返工、验证结果与剩余风险。",
+      },
+      {
+        role: "user",
+        content: [
+          `用户请求:\n${getLatestUserRequest(state)}`,
+          `High-Level Plan:\n${JSON.stringify(
+            state.highLevelPlan || [],
+            null,
+            2,
+          )}`,
+          `High-Level Plan 可读版:\n${formatHighLevelPlan(
+            state.highLevelPlan || [],
+          )}`,
+          `Planner 任务数组:\n${JSON.stringify(
+            state.plannerOutput || [],
+            null,
+            2,
+          )}`,
+          `Planner 可读版:\n${formatPlannerPayload(
+            state.plannerOutput || [],
+          )}`,
+          `Structured Task List:\n${
+            state.structuredTaskListSummary || "暂无"
+          }`,
+          `Modify 结果:\n${formatModifyResults(state.modifyResults || [])}`,
+          `Merged Patch:\n${state.mergedPatchSummary || "暂无"}`,
+          `Reviewer 结果:\n${JSON.stringify(
+            state.reviewPayload || DEFAULT_REVIEW_PAYLOAD,
+            null,
+            2,
+          )}`,
+          `Agent Lifecycle:\n${JSON.stringify(
+            state.agentLifecycles || {},
+            null,
+            2,
+          )}`,
+          `挂起交互请求:\n${
+            state.interactiveRequest
+              ? JSON.stringify(state.interactiveRequest, null, 2)
+              : "当前没有挂起的交互请求"
+          }`,
+          `结构化工程验证:
+${JSON.stringify(
+            state.verificationResult || DEFAULT_VERIFICATION_RESULT,
+            null,
+            2,
+          )}`,
+          `校验输出:\n${truncateText(state.lintSummary || "暂无", 4000)}`,
+        ].join("\n\n"),
+      },
+    ]);
 
-  return {
-    finalReportSummary,
-    summary: appendSummary(
-      state.summary || "",
-      getLatestUserRequest(state),
+    const finalReportSummary =
+      response.choices?.[0]?.message?.content?.trim() ||
+      "Final Report Agent 未生成额外结论。";
+    tracker.transition("COMPLETED", "Final Report 已生成。" );
+
+    return {
       finalReportSummary,
-    ),
-    tokenUsage: buildTokenUsage(response.usage),
-  };
+      summary: appendSummary(
+        state.summary || "",
+        getLatestUserRequest(state),
+        finalReportSummary,
+      ),
+      tokenUsage: buildTokenUsage(response.usage),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  } catch (error) {
+    tracker.transition(
+      "FAILED",
+      `Final Report 生成失败: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return {
+      finalReportSummary: tracker.getSnapshot().detail,
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
 }

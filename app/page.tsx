@@ -9,6 +9,7 @@ import ChatList from "./component/ChatList";
 import ChatSidebar from "./component/ChatSidebar";
 import CustomTitleBar from "./component/CustomTitleBar";
 import InteractiveRequestPanel from "./component/InteractiveRequestPanel";
+import TaskPlanningPanel from "./component/TaskPlanningPanel";
 import WorkspaceHeader from "./component/WorkspaceHeader";
 import { AVAILABLE_MODELS } from "./const/modelList";
 import { getThemeVariables } from "./const/theme";
@@ -19,6 +20,12 @@ import { useComposer } from "./hooks/useComposer";
 import { useThemeMode } from "./hooks/useThemeMode";
 import { useWorkspaceController } from "./hooks/useWorkspaceController";
 
+/**
+ * 白雪条工作台页面入口。
+ *
+ * 页面只组合聊天、任务规划和 Agent 面板；附件 RAG 已移动到提交 Hook，
+ * 避免用户每输入一个字符就在渲染阶段重复执行检索。
+ */
 export default function Home() {
   const [selectedModel, setSelectedModel] = useState(
     "qwen3.7-max-2026-05-20",
@@ -39,9 +46,7 @@ export default function Home() {
     selectedModel,
     attachedFile: composer.attachedFile,
     isParsingFile: composer.isParsingFile,
-    setInput: composer.setInput,
     clearAfterSubmit: composer.clearAfterSubmit,
-    fileInputRef: composer.fileInputRef,
     agents: agentCoordinator,
   });
 
@@ -65,7 +70,10 @@ export default function Home() {
     if (workspace.switchSession(id)) resetConversationUi();
   };
 
-  const handleDeleteSession = async (id: string, event: MouseEvent) => {
+  const handleDeleteSession = async (
+    id: string,
+    event: MouseEvent,
+  ) => {
     if (chat.isStreaming) return;
     const activeSessionChanged = await workspace.deleteSession(id, event);
     if (activeSessionChanged) resetConversationUi();
@@ -110,15 +118,15 @@ export default function Home() {
           activeSessionId={workspace.activeSessionId}
           isStreaming={chat.isStreaming}
           createQaSession={() => void handleCreateSession("qa")}
-          createCodeSession={(projectId) =>
+          createCodeSession={(projectId: string) =>
             void handleCreateSession("code", projectId)
           }
           addProject={() => void handleAddProject()}
-          reindexProject={(projectId) =>
+          reindexProject={(projectId: string) =>
             void workspace.reindexProject(projectId)
           }
           switchSession={handleSwitchSession}
-          deleteSession={(id, event) =>
+          deleteSession={(id: string, event: MouseEvent) =>
             void handleDeleteSession(id, event)
           }
         />
@@ -158,7 +166,10 @@ export default function Home() {
                       request={chat.interactiveRequest}
                       answer={chat.interactiveAnswer}
                       onAnswerChange={chat.setInteractiveAnswer}
-                      onReply={(mode, answer) =>
+                      onReply={(
+                        mode: "auto" | "llm" | "user",
+                        answer?: string,
+                      ) =>
                         void chat.handleInteractiveReply(mode, answer)
                       }
                     />
@@ -182,11 +193,19 @@ export default function Home() {
                 </div>
               </div>
 
-              <AgentPanel
-                agents={agentCoordinator.agents}
-                isStreaming={chat.isStreaming}
-                className="hidden xl:flex"
-              />
+              <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-4 xl:flex">
+                <TaskPlanningPanel
+                  agents={agentCoordinator.agents}
+                  toolActivities={chat.toolActivities}
+                  agentStatus={chat.agentStatus}
+                  isStreaming={chat.isStreaming}
+                />
+                <AgentPanel
+                  agents={agentCoordinator.agents}
+                  isStreaming={chat.isStreaming}
+                  className="min-h-0 flex-1"
+                />
+              </aside>
             </div>
           </div>
         </section>
@@ -197,35 +216,20 @@ export default function Home() {
           scrollbar-width: thin;
           scrollbar-color: var(--scrollbar-thumb) transparent;
         }
-
-        *::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-
-        *::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
+        *::-webkit-scrollbar { width: 8px; height: 8px; }
+        *::-webkit-scrollbar-track { background: transparent; }
         *::-webkit-scrollbar-thumb {
           background: var(--scrollbar-thumb);
           border: 2px solid transparent;
           background-clip: padding-box;
           border-radius: 999px;
         }
-
         body {
           margin: 0;
           background: var(--app-bg);
           transition: background-color 300ms var(--ease-apple);
         }
-
-        button,
-        input,
-        textarea {
-          font: inherit;
-        }
-
+        button, input, textarea { font: inherit; }
         .theme-transition {
           transition:
             background 300ms var(--ease-apple),

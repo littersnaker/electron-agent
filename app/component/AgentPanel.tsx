@@ -195,7 +195,7 @@ export default function AgentPanel({
 
   return (
     <aside
-      className={`agent-panel flex min-h-0 w-[304px] shrink-0 flex-col overflow-hidden rounded-[22px] border ${className}`}
+      className={`agent-panel flex min-h-0 w-full flex-col overflow-hidden rounded-[22px] border ${className}`}
       style={{
         background:
           "linear-gradient(145deg, var(--glass-strong), var(--glass-soft))",

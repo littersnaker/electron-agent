@@ -1,189 +1,262 @@
-import { BaseMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
 import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import {
+  DEFAULT_HIGH_LEVEL_PLAN,
+  DEFAULT_MERGE_RESULT,
   DEFAULT_PLANNER_PAYLOAD,
   DEFAULT_REVIEW_PAYLOAD,
+  DEFAULT_VERIFICATION_RESULT,
+  createDefaultWorkerMemory,
+} from "./types";
+import type {
+  AgentLifecycleEvent,
+  AgentLifecycleSnapshot,
+  AgentRequestMode,
+  HighLevelPlanPayload,
   InteractiveRequest,
+  MergeResult,
   ModifyTaskResult,
+  ModifyWorkerInput,
   PlannerPayload,
   PlannerValidationStatus,
+  PlanTask,
   ReviewPayload,
+  SharedWorkerMemory,
+  VerificationResult,
+  WorkerMemory,
+  WorkspaceRuntimeInfo,
 } from "./types";
 
+const replaceValue = <T>(current: T, next: T | undefined): T =>
+  next === undefined ? current : next;
+
+const mergeModifyResults = (
+  currentState: ModifyTaskResult[],
+  newValue: ModifyTaskResult[] | undefined,
+): ModifyTaskResult[] => {
+  if (newValue === undefined) return currentState;
+  if (newValue.length === 0) return [];
+
+  const resultMap = new Map(currentState.map((item) => [item.slot, item]));
+  newValue.forEach((item) => resultMap.set(item.slot, item));
+  return Array.from(resultMap.values()).sort(
+    (left, right) => left.slot - right.slot,
+  );
+};
+
+const mergeLifecycleSnapshots = (
+  currentState: Record<string, AgentLifecycleSnapshot>,
+  newValue: Record<string, AgentLifecycleSnapshot> | undefined,
+): Record<string, AgentLifecycleSnapshot> => {
+  if (newValue === undefined) return currentState;
+  if (Object.keys(newValue).length === 0) return {};
+
+  const merged = { ...currentState };
+  for (const [agentId, nextSnapshot] of Object.entries(newValue)) {
+    const previous = merged[agentId];
+    if (
+      !previous ||
+      Date.parse(nextSnapshot.updatedAt) >= Date.parse(previous.updatedAt)
+    ) {
+      merged[agentId] = nextSnapshot;
+    }
+  }
+  return merged;
+};
+
+const mergeLifecycleEvents = (
+  currentState: AgentLifecycleEvent[],
+  newValue: AgentLifecycleEvent[] | undefined,
+): AgentLifecycleEvent[] => {
+  if (newValue === undefined) return currentState;
+  if (newValue.length === 0) return [];
+
+  const eventMap = new Map(currentState.map((event) => [event.id, event]));
+  newValue.forEach((event) => eventMap.set(event.id, event));
+  return Array.from(eventMap.values()).sort((left, right) => {
+    const timeDiff = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    return timeDiff !== 0 ? timeDiff : left.sequence - right.sequence;
+  });
+};
+
 /*
- * 这个文件定义的是整张 LangGraph 图共享的“总状态”。
+ * 主图共享状态。
  *
- * 可以把它想象成一个全局白板：
- * - 每个节点来这里读自己需要的信息；
- * - 每个节点把自己的输出也写回这里；
- * - 后面的节点再继续接着用。
- *
- * 为什么要拆这么细？
- * 因为这套流程不是单 Agent 串行跑，而是：
- * 1. 前面多个 Agent 并发收集上下文；
- * 2. 中间 Planner / 校验 / 修复 / 降级多分支流转；
- * 3. 后面 Modify A/B/C 并发执行；
- * 4. Reviewer 再决定局部返工还是进入最终校验。
- *
- * 如果状态字段不拆开，后面就很难知道“当前到底在哪一步、为什么走到这里、谁产出的这份数据”。
+ * 隔离原则：
+ * - messages 只保存用户主线程；
+ * - Worker 通过 Send 获得自己的 task、previousMemory 与只读 SharedWorkerMemory；
+ * - Worker 的 AI/Tool 消息不写入主图；
+ * - 并发结果只通过带 reducer 的 modifyResults/lifecycle 字段汇总；
+ * - 正式工作区只允许 Merge 节点统一写入。
  */
 export const AgentState = Annotation.Root({
-  // LangGraph 自带的消息通道，保存用户、助手、工具调用的完整轨迹。
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
   }),
   model: Annotation<string>,
-  // 长期记忆摘要：跨多轮对话保留高价值上下文，避免每轮都把全量消息送给模型。
-  summary: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+  currentUserRequest: Annotation<string>({
+    reducer: replaceValue,
     default: () => "",
   }),
-  // 三个上下文 Agent 的独立输出。
+  summary: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
   searchContext: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   memoryContext: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   fileContext: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   mergedContext: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // Planner 的结构化输出：每一项就是一个可并行执行的子任务。
-  // 注意：这里存的是“已经通过解析后的任务数组”，不是模型原始文本。
+  requestMode: Annotation<AgentRequestMode>({
+    reducer: replaceValue,
+    default: () => "read_only",
+  }),
+  workspaceInfo: Annotation<WorkspaceRuntimeInfo | null>({
+    reducer: replaceValue,
+    default: () => null,
+  }),
+  directAnswer: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
+
+  // Hierarchical Planner 第一层。
+  highLevelPlanRawOutput: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
+  highLevelPlan: Annotation<HighLevelPlanPayload>({
+    reducer: replaceValue,
+    default: () => DEFAULT_HIGH_LEVEL_PLAN,
+  }),
+  highLevelPlanSummary: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
+
+  // Hierarchical Planner 第二层：可并发叶子任务。
   plannerOutput: Annotation<PlannerPayload>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => DEFAULT_PLANNER_PAYLOAD,
   }),
-  // Planner 原始文本输出，供后续 JSON Schema 校验节点单独解析。
-  // 单独保留原始文本，是为了调试和重规划时能知道模型第一次到底返回了什么。
   plannerRawOutput: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // 记录 Planner 校验/修复/降级当前所处阶段，方便图路由与前端状态展示。
-  // 这相当于 Planner 子流程里的“状态机状态”。
   plannerValidationStatus: Annotation<PlannerValidationStatus>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "pending",
   }),
-  // 给人看的说明文本：
-  // 当前是 schema 失败、文件重复、规则修复，还是已经降级，都会写在这里。
   plannerValidationMessage: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // Planner 重试计数器：用于限制 Retry Planner 最多执行 2~3 次。
-  // 这样做是为了避免模型持续输出坏结构，导致图无限自旋。
   plannerRetryCount: Annotation<number>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => 0,
   }),
-  // 记录“为什么要重试 Planner”，下一次重规划时会把这段原因喂回给模型。
   plannerRetryReason: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // Structured Task List 节点会把结构化任务再整理成一份可读摘要。
   structuredTaskListSummary: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // 这个布尔值的含义很朴素：当前请求到底要不要进入代码修改链路。
-  // 比如有些场景只是解释、总结、分析，就不一定真的要改文件。
   requiresChanges: Annotation<boolean>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => false,
   }),
-  // 三路 Modify 的执行结果会按 slot 合并到这里。
+
+  // Dynamic Send Worker 的并发聚合通道。
   modifyResults: Annotation<ModifyTaskResult[]>({
-    reducer: (currentState, newValue) => {
-      if (!newValue?.length) return currentState;
-      const resultMap = new Map(currentState.map((item) => [item.slot, item]));
-      newValue.forEach((item) => resultMap.set(item.slot, item));
-      return Array.from(resultMap.values()).sort(
-        (left, right) => left.slot - right.slot,
-      );
-    },
+    reducer: mergeModifyResults,
     default: () => [],
   }),
-  // Merge Patch 节点只汇总三路结果，不自动合并同文件 patch。
+
+  mergeResult: Annotation<MergeResult>({
+    reducer: replaceValue,
+    default: () => DEFAULT_MERGE_RESULT,
+  }),
   mergedPatchSummary: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // Reviewer 的结构化审查结论与控制字段。
-  // 这几个字段共同决定“返工谁、返工多少轮、为什么返工”。
   reviewPayload: Annotation<ReviewPayload>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => DEFAULT_REVIEW_PAYLOAD,
   }),
   reviewFeedback: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   reviewDecision: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "PASS",
   }),
-  // Reviewer 指定要返工的任务槽位列表。
-  // 例如 [0] 表示只重跑 Modify A，不要把 B/C 也重新跑一遍。
   retryTaskSlots: Annotation<number[]>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => [],
   }),
-  // Reviewer 已经打回了多少轮，用来阻止无限返工。
   reviewIteration: Annotation<number>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => 0,
   }),
-  // Lint / Build / Test 节点的原始输出。
+  verificationResult: Annotation<VerificationResult>({
+    reducer: replaceValue,
+    default: () => DEFAULT_VERIFICATION_RESULT,
+  }),
   lintSummary: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // Final Report 节点生成的最终可读结论。
   finalReportSummary: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // 所有在本轮流程里被读取/提议修改/实际修改过的文件集合。
-  // 后面的 Reviewer、Lint / Build / Test、Final Report 都依赖这份清单。
   touchedFiles: Annotation<string[]>({
-    reducer: (currentState, newValue) => {
-      if (!newValue) return currentState;
-      return Array.from(new Set([...currentState, ...newValue]));
-    },
+    reducer: replaceValue,
     default: () => [],
   }),
-  // 当 PTY 命令在中途出现交互式 Prompt，且自动策略无法安全继续时，
-  // 会把“待回答的问题”写到这里。
-  // 这样前端就能显示按钮，下一轮也能知道要恢复的是哪一次交互。
   interactiveRequest: Annotation<InteractiveRequest | null>({
     reducer: (_currentState, newValue) => newValue ?? null,
     default: () => null,
   }),
-  // 运行环境相关字段。
+
+  // Lifecycle Snapshot 供 UI 快速读取当前状态，Events 供审计/时间线使用。
+  agentLifecycles: Annotation<Record<string, AgentLifecycleSnapshot>>({
+    reducer: mergeLifecycleSnapshots,
+    default: () => ({}),
+  }),
+  agentLifecycleEvents: Annotation<AgentLifecycleEvent[]>({
+    reducer: mergeLifecycleEvents,
+    default: () => [],
+  }),
+
   workingDir: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   projectId: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
   apiKey: Annotation<string>({
-    reducer: (x, y) => y ?? x,
+    reducer: replaceValue,
     default: () => "",
   }),
-  // 全局 Token 累加器：每个节点把本轮消耗写进来，这里做自动累加。
   tokenUsage: Annotation<{ prompt: number; completion: number; total: number }>({
     reducer: (currentState, newValue) => {
       if (!newValue) return currentState;
@@ -196,3 +269,59 @@ export const AgentState = Annotation.Root({
     default: () => ({ prompt: 0, completion: 0, total: 0 }),
   }),
 });
+
+/*
+ * Dynamic Send Worker 的独立输入 State。
+ * 没有主线程 messages，避免跨 Worker ToolMessage 污染。
+ */
+export const ModifyWorkerState = Annotation.Root({
+  workerId: Annotation<string>,
+  slot: Annotation<number>,
+  task: Annotation<PlanTask>,
+  sharedMemory: Annotation<SharedWorkerMemory>,
+  previousMemory: Annotation<WorkerMemory>({
+    reducer: replaceValue,
+    default: createDefaultWorkerMemory,
+  }),
+  model: Annotation<string>,
+  workingDir: Annotation<string>,
+  projectId: Annotation<string>,
+  apiKey: Annotation<string>,
+  reviewFeedback: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
+  reviewIteration: Annotation<number>({
+    reducer: replaceValue,
+    default: () => 0,
+  }),
+  interactiveRequest: Annotation<InteractiveRequest | null>({
+    reducer: (_currentState, newValue) => newValue ?? null,
+    default: () => null,
+  }),
+  modifyResults: Annotation<ModifyTaskResult[]>({
+    reducer: mergeModifyResults,
+    default: () => [],
+  }),
+  agentLifecycles: Annotation<Record<string, AgentLifecycleSnapshot>>({
+    reducer: mergeLifecycleSnapshots,
+    default: () => ({}),
+  }),
+  agentLifecycleEvents: Annotation<AgentLifecycleEvent[]>({
+    reducer: mergeLifecycleEvents,
+    default: () => [],
+  }),
+  tokenUsage: Annotation<{ prompt: number; completion: number; total: number }>({
+    reducer: (currentState, newValue) => {
+      if (!newValue) return currentState;
+      return {
+        prompt: currentState.prompt + (newValue.prompt || 0),
+        completion: currentState.completion + (newValue.completion || 0),
+        total: currentState.total + (newValue.total || 0),
+      };
+    },
+    default: () => ({ prompt: 0, completion: 0, total: 0 }),
+  }),
+});
+
+export type ModifyWorkerStateInput = ModifyWorkerInput;

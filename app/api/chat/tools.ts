@@ -93,7 +93,7 @@ export const tools = [
     function: {
       name: "propose_file_change",
       description:
-        "为单个文件提交一份完整的新内容，但暂不覆盖正式文件。工具会把 fileContent 写入同目录下的 '<filePath>.pending'，并自动返回正式文件与 pending 文件之间的简化差异。修改已有文件时，必须先使用 read_file_from_disk 读取原文件；fileContent 必须包含该文件修改后的全部最终内容，而不是局部片段、补丁、伪代码或解释。每次调用只处理一个文件。",
+        "为单个文件提交一份完整的新内容，但暂不覆盖正式文件。普通串行模式下会写入同目录的 <filePath>.pending；并发 Modify Worker 模式下会写入该 Worker 的独立内存提案区，不接触正式工作区。修改已有文件时必须先调用 read_file_from_disk；fileContent 必须是完整最终内容。每次调用只处理一个文件。",
       parameters: {
         type: "object",
         properties: {
@@ -118,7 +118,7 @@ export const tools = [
     function: {
       name: "get_diff",
       description:
-        "查看正式文件与对应 '<filePath>.pending' 文件之间的简化逐行差异，不会修改任何文件。只能在 propose_file_change 已成功生成 pending 文件后使用。返回格式是带原行号的 '-旧行' 和 '+新行'，不是可直接应用的标准 unified diff；当前实现要求正式文件已经存在，因此新建文件可能返回“原文件不存在”。",
+        "查看正式文件与当前待合并提案之间的简化逐行差异，不会修改任何文件。普通串行模式读取 <filePath>.pending；并发 Modify Worker 模式读取当前 Worker 的独立内存提案。只能在 propose_file_change 成功后调用。返回结果用于检查，不是标准 unified diff。",
       parameters: {
         type: "object",
         properties: {
@@ -138,7 +138,7 @@ export const tools = [
     function: {
       name: "apply_file_change",
       description:
-        "正式应用一个已经生成的文件变更：把 '<filePath>.pending' 完整覆盖到目标文件，然后删除 pending 文件。仅在 propose_file_change 已成功、差异已经通过 get_diff 检查，并且当前工作流允许应用该修改时调用。该操作不是局部 patch，也不会自动保留正式文件的旧内容；如果 pending 内容不完整，会导致目标文件内容丢失。",
+        "确认应用一个已经生成的完整文件变更。普通串行模式会把 <filePath>.pending 覆盖到目标文件；并发 Modify Worker 模式只把该提案标记为 ready 并加入 Merge 队列，由 Merge 节点统一检查冲突后落盘。必须先 propose_file_change 并检查 get_diff。",
       parameters: {
         type: "object",
         properties: {
@@ -158,7 +158,7 @@ export const tools = [
     function: {
       name: "run_terminal_command",
       description:
-        "在当前项目工作目录中执行一条真实、可直接运行的 shell/CLI 命令。普通命令使用同步执行并在约 20 秒后超时；脚手架和其他已识别的交互命令（例如 vue create、npm create/init、npx create-*、pnpm create/dlx、yarn create、bun create、ng new、nest new、taro init、cargo generate、dotnet new、python/py manage.py）会进入持久 PTY 会话。PTY 命令出现 confirm、select、multiselect 或 input 提示时，会返回 interactiveRequest 并暂停等待用户选择；此时不得重新执行原命令，必须恢复同一个终端会话。不要用本工具读取或直接改写源码文件，也不要执行与当前任务无关、破坏性或未经用户授权的命令。",
+        "在当前项目工作目录中执行一条真实、可直接运行的 shell/CLI 命令。普通命令使用同步执行并在约 20 秒后超时；脚手架和其他已识别的交互命令（例如 vue create、npm create/init、npx create-*、pnpm create/dlx、yarn create、bun create、ng new、nest new、taro init、cargo generate、dotnet new、python/py manage.py）会进入持久 PTY 会话。PTY 命令出现 confirm、select、multiselect 或 input 提示时，会返回 interactiveRequest 并暂停等待用户选择；此时不得重新执行原命令，必须恢复同一个终端会话。不要用本工具读取或直接改写源码文件，也不要执行与当前任务无关、破坏性或未经用户授权的命令。并发 Modify Worker 阶段会禁用本工具，统一在 Merge 后执行 Lint / Build / Test。",
       parameters: {
         type: "object",
         properties: {

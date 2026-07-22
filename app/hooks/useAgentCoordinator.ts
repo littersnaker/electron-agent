@@ -135,6 +135,13 @@ export function useAgentCoordinator() {
     [],
   );
 
+  /**
+   * 模型开始输出最终答案时，只结束已经实际运行过的子 Agent。
+   *
+   * `createRunAgents()` 会把尚未启动的阶段标记为 queued。旧实现会把
+   * queued 一并改成 completed，导致工作区查询或只读查询看起来像执行了
+   * Planner、Worker、终端和审查。这里保留未参与阶段的原状态。
+   */
   const markFinalResponse = useCallback(() => {
     setAgents((current) =>
       current.map((agent) => {
@@ -143,12 +150,12 @@ export function useAgentCoordinator() {
             ...agent,
             status: "running" as const,
             progress: Math.max(agent.progress, 88),
-            currentTask: "汇总各 Agent 结果并生成最终回答",
+            currentTask: "汇总已执行步骤并生成最终回答",
             updatedAt: Date.now(),
           };
         }
 
-        if (["running", "thinking", "queued"].includes(agent.status)) {
+        if (["running", "thinking"].includes(agent.status)) {
           return {
             ...agent,
             status: "completed" as const,
@@ -178,6 +185,15 @@ export function useAgentCoordinator() {
     );
   }, []);
 
+  /**
+   * 一轮流式请求结束后收束 Agent 状态。
+   *
+   * - 报错 Agent 保留 error；
+   * - 终端交互存在时，终端继续保持运行；
+   * - Orchestrator 总是完成本轮协调；
+   * - 只有 running / thinking 的 Agent 才会转为 completed；
+   * - idle / queued Agent 没有参与本轮流程，因此保持原状态。
+   */
   const finalizeAgents = useCallback(
     (interactiveRequest: InteractiveRequest | null) => {
       setAgents((current) =>
@@ -194,16 +210,26 @@ export function useAgentCoordinator() {
             };
           }
 
-          return {
-            ...agent,
-            status: "completed" as const,
-            progress: 100,
-            currentTask:
-              agent.type === "orchestrator"
-                ? "本轮协作已完成"
-                : agent.currentTask,
-            updatedAt: Date.now(),
-          };
+          if (agent.type === "orchestrator") {
+            return {
+              ...agent,
+              status: "completed" as const,
+              progress: 100,
+              currentTask: "本轮协作已完成",
+              updatedAt: Date.now(),
+            };
+          }
+
+          if (["running", "thinking"].includes(agent.status)) {
+            return {
+              ...agent,
+              status: "completed" as const,
+              progress: 100,
+              updatedAt: Date.now(),
+            };
+          }
+
+          return agent;
         }),
       );
     },

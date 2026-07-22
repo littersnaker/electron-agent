@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
+import {
+  assertExistingWorkspaceDirectory,
+  normalizeAndValidateWorkspacePath,
+} from "./workspace-path";
 
 export type SessionMode = "qa" | "code";
 
@@ -61,7 +65,6 @@ function getDatabasePath(): string {
 
 function getDatabase(): DatabaseSync {
   if (database) return database;
-  console.log("getDatabasePath()", getDatabasePath());
   database = new DatabaseSync(getDatabasePath());
   database.exec("PRAGMA journal_mode = WAL;");
   database.exec("PRAGMA foreign_keys = ON;");
@@ -171,20 +174,18 @@ export function listWorkspace(): {
 }
 
 export function createProject(rootPath: string): WorkspaceProject {
-  const absolutePath = path.resolve(rootPath);
-  const stat = fs.statSync(absolutePath);
-  if (!stat.isDirectory()) throw new Error("选择的路径不是目录");
-
+  const absolutePath = normalizeAndValidateWorkspacePath(rootPath);
   const db = getDatabase();
   const existing = db
     .prepare("SELECT * FROM projects WHERE root_path = ?")
     .get(absolutePath) as unknown as ProjectRow | undefined;
   if (existing) {
+    const openedAt = now();
     db.prepare("UPDATE projects SET last_opened_at = ? WHERE id = ?").run(
-      now(),
+      openedAt,
       existing.id,
     );
-    return mapProject({ ...existing, last_opened_at: now() });
+    return mapProject({ ...existing, last_opened_at: openedAt });
   }
 
   const project: WorkspaceProject = {
@@ -210,6 +211,15 @@ export function createProject(rootPath: string): WorkspaceProject {
   return project;
 }
 
+/** 根据 ID 返回项目；聊天路由使用数据库记录作为工作目录唯一事实来源。 */
+export function getProjectById(projectId: string): WorkspaceProject | null {
+  const row = getDatabase()
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as unknown as ProjectRow | undefined;
+
+  return row ? mapProject(row) : null;
+}
+
 export function createSession(input: {
   mode: SessionMode;
   projectId?: string | null;
@@ -222,9 +232,10 @@ export function createSession(input: {
   }
   if (input.projectId) {
     const project = db
-      .prepare("SELECT id FROM projects WHERE id = ?")
-      .get(input.projectId);
+      .prepare("SELECT * FROM projects WHERE id = ?")
+      .get(input.projectId) as unknown as ProjectRow | undefined;
     if (!project) throw new Error("项目不存在");
+    assertExistingWorkspaceDirectory(project.root_path);
   }
   const createdAt = now();
   const session: WorkspaceSession = {
@@ -357,6 +368,7 @@ export async function indexProject(
     .prepare("SELECT * FROM projects WHERE id = ?")
     .get(projectId) as unknown as ProjectRow | undefined;
   if (!project) throw new Error("项目不存在");
+  assertExistingWorkspaceDirectory(project.root_path);
 
   db.prepare("UPDATE projects SET index_status = 'indexing' WHERE id = ?").run(
     projectId,
