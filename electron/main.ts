@@ -34,6 +34,48 @@ const WINDOW_THEME = {
   }
 >;
 
+const STARTUP_PAGE_THEME = {
+  dark: {
+    pageBackground:
+      "radial-gradient(circle at 72% 14%, rgba(10,132,255,0.12), transparent 30%), radial-gradient(circle at 30% 92%, rgba(191,90,242,0.08), transparent 34%), #09090b",
+    text: "#f5f5f7",
+    secondaryText: "rgba(235,235,245,0.62)",
+    tertiaryText: "rgba(235,235,245,0.38)",
+    spinnerTrack: "rgba(100,181,255,0.16)",
+    spinnerHead: "#64b5ff",
+    iconShadow:
+      "0 18px 54px rgba(10,132,255,0.22), 0 6px 20px rgba(0,0,0,0.30)",
+    errorLogBackground: "rgba(0,0,0,0.28)",
+    errorLogBorder: "rgba(255,255,255,0.09)",
+  },
+  light: {
+    pageBackground:
+      "radial-gradient(circle at 72% 14%, rgba(10,132,255,0.10), transparent 31%), radial-gradient(circle at 30% 92%, rgba(191,90,242,0.07), transparent 35%), #eef1f6",
+    text: "#1d1d1f",
+    secondaryText: "rgba(29,29,31,0.62)",
+    tertiaryText: "rgba(29,29,31,0.40)",
+    spinnerTrack: "rgba(10,132,255,0.14)",
+    spinnerHead: "#0a84ff",
+    iconShadow:
+      "0 18px 48px rgba(10,132,255,0.16), 0 6px 20px rgba(35,48,72,0.10)",
+    errorLogBackground: "rgba(255,255,255,0.60)",
+    errorLogBorder: "rgba(29,29,31,0.10)",
+  },
+} satisfies Record<
+  AppTheme,
+  {
+    pageBackground: string;
+    text: string;
+    secondaryText: string;
+    tertiaryText: string;
+    spinnerTrack: string;
+    spinnerHead: string;
+    iconShadow: string;
+    errorLogBackground: string;
+    errorLogBorder: string;
+  }
+>;
+
 const WINDOW_THEME_FILE = "window-theme.json";
 let currentTheme: AppTheme = "dark";
 
@@ -196,7 +238,11 @@ function getRuntimeIconDataUrl(iconPath?: string): string {
   }
 }
 
-function buildLoadingHtml(iconPath?: string): string {
+function buildLoadingHtml(
+  iconPath?: string,
+  theme: AppTheme = currentTheme,
+): string {
+  const palette = STARTUP_PAGE_THEME[theme];
   const iconUrl = getRuntimeIconDataUrl(iconPath);
   const iconContent = iconUrl
     ? `<img class="icon-image" src="${iconUrl}" alt="App Icon" />`
@@ -204,68 +250,193 @@ function buildLoadingHtml(iconPath?: string): string {
 
   return `
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="${theme}">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    color-scheme: ${theme};
+    --page-background: ${palette.pageBackground};
+    --text-primary: ${palette.text};
+    --text-secondary: ${palette.secondaryText};
+    --text-tertiary: ${palette.tertiaryText};
+    --spinner-track: ${palette.spinnerTrack};
+    --spinner-head: ${palette.spinnerHead};
+    --icon-shadow: ${palette.iconShadow};
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html,
   body {
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
-    color: #ededf2;
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--page-background);
+    color: var(--text-primary);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "SF Pro Display",
+      "SF Pro Text",
+      "Segoe UI",
+      "Microsoft YaHei",
+      sans-serif;
     user-select: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
+
+  .startup-card {
+    display: flex;
+    min-width: 280px;
+    flex-direction: column;
+    align-items: center;
+    padding: 34px 40px 30px;
+    border: 1px solid ${
+      theme === "dark"
+        ? "rgba(255,255,255,0.075)"
+        : "rgba(29,29,31,0.075)"
+    };
+    border-radius: 28px;
+    background: ${
+      theme === "dark"
+        ? "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))"
+        : "linear-gradient(180deg, rgba(255,255,255,0.70), rgba(255,255,255,0.42))"
+    };
+    box-shadow:
+      ${
+        theme === "dark"
+          ? "0 28px 80px rgba(0,0,0,0.28)"
+          : "0 28px 70px rgba(52,72,108,0.12)"
+      },
+      inset 0 1px 0 rgba(255,255,255,0.20);
+    backdrop-filter: blur(30px) saturate(145%);
+    -webkit-backdrop-filter: blur(30px) saturate(145%);
+    animation: cardEnter 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
   .icon {
-    width: 72px; height: 72px;
-    border-radius: 18px;
-    box-shadow: 0 8px 32px -8px rgba(139, 92, 246, 0.5);
+    width: 72px;
+    height: 72px;
     margin-bottom: 24px;
-    animation: pulse 2s ease-in-out infinite;
     overflow: hidden;
+    border-radius: 19px;
+    box-shadow: var(--icon-shadow);
+    animation: iconFloat 2.4s ease-in-out infinite;
   }
-  .icon-image, .icon-fallback {
+
+  .icon-image,
+  .icon-fallback {
     width: 100%;
     height: 100%;
-    border-radius: 18px;
+    border-radius: inherit;
   }
+
   .icon-image {
     display: block;
     object-fit: cover;
   }
+
   .icon-fallback {
-    background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 36px;
-    font-weight: bold;
+    background: linear-gradient(145deg, #64b5ff 0%, #7f7cff 48%, #bf5af2 100%);
     color: white;
+    font-size: 34px;
+    font-weight: 650;
   }
-  .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-  .subtitle { font-size: 13px; color: #9a9ab0; margin-bottom: 32px; }
+
+  .title {
+    margin-bottom: 8px;
+    color: var(--text-primary);
+    font-size: 21px;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+  }
+
+  .subtitle {
+    margin-bottom: 30px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: -0.006em;
+  }
+
   .spinner {
-    width: 32px; height: 32px;
-    border: 3px solid rgba(139, 92, 246, 0.2);
-    border-top-color: #8b5cf6;
+    width: 30px;
+    height: 30px;
+    border: 2.5px solid var(--spinner-track);
+    border-top-color: var(--spinner-head);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 0.78s linear infinite;
   }
-  .hint { font-size: 12px; color: #6b6b85; margin-top: 20px; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%,100% { opacity: 0.8; } 50% { opacity: 1; } }
+
+  .hint {
+    margin-top: 19px;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 400;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes iconFloat {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+
+  @keyframes cardEnter {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .startup-card,
+    .icon,
+    .spinner {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+  }
 </style>
 </head>
 <body>
-  <div class="icon">${iconContent}</div>
-  <div class="title">智能助手</div>
-  <div class="subtitle">正在启动服务，请稍候...</div>
-  <div class="spinner"></div>
-  <div class="hint">首次加载可能需要几秒钟</div>
+  <main class="startup-card" aria-live="polite">
+    <div class="icon">${iconContent}</div>
+    <div class="title">智能助手</div>
+    <div class="subtitle">正在启动服务，请稍候…</div>
+    <div class="spinner" aria-label="正在加载"></div>
+    <div class="hint">首次加载可能需要几秒钟</div>
+  </main>
 </body>
 </html>
 `;
@@ -468,7 +639,9 @@ function createWindow(): BrowserWindow {
 
   // 先显示加载中的 splash 页面
   win.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(buildLoadingHtml(iconPath))}`,
+    `data:text/html;charset=utf-8,${encodeURIComponent(
+      buildLoadingHtml(iconPath, currentTheme),
+    )}`,
   );
 
   // 显示窗口（splash 会立刻可见）
@@ -496,41 +669,142 @@ function createWindow(): BrowserWindow {
  */
 function showErrorPage(message: string): void {
   if (!mainWindow) return;
+
+  const palette = STARTUP_PAGE_THEME[currentTheme];
+  const safeMessage = message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const html = `
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="${currentTheme}">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    color-scheme: ${currentTheme};
+    --page-background: ${palette.pageBackground};
+    --text-primary: ${palette.text};
+    --text-secondary: ${palette.secondaryText};
+    --text-tertiary: ${palette.tertiaryText};
+    --log-background: ${palette.errorLogBackground};
+    --log-border: ${palette.errorLogBorder};
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
   body {
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
-    color: #ededf2;
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--page-background);
+    color: var(--text-primary);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "SF Pro Display",
+      "SF Pro Text",
+      "Segoe UI",
+      "Microsoft YaHei",
+      sans-serif;
     padding: 40px;
     text-align: center;
+    -webkit-font-smoothing: antialiased;
   }
-  .icon { width: 72px; height: 72px; border-radius: 18px; background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%); display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; color: white; margin-bottom: 24px; }
-  .title { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
-  .subtitle { font-size: 13px; color: #9a9ab0; margin-bottom: 24px; max-width: 520px; line-height: 1.6; }
-  .log { background: rgba(0,0,0,0.3); border: 1px solid #26263a; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #a1a1aa; text-align: left; max-width: 640px; width: 100%; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
-  .btn { margin-top: 24px; padding: 8px 20px; border-radius: 8px; background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%); color: white; border: none; cursor: pointer; font-size: 13px; }
+
+  .icon {
+    width: 68px;
+    height: 68px;
+    border-radius: 19px;
+    background: linear-gradient(145deg, #ff6961 0%, #ff9f0a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 32px;
+    font-weight: 650;
+    margin-bottom: 24px;
+    box-shadow: 0 18px 46px rgba(255,69,58,0.20);
+  }
+
+  .title {
+    margin-bottom: 10px;
+    font-size: 21px;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+  }
+
+  .subtitle {
+    max-width: 540px;
+    margin-bottom: 24px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .log {
+    width: min(680px, 100%);
+    max-height: 220px;
+    overflow: auto;
+    padding: 14px;
+    border: 1px solid var(--log-border);
+    border-radius: 14px;
+    background: var(--log-background);
+    color: var(--text-secondary);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-all;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .btn {
+    margin-top: 22px;
+    padding: 9px 18px;
+    border: 0;
+    border-radius: 11px;
+    background: linear-gradient(180deg, #168dff 0%, #0879eb 100%);
+    box-shadow:
+      0 9px 22px rgba(10,132,255,0.22),
+      inset 0 1px 0 rgba(255,255,255,0.22);
+    color: white;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition:
+      transform 150ms ease,
+      filter 150ms ease;
+  }
+
+  .btn:hover {
+    filter: brightness(1.04);
+    transform: translateY(-1px);
+  }
+
+  .btn:active {
+    transform: scale(0.98);
+  }
 </style>
 </head>
 <body>
   <div class="icon">!</div>
   <div class="title">服务启动失败</div>
-  <div class="subtitle">Next.js 服务未能正常启动，可能是端口占用或进程残留。请尝试关闭所有 Node.js 进程后重试。</div>
-  <div class="log">${message.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+  <div class="subtitle">
+    Next.js 服务未能正常启动，可能是端口占用或进程残留。请尝试关闭所有 Node.js 进程后重试。
+  </div>
+  <div class="log">${safeMessage}</div>
   <button class="btn" onclick="location.reload()">重试</button>
 </body>
 </html>
 `;
+
   mainWindow.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
   );
