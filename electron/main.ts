@@ -1,14 +1,103 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  shell,
+  ipcMain,
+  dialog,
+  nativeTheme,
+} from "electron";
 import path from "path";
 import fs from "fs";
 import { spawn, ChildProcess, execSync } from "child_process";
-import { nativeTheme } from "electron";
 import * as dotenv from "dotenv";
-nativeTheme.themeSource = "dark";
+type AppTheme = "dark" | "light";
+
+const TITLE_BAR_HEIGHT = 44;
+const WINDOW_THEME = {
+  dark: {
+    backgroundColor: "#09090b",
+    overlayColor: "#0f0f12",
+    symbolColor: "#f5f5f7",
+  },
+  light: {
+    backgroundColor: "#eef1f6",
+    overlayColor: "#f1f4f9",
+    symbolColor: "#1d1d1f",
+  },
+} satisfies Record<
+  AppTheme,
+  {
+    backgroundColor: string;
+    overlayColor: string;
+    symbolColor: string;
+  }
+>;
+
+const WINDOW_THEME_FILE = "window-theme.json";
+let currentTheme: AppTheme = "dark";
+
+function isAppTheme(value: unknown): value is AppTheme {
+  return value === "dark" || value === "light";
+}
+
+function readPersistedWindowTheme(): AppTheme {
+  try {
+    const themePath = path.join(app.getPath("userData"), WINDOW_THEME_FILE);
+    if (!fs.existsSync(themePath)) return "dark";
+
+    const parsed = JSON.parse(fs.readFileSync(themePath, "utf8")) as {
+      theme?: unknown;
+    };
+    return isAppTheme(parsed.theme) ? parsed.theme : "dark";
+  } catch (error) {
+    console.warn("[Electron] 读取窗口主题失败，将使用深色模式:", error);
+    return "dark";
+  }
+}
+
+function persistWindowTheme(theme: AppTheme): void {
+  try {
+    const themePath = path.join(app.getPath("userData"), WINDOW_THEME_FILE);
+    fs.writeFileSync(themePath, JSON.stringify({ theme }), "utf8");
+  } catch (error) {
+    console.warn("[Electron] 保存窗口主题失败:", error);
+  }
+}
+
+function applyThemeToWindow(win: BrowserWindow, theme: AppTheme): void {
+  const palette = WINDOW_THEME[theme];
+
+  win.setBackgroundColor(palette.backgroundColor);
+
+  // Windows / Linux 的右上角最小化、最大化和关闭按钮属于原生标题栏覆盖层，
+  // 网页中的 CSS 和 backdrop-filter 无法绘制这块区域，必须由主进程更新。
+  if (
+    (process.platform === "win32" || process.platform === "linux") &&
+    typeof win.setTitleBarOverlay === "function"
+  ) {
+    win.setTitleBarOverlay({
+      color: palette.overlayColor,
+      symbolColor: palette.symbolColor,
+      height: TITLE_BAR_HEIGHT,
+    });
+  }
+}
+
+function applyNativeWindowTheme(theme: AppTheme): void {
+  currentTheme = theme;
+  nativeTheme.themeSource = theme;
+  persistWindowTheme(theme);
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    applyThemeToWindow(mainWindow, theme);
+  }
+}
 
 function maskSecret(secret?: string): string {
   if (!secret) return "missing";
-  if (secret.length <= 8) return `${"*".repeat(secret.length)} (len:${secret.length})`;
+  if (secret.length <= 8)
+    return `${"*".repeat(secret.length)} (len:${secret.length})`;
   return `${secret.slice(0, 4)}...${secret.slice(-4)} (len:${secret.length})`;
 }
 
@@ -46,7 +135,9 @@ function loadElectronEnv(): void {
     console.warn(`[Electron] 读取环境变量文件失败: ${envPath}`, result.error);
   }
 
-  console.warn("[Electron] 未找到可用的 .env.local，后续只能依赖系统环境变量。");
+  console.warn(
+    "[Electron] 未找到可用的 .env.local，后续只能依赖系统环境变量。",
+  );
 }
 
 loadElectronEnv();
@@ -349,18 +440,19 @@ function startServer(): void {
  */
 function createWindow(): BrowserWindow {
   const iconPath = getRuntimeIconPath();
+  const nativeWindowTheme = WINDOW_THEME[currentTheme];
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     frame: false,
-    backgroundColor: "#0a0a0f",
+    backgroundColor: nativeWindowTheme.backgroundColor,
     titleBarStyle: "hidden", // 强制开启隐藏标题栏模式
     titleBarOverlay: {
-      color: "#131321", // 工具栏背景色
-      symbolColor: "#ededf2", // 按钮颜色
-      height: 42, // 工具栏高度
+      color: nativeWindowTheme.overlayColor,
+      symbolColor: nativeWindowTheme.symbolColor,
+      height: TITLE_BAR_HEIGHT,
     },
     icon: iconPath,
     webPreferences: {
@@ -371,6 +463,8 @@ function createWindow(): BrowserWindow {
     },
     show: false,
   });
+
+  applyThemeToWindow(win, currentTheme);
 
   // 先显示加载中的 splash 页面
   win.loadURL(
@@ -510,8 +604,20 @@ if (!gotTheLock) {
 } else {
   // 只有获取到锁才执行后续启动逻辑
   app.whenReady().then(() => {
+    currentTheme = readPersistedWindowTheme();
+    nativeTheme.themeSource = currentTheme;
+
     Menu.setApplicationMenu(null);
     mainWindow = createWindow();
+
+    ipcMain.on("window:setTheme", (_event, theme: unknown) => {
+      if (!isAppTheme(theme)) {
+        console.warn("[Electron] 忽略无效主题值:", theme);
+        return;
+      }
+
+      applyNativeWindowTheme(theme);
+    });
 
     // ⚡ 新增：注册选择文件夹的 IPC 事件
     ipcMain.handle("dialog:openDirectory", async () => {

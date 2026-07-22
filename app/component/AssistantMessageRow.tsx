@@ -31,18 +31,18 @@ const THINK_START = "<INTERNAL_THINK_START>";
 const THINK_END = "<INTERNAL_THINK_END>";
 
 const COLORS = {
-  text: "#f5f5f7",
-  textMuted: "rgba(235, 235, 245, 0.62)",
-  textSubtle: "rgba(235, 235, 245, 0.38)",
-  material: "rgba(255, 255, 255, 0.055)",
-  materialStrong: "rgba(255, 255, 255, 0.085)",
-  border: "rgba(255, 255, 255, 0.09)",
-  borderStrong: "rgba(255, 255, 255, 0.14)",
-  blue: "#0a84ff",
+  text: "var(--text-primary)",
+  textMuted: "var(--text-secondary)",
+  textSubtle: "var(--text-tertiary)",
+  material: "var(--glass)",
+  materialStrong: "var(--glass-hover)",
+  border: "var(--border)",
+  borderStrong: "var(--border-strong)",
+  blue: "var(--accent-blue)",
   blueSoft: "rgba(10, 132, 255, 0.14)",
-  green: "#30d158",
-  red: "#ff453a",
-  amber: "#ffd60a",
+  green: "var(--accent-green)",
+  red: "var(--accent-red)",
+  amber: "var(--accent-amber)",
 };
 
 const TOOL_META: Array<{
@@ -236,17 +236,15 @@ function ToolActivityPanel({
     <section
       className="overflow-hidden rounded-[18px] border"
       style={{
-        background:
-          "linear-gradient(180deg, rgba(255,255,255,0.072), rgba(255,255,255,0.035))",
+        background: "linear-gradient(180deg, var(--glass), var(--glass-soft))",
         borderColor: COLORS.border,
-        boxShadow:
-          "0 18px 50px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04)",
+        boxShadow: "var(--shadow-soft), inset 0 1px 0 rgba(255,255,255,0.04)",
       }}
     >
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-white/[0.035]"
+        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-[var(--glass-soft)]"
       >
         <div className="flex min-w-0 items-center gap-3">
           <span
@@ -534,7 +532,7 @@ export default function AssistantMessageRow({
               // 用户主动操作后锁定
               setUserCollapsedThinking(true);
             }}
-            className="flex w-full items-center justify-between px-3.5 py-2.5 text-left transition-colors hover:bg-white/[0.035]"
+            className="flex w-full items-center justify-between px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--glass-soft)]"
           >
             <div className="flex items-center gap-2">
               <span
@@ -633,7 +631,7 @@ export default function AssistantMessageRow({
 
       {(finalText.trim() || (!isThinking && !hasToolActivity)) && (
         <div
-          className="prose prose-invert prose-sm max-w-none overflow-x-auto break-words leading-7"
+          className="prose prose-sm max-w-none overflow-x-auto break-words leading-7 prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-li:text-[var(--text-primary)] prose-blockquote:text-[var(--text-secondary)] prose-blockquote:border-[var(--border-strong)]"
           style={{ color: COLORS.text }}
         >
           {finalText.trim() ? (
@@ -663,24 +661,34 @@ export default function AssistantMessageRow({
                     href={href}
                     target="_blank"
                     rel="noreferrer"
-                    className="underline decoration-white/30 underline-offset-4 transition-colors hover:decoration-white/70"
+                    className="underline decoration-current/30 underline-offset-4 transition-colors hover:decoration-current/70"
                     style={{ color: "#64b5ff" }}
                   >
                     {children}
                   </a>
                 ),
                 code: ({ children, className }) => {
-                  const block = Boolean(className);
+                  const isFencedCode = Boolean(className);
+
                   return (
                     <code
-                      className={block ? className : "rounded-md px-1.5 py-0.5"}
+                      className={
+                        isFencedCode
+                          ? className
+                          : "rounded-[6px] px-1.5 py-0.5 font-mono text-[0.9em]"
+                      }
                       style={
-                        block
+                        isFencedCode
                           ? undefined
                           : {
-                              background: COLORS.materialStrong,
-                              color: "#d7ecff",
-                              border: `1px solid ${COLORS.border}`,
+                              background:
+                                "color-mix(in srgb, var(--text-primary) 8%, transparent)",
+                              color: "var(--text-primary)",
+                              border:
+                                "1px solid color-mix(in srgb, var(--text-primary) 13%, transparent)",
+                              boxShadow:
+                                "inset 0 1px 0 color-mix(in srgb, white 12%, transparent)",
+                              fontWeight: 500,
                             }
                       }
                     >
@@ -690,10 +698,15 @@ export default function AssistantMessageRow({
                 },
                 pre: ({ children }) => (
                   <pre
-                    className="overflow-x-auto rounded-[14px] border p-4 text-[12px] leading-6"
+                    className="markdown-code-block my-4 overflow-x-auto rounded-[14px] border px-4 py-3.5 font-mono text-[12px] leading-6"
                     style={{
-                      background: "rgba(0, 0, 0, 0.26)",
-                      borderColor: COLORS.border,
+                      background:
+                        "color-mix(in srgb, var(--app-bg) 92%, var(--text-primary) 8%)",
+                      borderColor:
+                        "color-mix(in srgb, var(--text-primary) 14%, transparent)",
+                      color: "var(--text-primary)",
+                      boxShadow:
+                        "inset 0 1px 0 color-mix(in srgb, white 10%, transparent)",
                     }}
                   >
                     {children}
@@ -708,6 +721,25 @@ export default function AssistantMessageRow({
           )}
         </div>
       )}
+
+      <style jsx global>{`
+        .markdown-code-block > code {
+          display: block;
+          min-width: max-content;
+          padding: 0 !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+          background: transparent !important;
+          color: inherit !important;
+          box-shadow: none !important;
+          font: inherit;
+        }
+
+        .markdown-code-block code::before,
+        .markdown-code-block code::after {
+          content: none !important;
+        }
+      `}</style>
     </div>
   );
 }

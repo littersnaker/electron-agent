@@ -8,13 +8,13 @@ interface Props {
 }
 
 const COLORS = {
-  text: "#f5f5f7",
-  textMuted: "rgba(235, 235, 245, 0.62)",
-  textSubtle: "rgba(235, 235, 245, 0.36)",
-  material: "rgba(38, 38, 40, 0.86)",
-  materialSoft: "rgba(255, 255, 255, 0.055)",
-  border: "rgba(255, 255, 255, 0.1)",
-  blue: "#0a84ff",
+  text: "var(--text-primary)",
+  textMuted: "var(--text-secondary)",
+  textSubtle: "var(--text-tertiary)",
+  material: "var(--glass-solid)",
+  materialSoft: "var(--glass)",
+  border: "var(--border)",
+  blue: "var(--accent-blue)",
 };
 
 export default function ApiKeyModal({ isOpen, onSave }: Props) {
@@ -39,7 +39,7 @@ export default function ApiKeyModal({ isOpen, onSave }: Props) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{
-        background: "rgba(0, 0, 0, 0.48)",
+        background: "rgba(0, 0, 0, 0.36)",
         backdropFilter: "blur(20px) saturate(120%)",
         WebkitBackdropFilter: "blur(20px) saturate(120%)",
       }}
@@ -51,7 +51,7 @@ export default function ApiKeyModal({ isOpen, onSave }: Props) {
           background: COLORS.material,
           borderColor: COLORS.border,
           boxShadow:
-            "0 32px 90px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)",
+            "var(--shadow-float), inset 0 1px 0 rgba(255,255,255,0.09)",
           backdropFilter: "blur(38px) saturate(150%)",
           WebkitBackdropFilter: "blur(38px) saturate(150%)",
         }}
@@ -110,7 +110,7 @@ export default function ApiKeyModal({ isOpen, onSave }: Props) {
           <div
             className="flex h-11 items-center rounded-[12px] border px-3 transition-colors focus-within:border-[#0a84ff]"
             style={{
-              background: "rgba(0,0,0,0.18)",
+              background: "var(--glass-black)",
               borderColor: COLORS.border,
             }}
           >
@@ -119,7 +119,7 @@ export default function ApiKeyModal({ isOpen, onSave }: Props) {
               type={showKey ? "text" : "password"}
               autoFocus
               autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-white/20"
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-quaternary)]"
               style={{ color: COLORS.text }}
               placeholder="sk-..."
               value={key}

@@ -14,13 +14,13 @@ interface Props {
 }
 
 const COLORS = {
-  text: "#f5f5f7",
-  textMuted: "rgba(235, 235, 245, 0.62)",
-  textSubtle: "rgba(235, 235, 245, 0.34)",
-  material: "rgba(255, 255, 255, 0.055)",
-  materialStrong: "rgba(35, 35, 38, 0.94)",
-  border: "rgba(255, 255, 255, 0.095)",
-  blue: "#0a84ff",
+  text: "var(--text-primary)",
+  textMuted: "var(--text-secondary)",
+  textSubtle: "var(--text-tertiary)",
+  material: "var(--glass)",
+  materialStrong: "var(--glass-solid)",
+  border: "var(--border)",
+  blue: "var(--accent-blue)",
 };
 
 export default function ModelSelector({
@@ -76,7 +76,7 @@ export default function ModelSelector({
           onClick={() => setIsOpen((value) => !value)}
           className="flex h-9 w-full items-center justify-between gap-2 rounded-[11px] border px-3 text-left transition-all active:scale-[0.99]"
           style={{
-            background: isOpen ? "rgba(255,255,255,0.085)" : COLORS.material,
+            background: isOpen ? "var(--glass-hover)" : COLORS.material,
             borderColor: isOpen ? "rgba(10,132,255,0.4)" : COLORS.border,
             color: COLORS.text,
             boxShadow: isOpen
@@ -129,7 +129,7 @@ export default function ModelSelector({
             background: COLORS.materialStrong,
             borderColor: COLORS.border,
             boxShadow:
-              "0 26px 70px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.06)",
+              "var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.07)",
             backdropFilter: "blur(32px) saturate(150%)",
             WebkitBackdropFilter: "blur(32px) saturate(150%)",
           }}
@@ -145,7 +145,7 @@ export default function ModelSelector({
                     onSelect(model.id);
                     setIsOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 rounded-[10px] px-3 py-2.5 text-left transition-colors hover:bg-white/[0.06]"
+                  className="flex w-full items-center gap-2 rounded-[10px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--glass-hover)]"
                   style={{
                     background: selected ? "rgba(10,132,255,0.12)" : "transparent",
                     color: selected ? COLORS.text : COLORS.textMuted,

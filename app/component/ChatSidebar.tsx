@@ -15,17 +15,17 @@ interface ChatSidebarProps {
 }
 
 const COLORS = {
-  text: "#f5f5f7",
-  textMuted: "rgba(235, 235, 245, 0.62)",
-  textSubtle: "rgba(235, 235, 245, 0.34)",
-  material: "rgba(255, 255, 255, 0.055)",
-  materialStrong: "rgba(255, 255, 255, 0.085)",
-  materialHover: "rgba(255, 255, 255, 0.085)",
-  border: "rgba(255, 255, 255, 0.085)",
-  blue: "#0a84ff",
-  green: "#30d158",
-  amber: "#ffd60a",
-  red: "#ff453a",
+  text: "var(--text-primary)",
+  textMuted: "var(--text-secondary)",
+  textSubtle: "var(--text-tertiary)",
+  material: "var(--glass)",
+  materialStrong: "var(--glass-hover)",
+  materialHover: "var(--glass-hover)",
+  border: "var(--border)",
+  blue: "var(--accent-blue)",
+  green: "var(--accent-green)",
+  amber: "var(--accent-amber)",
+  red: "var(--accent-red)",
 };
 
 function PlusIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -167,7 +167,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
     <aside
       className="flex w-[282px] shrink-0 flex-col select-none border-r"
       style={{
-        background: "rgba(23, 23, 25, 0.76)",
+        background: "var(--sidebar-bg)",
         borderColor: COLORS.border,
         backdropFilter: "blur(28px) saturate(135%)",
         WebkitBackdropFilter: "blur(28px) saturate(135%)",
@@ -215,7 +215,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           disabled={props.isStreaming}
           className="flex h-9 w-full items-center justify-center gap-2 rounded-[11px] text-[12px] font-semibold text-white transition-all active:scale-[0.985] disabled:opacity-40"
           style={{
-            background: "linear-gradient(180deg, #168dff 0%, #0879eb 100%)",
+            background: "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
             boxShadow:
               "0 8px 20px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.2)",
           }}
@@ -288,7 +288,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                   key={project.id}
                   className="rounded-[14px] border p-2"
                   style={{
-                    background: "rgba(255,255,255,0.026)",
+                    background: "var(--glass-soft)",
                     borderColor: COLORS.border,
                   }}
                 >
