@@ -6,8 +6,15 @@ export interface FrontendMessage {
   content: string;
 }
 
+export interface FrontendAttachment {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+}
+
 export interface ChatRequestBody {
   messages?: FrontendMessage[];
+  attachments?: FrontendAttachment[];
   sessionId?: string;
   workingDir?: string;
   projectId?: string;

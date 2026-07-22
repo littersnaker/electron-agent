@@ -2,39 +2,17 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
-import type { LlmCredentials, LlmProviderId } from "../lib/llm/types";
+import { LLM_PROVIDER_CATALOG } from "../lib/llm/registry/providers";
+import type {
+  LlmCredentials,
+  LlmProviderId,
+} from "../lib/llm/types";
 
 interface Props {
   initialKeys: LlmCredentials;
   onSave: (keys: LlmCredentials) => void;
   onClose: () => void;
 }
-
-const PROVIDERS: readonly Array<{
-  id: LlmProviderId;
-  name: string;
-  environmentKey: string;
-  placeholder: string;
-}> = [
-  {
-    id: "qwen",
-    name: "Qwen / DashScope",
-    environmentKey: "DASHSCOPE_API_KEY",
-    placeholder: "sk-...",
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    environmentKey: "OPENAI_API_KEY",
-    placeholder: "sk-...",
-  },
-  {
-    id: "gemini",
-    name: "Google Gemini",
-    environmentKey: "GEMINI_API_KEY",
-    placeholder: "AIza...",
-  },
-];
 
 const COLORS = {
   text: "var(--text-primary)",
@@ -45,7 +23,11 @@ const COLORS = {
   border: "var(--border)",
 };
 
-export default function ApiKeyModal({ initialKeys, onSave, onClose }: Props) {
+export default function ApiKeyModal({
+  initialKeys,
+  onSave,
+  onClose,
+}: Props) {
   const [keys, setKeys] = useState<LlmCredentials>(initialKeys);
   const [visibleProviders, setVisibleProviders] = useState<
     ReadonlySet<LlmProviderId>
@@ -66,11 +48,13 @@ export default function ApiKeyModal({ initialKeys, onSave, onClose }: Props) {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onSave({
-      qwen: keys.qwen?.trim() || undefined,
-      openai: keys.openai?.trim() || undefined,
-      gemini: keys.gemini?.trim() || undefined,
-    });
+    const normalized: LlmCredentials = {};
+
+    for (const provider of LLM_PROVIDER_CATALOG) {
+      const value = keys[provider.id]?.trim();
+      if (value) normalized[provider.id] = value;
+    }
+    onSave(normalized);
   };
 
   return (
@@ -84,7 +68,7 @@ export default function ApiKeyModal({ initialKeys, onSave, onClose }: Props) {
     >
       <form
         onSubmit={submit}
-        className="w-[500px] max-w-full overflow-hidden rounded-[24px] border"
+        className="max-h-[86vh] w-[540px] max-w-full overflow-hidden rounded-[24px] border"
         style={{
           background: COLORS.material,
           borderColor: COLORS.border,
@@ -103,12 +87,12 @@ export default function ApiKeyModal({ initialKeys, onSave, onClose }: Props) {
             className="mt-2 text-[12px] leading-5"
             style={{ color: COLORS.textMuted }}
           >
-            Key 仅保存在本机浏览器存储中。未填写的 Provider 可使用服务端环境变量。
+            Auto 只会使用已配置凭证的 Provider。Key 仅保存在本机，也可由服务端环境变量提供。
           </p>
         </div>
 
-        <div className="space-y-3 px-6 pb-5">
-          {PROVIDERS.map((provider) => {
+        <div className="max-h-[58vh] space-y-3 overflow-y-auto px-6 pb-5">
+          {LLM_PROVIDER_CATALOG.map((provider) => {
             const visible = visibleProviders.has(provider.id);
             return (
               <label key={provider.id} className="block">

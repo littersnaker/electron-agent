@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveLlmCredentials } from "@/app/lib/llm/credentials";
 import { AUTO_MODEL_ID } from "@/app/lib/llm/model-catalog";
 import { streamWithLlm } from "@/app/lib/llm/gateway";
-import type { LlmMessage } from "@/app/lib/llm/types";
+import type { LlmContentPart, LlmMessage } from "@/app/lib/llm/types";
 import { QaPromptText } from "../chat/prompt";
 import {
   sendSse,
@@ -13,14 +13,32 @@ import type { ChatRequestBody, FrontendMessage } from "../chat/server/types";
 
 export const runtime = "nodejs";
 
-function toLlmMessage(message: FrontendMessage): LlmMessage {
+function parseAttachmentDataUrl(
+  value: string,
+): { mimeType: string; data: string } | undefined {
+  const match = /^data:([^;,]+);base64,(.+)$/u.exec(value);
+  if (!match) return undefined;
   return {
-    role: message.role === "assistant" ? "assistant" : message.role,
-    content: message.content,
+    mimeType: match[1] || "image/png",
+    data: match[2],
   };
 }
 
-/** 普通问答也复用同一 LLM Gateway 与 Model Router。 */
+function toLlmMessage(
+  message: FrontendMessage,
+  imageParts?: readonly LlmContentPart[],
+): LlmMessage {
+  return {
+    role: message.role === "assistant" ? "assistant" : message.role,
+    content: message.content,
+    parts:
+      message.role === "user" && imageParts?.length
+        ? [{ type: "text", text: message.content }, ...imageParts]
+        : undefined,
+  };
+}
+
+/** 普通问答复用 V7 模型编排层，并支持图片输入触发视觉模型。 */
 export async function POST(request: Request): Promise<Response> {
   try {
     const body = (await request.json()) as ChatRequestBody;
@@ -29,9 +47,30 @@ export async function POST(request: Request): Promise<Response> {
       request.headers.get("x-llm-model-id")?.trim() ||
       request.headers.get("x-dashscope-model")?.trim() ||
       AUTO_MODEL_ID;
+    const imageParts: LlmContentPart[] = (body.attachments || []).flatMap(
+      (attachment): LlmContentPart[] => {
+        const parsed = parseAttachmentDataUrl(attachment.dataUrl);
+        return parsed
+          ? [
+              {
+                type: "image",
+                mimeType: parsed.mimeType,
+                data: parsed.data,
+                name: attachment.name,
+              },
+            ]
+          : [];
+      },
+    );
+    const sourceMessages = body.messages || [];
     const messages: LlmMessage[] = [
       { role: "system", content: QaPromptText },
-      ...(body.messages || []).map(toLlmMessage),
+      ...sourceMessages.map((message, index) =>
+        toLlmMessage(
+          message,
+          index === sourceMessages.length - 1 ? imageParts : undefined,
+        ),
+      ),
     ];
     const encoder = new TextEncoder();
 

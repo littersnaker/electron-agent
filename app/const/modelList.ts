@@ -1,7 +1,8 @@
 import {
   AUTO_MODEL_ID,
   LLM_MODEL_CATALOG,
-} from "../lib/llm/model-catalog";
+} from "../lib/llm/registry/models";
+import { getProviderDefinition } from "../lib/llm/registry/providers";
 
 export interface ModelOption {
   id: string;
@@ -10,23 +11,18 @@ export interface ModelOption {
   description: string;
 }
 
-/** 前端只消费公开模型元数据，不包含任何服务端凭证。 */
+/** 前端模型列表直接由 V7 注册表生成。 */
 export const AVAILABLE_MODELS: readonly ModelOption[] = [
-  // {
-  //   id: AUTO_MODEL_ID,
-  //   name: "Auto Router",
-  //   provider: "自动路由",
-  //   description: "根据 Planner、Worker、Review 等任务类型选择可用模型",
-  // },
+  {
+    id: AUTO_MODEL_ID,
+    name: "Auto Orchestration",
+    provider: "自动编排",
+    description: "仅从已配置模型池中按能力评分，并在调用失败时自动降级",
+  },
   ...LLM_MODEL_CATALOG.map((model) => ({
     id: model.id,
     name: model.name,
-    provider:
-      model.provider === "qwen"
-        ? "Qwen"
-        : model.provider === "openai"
-          ? "OpenAI"
-          : "Gemini",
+    provider: getProviderDefinition(model.provider).name,
     description: model.description,
   })),
 ];

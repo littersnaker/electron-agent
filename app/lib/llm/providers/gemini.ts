@@ -1,15 +1,18 @@
-import type {
-  LlmChatResponse,
-  LlmCompletionRequest,
-  LlmFunctionTool,
-  LlmMessage,
-  LlmProvider,
-  LlmStreamChunk,
-  LlmToolCall,
+import {
+  LlmProviderError,
+  type LlmChatResponse,
+  type LlmCompletionRequest,
+  type LlmFunctionTool,
+  type LlmMessage,
+  type LlmProvider,
+  type LlmStreamChunk,
+  type LlmToolCall,
 } from "../types";
 
 interface GeminiPart {
   text?: string;
+  inlineData?: { mimeType: string; data: string };
+  fileData?: { mimeType: string; fileUri: string };
   functionCall?: { name?: string; args?: Record<string, unknown> };
 }
 
@@ -22,7 +25,6 @@ interface GeminiResponseBody {
     candidatesTokenCount?: number;
     totalTokenCount?: number;
   };
-  error?: { message?: string };
 }
 
 function parseJsonObject(value: string): Record<string, unknown> {
@@ -44,6 +46,38 @@ function buildToolNameMap(messages: readonly LlmMessage[]): Map<string, string> 
     }
   }
   return result;
+}
+
+function toGeminiUserParts(message: LlmMessage): Array<Record<string, unknown>> {
+  const parts: Array<Record<string, unknown>> = [];
+  const textParts = message.parts?.filter((part) => part.type === "text") || [];
+  for (const part of textParts) {
+    if (part.type === "text" && part.text) parts.push({ text: part.text });
+  }
+
+  if (!textParts.length && message.content) {
+    parts.push({ text: message.content });
+  }
+
+  for (const part of message.parts || []) {
+    if (part.type !== "image") continue;
+    if (part.data) {
+      parts.push({
+        inlineData: {
+          mimeType: part.mimeType,
+          data: part.data,
+        },
+      });
+    } else if (part.url) {
+      parts.push({
+        fileData: {
+          mimeType: part.mimeType,
+          fileUri: part.url,
+        },
+      });
+    }
+  }
+  return parts.length ? parts : [{ text: "" }];
 }
 
 function toGeminiContents(messages: readonly LlmMessage[]) {
@@ -83,7 +117,7 @@ function toGeminiContents(messages: readonly LlmMessage[]) {
         };
       }
 
-      return { role: "user", parts: [{ text: message.content }] };
+      return { role: "user", parts: toGeminiUserParts(message) };
     });
 }
 
@@ -165,9 +199,17 @@ function buildRequestBody(request: LlmCompletionRequest) {
   };
 }
 
-async function readGeminiError(response: Response): Promise<string> {
-  const detail = (await response.text()).trim();
-  return detail || `HTTP ${response.status}`;
+async function createGeminiError(response: Response): Promise<LlmProviderError> {
+  const detail = (await response.text()).trim() || `HTTP ${response.status}`;
+  return new LlmProviderError({
+    provider: "gemini",
+    status: response.status,
+    retryable:
+      response.status === 408 ||
+      response.status === 429 ||
+      response.status >= 500,
+    detail,
+  });
 }
 
 /** Gemini generateContent / streamGenerateContent 协议适配器。 */
@@ -188,9 +230,7 @@ export class GeminiProvider implements LlmProvider {
       signal: request.signal,
     });
 
-    if (!response.ok) {
-      throw new Error(`Gemini 调用失败: ${await readGeminiError(response)}`);
-    }
+    if (!response.ok) throw await createGeminiError(response);
 
     const payload = (await response.json()) as GeminiResponseBody;
     const parsed = parseGeminiContent(payload);
@@ -225,9 +265,12 @@ export class GeminiProvider implements LlmProvider {
     });
 
     if (!response.ok || !response.body) {
-      throw new Error(
-        `Gemini 流式调用失败: ${await readGeminiError(response)}`,
-      );
+      if (!response.ok) throw await createGeminiError(response);
+      throw new LlmProviderError({
+        provider: "gemini",
+        retryable: true,
+        detail: "响应体为空",
+      });
     }
 
     const reader = response.body.getReader();
@@ -238,7 +281,7 @@ export class GeminiProvider implements LlmProvider {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n/);
+      const lines = buffer.split(/\r?\n/u);
       buffer = lines.pop() || "";
 
       for (const line of lines) {
@@ -261,7 +304,7 @@ export class GeminiProvider implements LlmProvider {
               : undefined,
           };
         } catch {
-          // 忽略单个无效 SSE 数据帧。
+          // 单个无效 SSE 帧不会中断整个流。
         }
       }
     }

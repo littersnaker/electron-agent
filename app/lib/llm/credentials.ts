@@ -1,38 +1,53 @@
-import type { LlmCredentials, LlmProviderId } from "./types";
-
-const ENV_KEYS: Record<LlmProviderId, string> = {
-  qwen: "DASHSCOPE_API_KEY",
-  openai: "OPENAI_API_KEY",
-  gemini: "GEMINI_API_KEY",
-};
-
-const HEADER_KEYS: Record<LlmProviderId, string> = {
-  qwen: "x-llm-key-qwen",
-  openai: "x-llm-key-openai",
-  gemini: "x-llm-key-gemini",
-};
+import {
+  LLM_PROVIDER_CATALOG,
+  LLM_PROVIDER_IDS,
+} from "./registry/providers";
+import type {
+  LlmCredentials,
+  LlmProviderId,
+} from "./types";
 
 function readSecret(
   headers: Headers,
   provider: LlmProviderId,
 ): string | undefined {
-  const fromHeader = headers.get(HEADER_KEYS[provider])?.trim();
-  const fromEnvironment = process.env[ENV_KEYS[provider]]?.trim();
+  const definition = LLM_PROVIDER_CATALOG.find(
+    (item) => item.id === provider,
+  );
+  if (!definition) return undefined;
+
+  const fromHeader = headers.get(definition.requestHeader)?.trim();
+  const fromEnvironment =
+    process.env[definition.environmentKey]?.trim();
   return fromHeader || fromEnvironment || undefined;
 }
 
-/** 服务端只读取请求头和环境变量，不把默认 Key 回传给浏览器。 */
+/** 服务端只读取请求头和环境变量，不把真实 Key 回传给浏览器。 */
 export function resolveLlmCredentials(headers: Headers): LlmCredentials {
-  return {
-    qwen:
-      readSecret(headers, "qwen") ||
-      headers.get("x-dashscope-api-key")?.trim() ||
-      undefined,
-    openai: readSecret(headers, "openai"),
-    gemini: readSecret(headers, "gemini"),
-  };
+  const credentials: LlmCredentials = {};
+
+  for (const provider of LLM_PROVIDER_IDS) {
+    const value = readSecret(headers, provider);
+    if (value) credentials[provider] = value;
+  }
+
+  // 保留旧版本千问请求头兼容。
+  if (!credentials.qwen) {
+    credentials.qwen =
+      headers.get("x-dashscope-api-key")?.trim() || undefined;
+  }
+
+  return credentials;
 }
 
-export function hasProviderCredential(provider: LlmProviderId): boolean {
-  return Boolean(process.env[ENV_KEYS[provider]]?.trim());
+export function hasProviderCredential(
+  provider: LlmProviderId,
+): boolean {
+  const definition = LLM_PROVIDER_CATALOG.find(
+    (item) => item.id === provider,
+  );
+  return Boolean(
+    definition &&
+      process.env[definition.environmentKey]?.trim(),
+  );
 }

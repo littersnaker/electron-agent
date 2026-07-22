@@ -15,13 +15,39 @@ import {
   sendUsage,
 } from "./server/sse";
 import { streamFinalAnswer } from "./server/stream-final-answer";
-import type { ChatRequestBody, FrontendMessage } from "./server/types";
+import type {
+  ChatRequestBody,
+  FrontendAttachment,
+  FrontendMessage,
+} from "./server/types";
 
 export const runtime = "nodejs";
 
 /** 将前端消息转换成 LangGraph 使用的 BaseMessage。 */
-function toLangChainMessage(message: FrontendMessage): BaseMessage {
-  if (message.role === "user") return new HumanMessage(message.content);
+function toMultimodalParts(
+  content: string,
+  attachments: readonly FrontendAttachment[],
+): Array<Record<string, unknown>> {
+  return [
+    { type: "text", text: content },
+    ...attachments.map((attachment) => ({
+      type: "image_url",
+      image_url: { url: attachment.dataUrl },
+    })),
+  ];
+}
+
+function toLangChainMessage(
+  message: FrontendMessage,
+  attachments: readonly FrontendAttachment[] = [],
+): BaseMessage {
+  if (message.role === "user") {
+    return attachments.length
+      ? new HumanMessage({
+          content: toMultimodalParts(message.content, attachments),
+        })
+      : new HumanMessage(message.content);
+  }
   if (message.role === "assistant") return new AIMessage(message.content);
   return new SystemMessage(message.content);
 }
@@ -29,10 +55,10 @@ function toLangChainMessage(message: FrontendMessage): BaseMessage {
 /**
  * Code Agent 请求入口。
  *
- * V6 变化：
+ * V7 变化：
  * 1. 工作目录以数据库中的项目记录为准，不再允许空路径回退 process.cwd()；
  * 2. workspace_info/read_only 请求在图内短路，不再强行生成任务报告；
- * 3. LLM Provider、Prompt Registry 与 Model Router 已从业务节点解耦；
+ * 3. 模型编排层按能力、凭证和任务评分选择模型，并支持故障降级；
  * 4. SSE、图运行和最终回答拆分到独立模块，保持 Route 可维护。
  */
 export async function POST(request: Request): Promise<Response> {
@@ -48,7 +74,15 @@ export async function POST(request: Request): Promise<Response> {
       body.projectId,
       body.workingDir,
     );
-    const inputMessages = (body.messages || []).map(toLangChainMessage);
+    const sourceMessages = body.messages || [];
+    const inputMessages = sourceMessages.map((message, index) =>
+      toLangChainMessage(
+        message,
+        index === sourceMessages.length - 1
+          ? body.attachments || []
+          : [],
+      ),
+    );
     const sessionId = body.sessionId?.trim() || "default-code-thread";
     const encoder = new TextEncoder();
 

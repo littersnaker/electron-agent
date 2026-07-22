@@ -1,30 +1,35 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import type { LlmCredentials, LlmProviderId } from "../lib/llm/types";
-
-const STORAGE_KEYS: Record<LlmProviderId, string> = {
-  qwen: "DASHSCOPE_API_KEY",
-  openai: "OPENAI_API_KEY",
-  gemini: "GEMINI_API_KEY",
-};
+import {
+  LLM_PROVIDER_CATALOG,
+  LLM_PROVIDER_IDS,
+} from "../lib/llm/registry/providers";
+import type { LlmCredentials } from "../lib/llm/types";
 
 function readStoredKeys(): LlmCredentials {
   if (typeof window === "undefined") return {};
-  return {
-    qwen: window.localStorage.getItem(STORAGE_KEYS.qwen) || undefined,
-    openai: window.localStorage.getItem(STORAGE_KEYS.openai) || undefined,
-    gemini: window.localStorage.getItem(STORAGE_KEYS.gemini) || undefined,
-  };
+  const result: LlmCredentials = {};
+
+  for (const provider of LLM_PROVIDER_CATALOG) {
+    const value = window.localStorage.getItem(provider.environmentKey);
+    if (value) result[provider.id] = value;
+  }
+  return result;
 }
 
 function persistKeys(keys: LlmCredentials): void {
-  for (const provider of Object.keys(STORAGE_KEYS) as LlmProviderId[]) {
-    const value = keys[provider]?.trim();
+  for (const providerId of LLM_PROVIDER_IDS) {
+    const provider = LLM_PROVIDER_CATALOG.find(
+      (item) => item.id === providerId,
+    );
+    if (!provider) continue;
+
+    const value = keys[providerId]?.trim();
     if (value) {
-      window.localStorage.setItem(STORAGE_KEYS[provider], value);
+      window.localStorage.setItem(provider.environmentKey, value);
     } else {
-      window.localStorage.removeItem(STORAGE_KEYS[provider]);
+      window.localStorage.removeItem(provider.environmentKey);
     }
   }
 }
@@ -32,8 +37,8 @@ function persistKeys(keys: LlmCredentials): void {
 /**
  * 多 Provider Key 管理。
  *
- * 使用 lazy initializer 读取 localStorage，不通过 useEffect 同步状态，
- * 避免 React Hooks ESLint 的 set-state-in-effect 问题。
+ * Provider 列表来自公共注册表，后续新增 DeepSeek、GLM、Kimi 等服务时，
+ * 不需要重复修改本 Hook 的字段定义。
  */
 export function useApiKey() {
   const [showKeyModal, setShowKeyModal] = useState(false);

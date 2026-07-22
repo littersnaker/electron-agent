@@ -9,6 +9,10 @@ import type {
   WorkspaceProject,
 } from "../const/pageConst";
 import { buildRetrievedAttachment } from "../lib/rag/attachment-rag";
+import {
+  buildImageAttachmentPayload,
+  buildLlmRequestHeaders,
+} from "../lib/llm/client-request";
 import type { LlmCredentials } from "../lib/llm/types";
 import type {
   InteractiveRequest,
@@ -83,20 +87,6 @@ async function readResponseError(response: Response): Promise<string> {
     // 非 JSON 错误响应继续使用状态码兜底。
   }
   return `模型请求失败（HTTP ${response.status}）`;
-}
-
-function buildLlmRequestHeaders(
-  apiKeys: LlmCredentials,
-  selectedModel: string,
-): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "x-llm-model-id": selectedModel,
-  };
-  if (apiKeys.qwen) headers["x-llm-key-qwen"] = apiKeys.qwen;
-  if (apiKeys.openai) headers["x-llm-key-openai"] = apiKeys.openai;
-  if (apiKeys.gemini) headers["x-llm-key-gemini"] = apiKeys.gemini;
-  return headers;
 }
 
 export function useChatStream({
@@ -242,6 +232,7 @@ export function useChatStream({
             headers: buildLlmRequestHeaders(apiKeys, selectedModel),
             body: JSON.stringify({
               messages: requestMessages.slice(-MAX_CONTEXT_MESSAGES),
+              attachments: buildImageAttachmentPayload(fileOverride),
               sessionId: activeSession.id,
               workingDir: activeProject?.rootPath || "",
               projectId: activeProject?.id || "",

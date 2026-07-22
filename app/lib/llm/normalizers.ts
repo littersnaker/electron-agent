@@ -1,5 +1,7 @@
 import type {
+  LlmContentPart,
   LlmFunctionTool,
+  LlmImagePart,
   LlmMessage,
   LlmToolCall,
 } from "./types";
@@ -26,6 +28,72 @@ function readString(value: unknown): string {
     .join("\n");
 }
 
+function parseDataUrl(value: string): LlmImagePart | undefined {
+  const match = /^data:([^;,]+);base64,(.+)$/u.exec(value);
+  if (!match) return undefined;
+  return {
+    type: "image",
+    mimeType: match[1] || "image/png",
+    data: match[2],
+  };
+}
+
+function readImagePart(value: Record<string, unknown>): LlmImagePart | undefined {
+  if (value.type === "image" && typeof value.data === "string") {
+    return {
+      type: "image",
+      mimeType:
+        typeof value.mimeType === "string"
+          ? value.mimeType
+          : "image/png",
+      data: value.data,
+      name: typeof value.name === "string" ? value.name : undefined,
+    };
+  }
+
+  if (value.type !== "image_url" || !("image_url" in value)) {
+    return undefined;
+  }
+
+  const raw = value.image_url;
+  const url =
+    typeof raw === "string"
+      ? raw
+      : raw &&
+          typeof raw === "object" &&
+          "url" in raw &&
+          typeof raw.url === "string"
+        ? raw.url
+        : undefined;
+  if (!url) return undefined;
+
+  return parseDataUrl(url) || {
+    type: "image",
+    mimeType: "image/*",
+    url,
+  };
+}
+
+function readContentParts(value: unknown): LlmContentPart[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const parts = value.flatMap((item): LlmContentPart[] => {
+    if (typeof item === "string") {
+      return item ? [{ type: "text", text: item }] : [];
+    }
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+
+    if (record.type === "text" && typeof record.text === "string") {
+      return [{ type: "text", text: record.text }];
+    }
+    const image = readImagePart(record);
+    return image ? [image] : [];
+  });
+
+  return parts.length ? parts : undefined;
+}
+
 function readToolCalls(value: unknown): LlmToolCall[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
@@ -49,7 +117,7 @@ function readToolCalls(value: unknown): LlmToolCall[] | undefined {
   return calls.length ? calls : undefined;
 }
 
-/** 将旧的 OpenAI 风格 Record 消息归一化为 Provider 无关消息。 */
+/** 将旧 OpenAI/LangChain 消息归一化为 Provider 无关结构。 */
 export function normalizeLlmMessages(
   values: readonly LlmMessage[] | readonly Record<string, unknown>[],
 ): LlmMessage[] {
@@ -61,10 +129,15 @@ export function normalizeLlmMessages(
       roleValue === "tool"
         ? roleValue
         : "user";
+    const rawContent = "content" in value ? value.content : "";
 
     return {
       role,
-      content: readString("content" in value ? value.content : ""),
+      content: readString(rawContent),
+      parts:
+        "parts" in value && Array.isArray(value.parts)
+          ? (value.parts as LlmContentPart[])
+          : readContentParts(rawContent),
       toolCalls:
         "toolCalls" in value
           ? readToolCalls(value.toolCalls)
@@ -74,7 +147,8 @@ export function normalizeLlmMessages(
       toolCallId:
         "toolCallId" in value && typeof value.toolCallId === "string"
           ? value.toolCallId
-          : "tool_call_id" in value && typeof value.tool_call_id === "string"
+          : "tool_call_id" in value &&
+              typeof value.tool_call_id === "string"
             ? value.tool_call_id
             : undefined,
       name:
@@ -86,13 +160,20 @@ export function normalizeLlmMessages(
 }
 
 export function normalizeLlmTools(
-  values: readonly LlmFunctionTool[] | readonly Record<string, unknown>[] | undefined,
+  values:
+    | readonly LlmFunctionTool[]
+    | readonly Record<string, unknown>[]
+    | undefined,
 ): LlmFunctionTool[] | undefined {
   if (!values) return undefined;
   const tools = values.flatMap((value): LlmFunctionTool[] => {
     if (!("function" in value) || !value.function) return [];
     const fn = value.function;
-    if (typeof fn !== "object" || !("name" in fn) || typeof fn.name !== "string") {
+    if (
+      typeof fn !== "object" ||
+      !("name" in fn) ||
+      typeof fn.name !== "string"
+    ) {
       return [];
     }
     return [
