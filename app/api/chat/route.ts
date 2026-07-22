@@ -5,6 +5,8 @@ import {
   SystemMessage,
 } from "@langchain/core/messages";
 import { NextResponse } from "next/server";
+import { resolveLlmCredentials } from "@/app/lib/llm/credentials";
+import { AUTO_MODEL_ID } from "@/app/lib/llm/model-catalog";
 import { resolveChatWorkspace } from "./server/resolve-chat-workspace";
 import { runAgentGraph } from "./server/run-agent-graph";
 import {
@@ -27,26 +29,18 @@ function toLangChainMessage(message: FrontendMessage): BaseMessage {
 /**
  * Code Agent 请求入口。
  *
- * V5 变化：
+ * V6 变化：
  * 1. 工作目录以数据库中的项目记录为准，不再允许空路径回退 process.cwd()；
  * 2. workspace_info/read_only 请求在图内短路，不再强行生成任务报告；
- * 3. SSE、图运行和最终回答拆分到独立模块，保持 Route 可维护。
+ * 3. LLM Provider、Prompt Registry 与 Model Router 已从业务节点解耦；
+ * 4. SSE、图运行和最终回答拆分到独立模块，保持 Route 可维护。
  */
 export async function POST(request: Request): Promise<Response> {
-  const apiKey =
-    request.headers.get("x-dashscope-api-key") ||
-    process.env.DASHSCOPE_API_KEY;
-  const model =
-    request.headers.get("x-dashscope-model") ||
-    process.env.DASHSCOPE_MODEL ||
-    "qwen-plus";
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "Missing DASHSCOPE_API_KEY" },
-      { status: 500 },
-    );
-  }
+  const credentials = resolveLlmCredentials(request.headers);
+  const preferredModelId =
+    request.headers.get("x-llm-model-id")?.trim() ||
+    request.headers.get("x-dashscope-model")?.trim() ||
+    AUTO_MODEL_ID;
 
   try {
     const body = (await request.json()) as ChatRequestBody;
@@ -72,10 +66,10 @@ export async function POST(request: Request): Promise<Response> {
           const finalState = await runAgentGraph({
             inputMessages,
             sessionId,
-            model,
+            model: preferredModelId,
             workingDir: workspace.workingDir,
             projectId: workspace.projectId,
-            apiKey,
+            llmCredentials: credentials,
             controller,
             encoder,
           });
@@ -131,8 +125,8 @@ export async function POST(request: Request): Promise<Response> {
 
           await streamFinalAnswer({
             finalState,
-            apiKey,
-            model,
+            credentials,
+            preferredModelId,
             controller,
             encoder,
           });

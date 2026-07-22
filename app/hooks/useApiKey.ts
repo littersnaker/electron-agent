@@ -1,42 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import type { LlmCredentials, LlmProviderId } from "../lib/llm/types";
 
+const STORAGE_KEYS: Record<LlmProviderId, string> = {
+  qwen: "DASHSCOPE_API_KEY",
+  openai: "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
+};
+
+function readStoredKeys(): LlmCredentials {
+  if (typeof window === "undefined") return {};
+  return {
+    qwen: window.localStorage.getItem(STORAGE_KEYS.qwen) || undefined,
+    openai: window.localStorage.getItem(STORAGE_KEYS.openai) || undefined,
+    gemini: window.localStorage.getItem(STORAGE_KEYS.gemini) || undefined,
+  };
+}
+
+function persistKeys(keys: LlmCredentials): void {
+  for (const provider of Object.keys(STORAGE_KEYS) as LlmProviderId[]) {
+    const value = keys[provider]?.trim();
+    if (value) {
+      window.localStorage.setItem(STORAGE_KEYS[provider], value);
+    } else {
+      window.localStorage.removeItem(STORAGE_KEYS[provider]);
+    }
+  }
+}
+
+/**
+ * 多 Provider Key 管理。
+ *
+ * 使用 lazy initializer 读取 localStorage，不通过 useEffect 同步状态，
+ * 避免 React Hooks ESLint 的 set-state-in-effect 问题。
+ */
 export function useApiKey() {
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [apiKeys, setApiKeys] = useState<LlmCredentials>(readStoredKeys);
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("/api/config");
-        const { hasDefaultKey } = (await response.json()) as {
-          hasDefaultKey: boolean;
-        };
-        const savedKey = localStorage.getItem("DASHSCOPE_API_KEY") || "";
-
-        setApiKey(savedKey);
-        if (!hasDefaultKey && !savedKey) setShowKeyModal(true);
-      } catch (error) {
-        console.error("无法读取 API Key 配置", error);
-      }
-    };
-
-    void checkAuth();
-  }, []);
-
-  const handleSaveKey = useCallback((key?: string) => {
-    if (key) {
-      localStorage.setItem("DASHSCOPE_API_KEY", key);
-      setApiKey(key);
-    }
+  const handleSaveKeys = useCallback((nextKeys: LlmCredentials) => {
+    persistKeys(nextKeys);
+    setApiKeys(nextKeys);
     setShowKeyModal(false);
   }, []);
 
   return {
-    apiKey,
+    apiKeys,
     showKeyModal,
     openKeyModal: () => setShowKeyModal(true),
-    handleSaveKey,
+    closeKeyModal: () => setShowKeyModal(false),
+    handleSaveKeys,
   };
 }

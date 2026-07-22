@@ -12,6 +12,7 @@ import InteractiveRequestPanel from "./component/InteractiveRequestPanel";
 import TaskPlanningPanel from "./component/TaskPlanningPanel";
 import WorkspaceHeader from "./component/WorkspaceHeader";
 import { AVAILABLE_MODELS } from "./const/modelList";
+import { AUTO_MODEL_ID } from "./lib/llm/model-catalog";
 import { getThemeVariables } from "./const/theme";
 import { useAgentCoordinator } from "./hooks/useAgentCoordinator";
 import { useApiKey } from "./hooks/useApiKey";
@@ -27,9 +28,7 @@ import { useWorkspaceController } from "./hooks/useWorkspaceController";
  * 避免用户每输入一个字符就在渲染阶段重复执行检索。
  */
 export default function Home() {
-  const [selectedModel, setSelectedModel] = useState(
-    "qwen3.7-max-2026-05-20",
-  );
+  const [selectedModel, setSelectedModel] = useState(AUTO_MODEL_ID);
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
@@ -42,7 +41,7 @@ export default function Home() {
     setMessages: workspace.setMessages,
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
-    apiKey: apiKey.apiKey,
+    apiKeys: apiKey.apiKeys,
     selectedModel,
     attachedFile: composer.attachedFile,
     isParsingFile: composer.isParsingFile,
@@ -98,10 +97,13 @@ export default function Home() {
           "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif",
       }}
     >
-      <ApiKeyModal
-        isOpen={apiKey.showKeyModal}
-        onSave={apiKey.handleSaveKey}
-      />
+      {apiKey.showKeyModal && (
+        <ApiKeyModal
+          initialKeys={apiKey.apiKeys}
+          onSave={apiKey.handleSaveKeys}
+          onClose={apiKey.closeKeyModal}
+        />
+      )}
       <CustomTitleBar
         theme={theme}
         onToggleTheme={toggleTheme}

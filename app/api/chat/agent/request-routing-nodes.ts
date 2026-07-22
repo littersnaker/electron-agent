@@ -1,4 +1,7 @@
 import type { BaseMessage } from "@langchain/core/messages";
+import { completeWithLlm } from "@/app/lib/llm/gateway";
+import { getRequestLlmCredentials } from "@/app/lib/llm/request-context";
+import { ReadOnlyPromptText } from "../prompt";
 import type { PlannerValidationStatus } from "./types";
 import { classifyAgentRequest } from "./request-classifier";
 import { AgentState } from "./state";
@@ -15,18 +18,6 @@ import {
 } from "./workspace-context";
 
 type AgentRuntimeState = typeof AgentState.State;
-
-type ReadOnlyModelResponse = {
-  choices?: Array<{ message?: { content?: string | null } }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
-};
-
-const QWEN_URL =
-  "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 
 /** 将 LangChain 消息内容安全转换成纯文本。 */
 function messageContentToText(content: unknown): string {
@@ -156,38 +147,22 @@ export function workspaceInfoAnswerNode(
 export async function readOnlyAnswerNode(
   state: AgentRuntimeState,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(QWEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${state.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: state.model || "qwen-plus",
-      stream: false,
-      messages: [
-        {
-          role: "system",
-          content:
-            "你是白雪条项目的只读分析助手。只能根据提供的项目上下文回答，不得声称修改、创建、删除或验证了文件。信息不足时明确说明缺少什么。回答使用简洁中文 Markdown。",
-        },
-        {
-          role: "user",
-          content: [
-            `用户问题：\n${state.currentUserRequest}`,
-            `项目上下文：\n${state.mergedContext}`,
-          ].join("\n\n"),
-        },
-      ],
-    }),
+  const payload = await completeWithLlm({
+    task: "read_only",
+    preferredModelId: state.model,
+    credentials: getRequestLlmCredentials(),
+    messages: [
+      { role: "system", content: ReadOnlyPromptText },
+      {
+        role: "user",
+        content: [
+          `用户问题：\n${state.currentUserRequest}`,
+          `项目上下文：\n${state.mergedContext}`,
+        ].join("\n\n"),
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`只读回答模型调用失败: ${detail || response.status}`);
-  }
-
-  const payload = (await response.json()) as ReadOnlyModelResponse;
   const directAnswer = payload.choices?.[0]?.message?.content?.trim();
   if (!directAnswer) {
     throw new Error("只读回答模型没有返回有效内容");

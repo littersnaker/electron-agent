@@ -73,11 +73,10 @@ function buildWorkerInput(
     sharedMemory: buildSharedWorkerMemory(state),
     previousMemory:
       previousResult?.workerMemory || createDefaultWorkerMemory(),
-    model: state.model || "qwen-plus",
+    model: state.model || "auto",
     // /api/chat 已经验证工作目录，图内不再静默退回 process.cwd()。
     workingDir: state.workingDir,
     projectId: state.projectId || "",
-    apiKey: state.apiKey || "",
     reviewFeedback: state.reviewFeedback || "",
     reviewIteration: state.reviewIteration || 0,
     interactiveRequest:

@@ -253,10 +253,6 @@ export const AgentState = Annotation.Root({
     reducer: replaceValue,
     default: () => "",
   }),
-  apiKey: Annotation<string>({
-    reducer: replaceValue,
-    default: () => "",
-  }),
   tokenUsage: Annotation<{ prompt: number; completion: number; total: number }>({
     reducer: (currentState, newValue) => {
       if (!newValue) return currentState;
@@ -286,7 +282,6 @@ export const ModifyWorkerState = Annotation.Root({
   model: Annotation<string>,
   workingDir: Annotation<string>,
   projectId: Annotation<string>,
-  apiKey: Annotation<string>,
   reviewFeedback: Annotation<string>({
     reducer: replaceValue,
     default: () => "",

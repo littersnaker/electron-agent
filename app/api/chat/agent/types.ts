@@ -157,7 +157,6 @@ export interface ModifyWorkerInput {
   model: string;
   workingDir: string;
   projectId: string;
-  apiKey: string;
   reviewFeedback: string;
   reviewIteration: number;
   interactiveRequest: InteractiveRequest | null;

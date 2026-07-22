@@ -6,6 +6,9 @@ import path from "path";
 import { z } from "zod";
 import { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { tools } from "../tools";
+import { completeWithLlm } from "@/app/lib/llm/gateway";
+import { getRequestLlmCredentials } from "@/app/lib/llm/request-context";
+import type { LlmChatResponse, LlmTaskType } from "@/app/lib/llm/types";
 import { AgentState, ModifyWorkerState } from "./state";
 import {
   AgentLifecycleEvent,
@@ -46,7 +49,9 @@ import {
 } from "./persistent-terminal-session";
 import {
   CliPromptText,
+  FinalReportAgentPromptText,
   HighLevelPlannerPromptText,
+  ModifyWorkerPromptText,
   PlannerPromptText,
   ReviewerPromptText,
   WorkerMemoryPromptText,
@@ -66,8 +71,6 @@ import {
  * 2. 再看 Planner 校验相关函数，理解为什么要多一层 schema / 唯一性防线；
  * 3. 再看 Modify / Reviewer / Lint / Final Report 这几段主流程。
  */
-const QWEN_URL =
-  "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 // Planner 最多拆出 6 个独立任务，通过 Send 动态并发执行。
 const MAX_PARALLEL_MODIFIERS = 6;
 const MAX_HIGH_LEVEL_ITEMS = 4;
@@ -138,28 +141,6 @@ type TerminalCommandOutcome = {
   interactiveRequest: InteractiveRequest | null;
   tokenUsage: TokenUsage;
 };
-
-interface QwenToolCall {
-  id: string;
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
-
-interface QwenChatResponse {
-  choices?: Array<{
-    message?: {
-      content: string | null;
-      tool_calls?: QwenToolCall[];
-    };
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
 
 type LifecycleTracker = {
   events: AgentLifecycleEvent[];
@@ -249,19 +230,6 @@ function buildLifecycleStateUpdate(
   };
 }
 
-// 统一取模型名，避免每个节点都手写默认值判断。
-function getModel(state: AgentRuntimeState): string {
-  return state.model || "qwen-plus";
-}
-
-// 统一取 API Key。
-// 这样所有节点只管“我要调模型”，不用各自重复兜底逻辑。
-function getApiKey(state: AgentRuntimeState): string {
-  const apiKey = state.apiKey || process.env.DASHSCOPE_API_KEY;
-  if (!apiKey) throw new Error("Missing DASHSCOPE_API_KEY");
-  return apiKey;
-}
-
 // 模型返回的 content 可能是字符串，也可能是多段结构化内容。
 // 这个函数把它统一压平成纯文本，方便后续拼提示词和写日志。
 function normalizeContent(content: unknown): string {
@@ -307,7 +275,7 @@ function getLatestUserRequest(state: AgentRuntimeState): string {
 
 // 把接口 usage 统一整理成项目内部使用的 Token 结构。
 // 这样不同节点返回的 tokenUsage 才能稳定累加。
-function buildTokenUsage(response?: QwenChatResponse["usage"]): TokenUsage {
+function buildTokenUsage(response?: LlmChatResponse["usage"]): TokenUsage {
   if (!response) return { prompt: 0, completion: 0, total: 0 };
   return {
     prompt: response.prompt_tokens || 0,
@@ -403,7 +371,7 @@ async function buildInteractiveAnswerByLlm(
   command: string,
   prompt: string,
 ): Promise<{ answer: string; tokenUsage: TokenUsage }> {
-  const response = await invokeQwen(state, [
+  const response = await invokeLlm(state, [
     {
       role: "system",
       content: CliPromptText,
@@ -416,7 +384,7 @@ async function buildInteractiveAnswerByLlm(
         `当前交互提示:\n${prompt}`,
       ].join("\n\n"),
     },
-  ]);
+  ], "cli");
 
   return {
     answer: stripThinkContent(response.choices?.[0]?.message?.content || "").trim() || "yes",
@@ -650,7 +618,7 @@ async function compressWorkerMemory(
   runtimeMessages: Array<Record<string, unknown>>,
   toolRound: number,
 ): Promise<{ memory: WorkerMemory; tokenUsage: TokenUsage }> {
-  const response = await invokeQwen(state, [
+  const response = await invokeLlm(state, [
     { role: "system", content: WorkerMemoryPromptText },
     {
       role: "user",
@@ -671,7 +639,7 @@ async function compressWorkerMemory(
         )}`,
       ].join("\n\n"),
     },
-  ]);
+  ], "memory");
 
   const content = response.choices?.[0]?.message?.content || "";
   return {
@@ -700,39 +668,23 @@ function buildWorkerContinuationMessage(
 }
 
 /*
- * 所有 Agent 节点调 Qwen 都走这里。
- *
- * 统一封装的原因是：
- * 1. 请求地址、鉴权、模型名逻辑保持一致；
- * 2. 以后如果要换模型商、改参数，不需要每个节点都改；
- * 3. withTools 开关可以明确区分“只思考”和“可调用工具”两种调用场景。
+ * 所有 Agent 节点统一经过 LLM Gateway。
+ * Provider、模型地址、鉴权格式和任务路由都被隔离在 app/lib/llm 中。
  */
-async function invokeQwen(
+async function invokeLlm(
   state: AgentRuntimeState,
   messages: Array<Record<string, unknown>>,
+  task: LlmTaskType,
   withTools = false,
-): Promise<QwenChatResponse> {
-  const response = await fetch(QWEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getApiKey(state)}`,
-    },
-    body: JSON.stringify({
-      model: getModel(state),
-      messages,
-      tools: withTools ? tools : undefined,
-      tool_choice: withTools ? "auto" : undefined,
-      stream: false,
-    }),
+): Promise<LlmChatResponse> {
+  return completeWithLlm({
+    task,
+    preferredModelId: state.model,
+    credentials: getRequestLlmCredentials(),
+    messages,
+    tools: withTools ? tools : undefined,
+    toolChoice: withTools ? "auto" : "none",
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Qwen API failed: ${response.status} ${errorText}`);
-  }
-
-  return (await response.json()) as QwenChatResponse;
 }
 
 // Planner 经常会在 JSON 外面夹带解释文字。
@@ -1985,13 +1937,13 @@ export async function highLevelPlanningAgentNode(
   tracker.transition("PLANNING", "正在生成模块级 High-Level Plan。");
 
   try {
-    const response = await invokeQwen(state, [
+    const response = await invokeLlm(state, [
       { role: "system", content: HighLevelPlannerPromptText },
       {
         role: "user",
         content: state.mergedContext || getLatestUserRequest(state),
       },
-    ]);
+    ], "planner");
     const highLevelPlanRawOutput =
       response.choices?.[0]?.message?.content || "";
     const parsed = parseHighLevelPlanWithSchema(highLevelPlanRawOutput);
@@ -2078,7 +2030,7 @@ export async function planningAgentNode(
   tracker.transition("PLANNING", "正在生成文件级并发叶子任务。");
 
   try {
-    const response = await invokeQwen(state, [
+    const response = await invokeLlm(state, [
       { role: "system", content: PlannerPromptText },
       {
         role: "user",
@@ -2102,7 +2054,7 @@ export async function planningAgentNode(
           .filter(Boolean)
           .join("\n\n"),
       },
-    ]);
+    ], "planner");
 
     const plannerRawOutput = response.choices?.[0]?.message?.content || "";
     tracker.transition("COMPLETED", "Task Planner 已生成待校验叶子任务。");
@@ -2291,7 +2243,6 @@ export async function modifyWorkerNode(
 
   const runtimeState = {
     model: input.model,
-    apiKey: input.apiKey,
     workingDir: input.workingDir,
     projectId: input.projectId,
     interactiveRequest: input.interactiveRequest,
@@ -2366,16 +2317,16 @@ export async function modifyWorkerNode(
 
   try {
     for (let attempt = 0; attempt < MAX_WORKER_TOOL_ROUNDS; attempt += 1) {
-      const response = await invokeQwen(
+      const response = await invokeLlm(
         runtimeState,
         [
           {
             role: "system",
-            content:
-              "你是独立 Modify Worker。只负责当前 Send 分配的任务，持续调用工具直到形成可交给 Merge Patch Manager 的完整文件提案。禁止引用其他 Worker 的工具消息。",
+            content: ModifyWorkerPromptText,
           },
           ...runtimeMessages,
         ],
+        "worker",
         true,
       );
 
@@ -3182,7 +3133,7 @@ export async function reviewerAgentNode(
       80,
     );
 
-    const response = await invokeQwen(state, [
+    const response = await invokeLlm(state, [
       { role: "system", content: ReviewerPromptText },
       {
         role: "user",
@@ -3210,7 +3161,7 @@ ${JSON.stringify(
           `当前文件快照:\n${filePreview || "暂无文件快照"}`,
         ].join("\n\n"),
       },
-    ]);
+    ], "reviewer");
 
     const payload = safeParseReviewPayload(
       response.choices?.[0]?.message?.content || "",
@@ -3577,11 +3528,10 @@ export async function finalReportNode(
   tracker.transition("EXECUTING", "正在汇总完整 Agent 执行结果。" );
 
   try {
-    const response = await invokeQwen(state, [
+    const response = await invokeLlm(state, [
       {
         role: "system",
-        content:
-          "你是 Final Report Agent。根据 High-Level Plan、动态 Worker、Worker Memory、Merge、Reviewer 与 Lint/Build/Test 输出，给出简洁中文 Markdown 结论。必须说明完成情况、涉及文件、自动合并/冲突、上下文压缩、返工、验证结果与剩余风险。",
+        content: FinalReportAgentPromptText,
       },
       {
         role: "user",
@@ -3632,7 +3582,7 @@ ${JSON.stringify(
           `校验输出:\n${truncateText(state.lintSummary || "暂无", 4000)}`,
         ].join("\n\n"),
       },
-    ]);
+    ], "final_report");
 
     const finalReportSummary =
       response.choices?.[0]?.message?.content?.trim() ||

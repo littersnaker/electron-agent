@@ -9,6 +9,7 @@ import type {
   WorkspaceProject,
 } from "../const/pageConst";
 import { buildRetrievedAttachment } from "../lib/rag/attachment-rag";
+import type { LlmCredentials } from "../lib/llm/types";
 import type {
   InteractiveRequest,
   StreamPacket,
@@ -31,7 +32,7 @@ interface UseChatStreamOptions {
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setSessions: Dispatch<SetStateAction<ChatSession[]>>;
   persistSession: PersistSession;
-  apiKey: string;
+  apiKeys: LlmCredentials;
   selectedModel: string;
   attachedFile: AttachedFile | null;
   isParsingFile: boolean;
@@ -84,6 +85,20 @@ async function readResponseError(response: Response): Promise<string> {
   return `模型请求失败（HTTP ${response.status}）`;
 }
 
+function buildLlmRequestHeaders(
+  apiKeys: LlmCredentials,
+  selectedModel: string,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-llm-model-id": selectedModel,
+  };
+  if (apiKeys.qwen) headers["x-llm-key-qwen"] = apiKeys.qwen;
+  if (apiKeys.openai) headers["x-llm-key-openai"] = apiKeys.openai;
+  if (apiKeys.gemini) headers["x-llm-key-gemini"] = apiKeys.gemini;
+  return headers;
+}
+
 export function useChatStream({
   activeSession,
   activeProject,
@@ -91,7 +106,7 @@ export function useChatStream({
   setMessages,
   setSessions,
   persistSession,
-  apiKey,
+  apiKeys,
   selectedModel,
   attachedFile,
   isParsingFile,
@@ -224,11 +239,7 @@ export function useChatStream({
           activeSession.mode === "code" ? "/api/chat" : "/api/qa",
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-dashscope-api-key": apiKey,
-              "x-dashscope-model": selectedModel,
-            },
+            headers: buildLlmRequestHeaders(apiKeys, selectedModel),
             body: JSON.stringify({
               messages: requestMessages.slice(-MAX_CONTEXT_MESSAGES),
               sessionId: activeSession.id,
@@ -426,7 +437,7 @@ export function useChatStream({
       activeProject,
       activeSession,
       agents,
-      apiKey,
+      apiKeys,
       attachedFile,
       clearAfterSubmit,
       isParsingFile,

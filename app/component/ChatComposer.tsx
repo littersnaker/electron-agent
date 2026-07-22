@@ -3,12 +3,8 @@
 import type { ChangeEvent, RefObject } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import type { AttachedFile } from "../const/pageConst";
+import type { ModelOption } from "../const/modelList";
 import ModelSelector from "./ModelSelector";
-
-interface ModelOption {
-  id: string;
-  name: string;
-}
 
 interface ChatComposerProps {
   mode?: "qa" | "code";
@@ -20,7 +16,7 @@ interface ChatComposerProps {
   isStreaming: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onFileSelect: (event: ChangeEvent<HTMLInputElement>) => void;
-  models: ModelOption[];
+  models: readonly ModelOption[];
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
   onSubmit: () => void;

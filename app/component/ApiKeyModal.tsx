@@ -1,11 +1,40 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
+import type { LlmCredentials, LlmProviderId } from "../lib/llm/types";
 
 interface Props {
-  isOpen: boolean;
-  onSave: (key: string) => void;
+  initialKeys: LlmCredentials;
+  onSave: (keys: LlmCredentials) => void;
+  onClose: () => void;
 }
+
+const PROVIDERS: readonly Array<{
+  id: LlmProviderId;
+  name: string;
+  environmentKey: string;
+  placeholder: string;
+}> = [
+  {
+    id: "qwen",
+    name: "Qwen / DashScope",
+    environmentKey: "DASHSCOPE_API_KEY",
+    placeholder: "sk-...",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    environmentKey: "OPENAI_API_KEY",
+    placeholder: "sk-...",
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    environmentKey: "GEMINI_API_KEY",
+    placeholder: "AIza...",
+  },
+];
 
 const COLORS = {
   text: "var(--text-primary)",
@@ -14,25 +43,34 @@ const COLORS = {
   material: "var(--glass-solid)",
   materialSoft: "var(--glass)",
   border: "var(--border)",
-  blue: "var(--accent-blue)",
 };
 
-export default function ApiKeyModal({ isOpen, onSave }: Props) {
-  const [key, setKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+export default function ApiKeyModal({ initialKeys, onSave, onClose }: Props) {
+  const [keys, setKeys] = useState<LlmCredentials>(initialKeys);
+  const [visibleProviders, setVisibleProviders] = useState<
+    ReadonlySet<LlmProviderId>
+  >(() => new Set());
 
-  useEffect(() => {
-    const changeIsOpen = () => {
-      if (isOpen) setShowKey(false);
-    };
-    changeIsOpen();
-  }, [isOpen]);
+  const updateKey = (provider: LlmProviderId, value: string) => {
+    setKeys((current) => ({ ...current, [provider]: value }));
+  };
 
-  if (!isOpen) return null;
+  const toggleVisibility = (provider: LlmProviderId) => {
+    setVisibleProviders((current) => {
+      const next = new Set(current);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (key.trim()) onSave(key.trim());
+    onSave({
+      qwen: keys.qwen?.trim() || undefined,
+      openai: keys.openai?.trim() || undefined,
+      gemini: keys.gemini?.trim() || undefined,
+    });
   };
 
   return (
@@ -46,141 +84,100 @@ export default function ApiKeyModal({ isOpen, onSave }: Props) {
     >
       <form
         onSubmit={submit}
-        className="w-[420px] max-w-full overflow-hidden rounded-[24px] border"
+        className="w-[500px] max-w-full overflow-hidden rounded-[24px] border"
         style={{
           background: COLORS.material,
           borderColor: COLORS.border,
           boxShadow:
             "var(--shadow-float), inset 0 1px 0 rgba(255,255,255,0.09)",
-          backdropFilter: "blur(38px) saturate(150%)",
-          WebkitBackdropFilter: "blur(38px) saturate(150%)",
         }}
       >
-        <div className="px-6 pb-4 pt-6 text-center">
-          <div
-            className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[15px] border"
-            style={{
-              background:
-                "linear-gradient(145deg, rgba(10,132,255,0.22), rgba(191,90,242,0.16))",
-              borderColor: COLORS.border,
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
-            }}
-          >
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
-              <path
-                d="M8.2 11.5V8.7A3.8 3.8 0 0 1 12 4.9a3.8 3.8 0 0 1 3.8 3.8v2.8"
-                stroke="#64b5ff"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-              <rect
-                x="5.6"
-                y="10.5"
-                width="12.8"
-                height="9"
-                rx="2.4"
-                stroke="#64b5ff"
-                strokeWidth="1.8"
-              />
-              <circle cx="12" cy="15" r="1.2" fill="#64b5ff" />
-            </svg>
-          </div>
+        <div className="px-6 pb-3 pt-6">
           <h2
             className="text-[19px] font-semibold tracking-[-0.02em]"
             style={{ color: COLORS.text }}
           >
-            配置千问 API Key
+            模型服务配置
           </h2>
           <p
-            className="mx-auto mt-2 max-w-[330px] text-[12px] leading-5"
+            className="mt-2 text-[12px] leading-5"
             style={{ color: COLORS.textMuted }}
           >
-            Key 仅保存在本机浏览器存储中，并随请求发送到当前模型服务。
+            Key 仅保存在本机浏览器存储中。未填写的 Provider 可使用服务端环境变量。
           </p>
         </div>
 
-        <div className="px-6 pb-6">
-          <label
-            htmlFor="dashscope-api-key"
-            className="mb-2 block text-[11px] font-medium"
-            style={{ color: COLORS.textMuted }}
-          >
-            API Key
-          </label>
-          <div
-            className="flex h-11 items-center rounded-[12px] border px-3 transition-colors focus-within:border-[#0a84ff]"
-            style={{
-              background: "var(--glass-black)",
-              borderColor: COLORS.border,
-            }}
-          >
-            <input
-              id="dashscope-api-key"
-              type={showKey ? "text" : "password"}
-              autoFocus
-              autoComplete="off"
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-quaternary)]"
-              style={{ color: COLORS.text }}
-              placeholder="sk-..."
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setShowKey((value) => !value)}
-              className="ml-2 flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.06]"
-              style={{ color: COLORS.textSubtle }}
-              aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
-            >
-              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
-                <path
-                  d="M2.5 10s2.7-4.2 7.5-4.2 7.5 4.2 7.5 4.2-2.7 4.2-7.5 4.2S2.5 10 2.5 10Z"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-                <circle
-                  cx="10"
-                  cy="10"
-                  r="2"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                />
-              </svg>
-            </button>
-          </div>
+        <div className="space-y-3 px-6 pb-5">
+          {PROVIDERS.map((provider) => {
+            const visible = visibleProviders.has(provider.id);
+            return (
+              <label key={provider.id} className="block">
+                <span
+                  className="mb-1.5 flex items-center justify-between text-[11px] font-medium"
+                  style={{ color: COLORS.textMuted }}
+                >
+                  <span>{provider.name}</span>
+                  <span style={{ color: COLORS.textSubtle }}>
+                    {provider.environmentKey}
+                  </span>
+                </span>
+                <div
+                  className="flex h-11 items-center rounded-[12px] border px-3"
+                  style={{
+                    background: "var(--glass-black)",
+                    borderColor: COLORS.border,
+                  }}
+                >
+                  <input
+                    type={visible ? "text" : "password"}
+                    autoComplete="off"
+                    className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+                    style={{ color: COLORS.text }}
+                    placeholder={provider.placeholder}
+                    value={keys[provider.id] || ""}
+                    onChange={(event) =>
+                      updateKey(provider.id, event.target.value)
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility(provider.id)}
+                    className="ml-2 rounded-lg px-2 py-1 text-[10px]"
+                    style={{ color: COLORS.textSubtle }}
+                  >
+                    {visible ? "隐藏" : "显示"}
+                  </button>
+                </div>
+              </label>
+            );
+          })}
+        </div>
 
-          <button
-            type="submit"
-            disabled={!key.trim()}
-            className="mt-4 flex h-11 w-full items-center justify-center rounded-[12px] text-[13px] font-semibold text-white transition-all active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-35"
-            style={{
-              background: "linear-gradient(180deg, #168dff 0%, #0879eb 100%)",
-              boxShadow:
-                "0 10px 24px rgba(10,132,255,0.2), inset 0 1px 0 rgba(255,255,255,0.2)",
-            }}
-          >
-            保存并使用
-          </button>
-
+        <div
+          className="flex gap-2 border-t px-6 py-4"
+          style={{ borderColor: COLORS.border }}
+        >
           <button
             type="button"
-            onClick={() => onSave("")}
-            className="mt-2 flex h-10 w-full items-center justify-center rounded-[12px] border text-[12px] font-medium transition-colors hover:bg-white/[0.055]"
+            onClick={onClose}
+            className="h-10 flex-1 rounded-[12px] border text-[12px] font-medium"
             style={{
               background: COLORS.materialSoft,
               borderColor: COLORS.border,
               color: COLORS.textMuted,
             }}
           >
-            使用应用内默认 Key
+            取消
           </button>
-
-          <p
-            className="mt-3 text-center text-[10px]"
-            style={{ color: COLORS.textSubtle }}
+          <button
+            type="submit"
+            className="h-10 flex-1 rounded-[12px] text-[12px] font-semibold text-white"
+            style={{
+              background: "linear-gradient(180deg, #168dff 0%, #0879eb 100%)",
+            }}
           >
-            可以稍后在右上角的设置中重新配置
-          </p>
+            保存配置
+          </button>
         </div>
       </form>
     </div>

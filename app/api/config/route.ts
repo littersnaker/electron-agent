@@ -1,11 +1,22 @@
-// app/api/config/route.ts
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import { hasProviderCredential } from "@/app/lib/llm/credentials";
+import { LLM_MODEL_CATALOG } from "@/app/lib/llm/model-catalog";
 
-export async function GET() {
-  // 检查环境变量是否存在
-  const hasDefaultKey = !!process.env.DASHSCOPE_API_KEY;
-  
+export const runtime = "nodejs";
+
+/** 仅返回配置状态和公开模型元数据，永远不返回服务端 API Key。 */
+export function GET(): Response {
   return NextResponse.json({
-    hasDefaultKey,
+    providers: {
+      qwen: { hasDefaultKey: hasProviderCredential("qwen") },
+      openai: { hasDefaultKey: hasProviderCredential("openai") },
+      gemini: { hasDefaultKey: hasProviderCredential("gemini") },
+    },
+    models: LLM_MODEL_CATALOG.map((model) => ({
+      id: model.id,
+      provider: model.provider,
+      name: model.name,
+      description: model.description,
+    })),
   });
 }
