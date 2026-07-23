@@ -29,6 +29,15 @@ export interface TokenInfo {
   prompt: number;
   completion: number;
   total: number;
+  /** tokens / images / videos / requests。 */
+  unit?: "tokens" | "images" | "videos" | "requests";
+  /** 媒体任务显示“图片额度/视频额度”，文本任务默认显示 Tokens。 */
+  label?: string;
+  /** 视觉质量检查等辅助 LLM 的 Token 消耗。 */
+  auxiliaryPrompt?: number;
+  auxiliaryCompletion?: number;
+  auxiliaryTotal?: number;
+  auxiliaryLabel?: string;
 }
 
 export interface AgentEventPayload {

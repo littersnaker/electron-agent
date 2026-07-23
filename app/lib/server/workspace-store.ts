@@ -12,7 +12,10 @@ export type SessionMode = "qa" | "code";
 export type StoredMessageAttachment = {
   name: string;
   type: string;
-  dataUrl: string;
+  dataUrl?: string;
+  url?: string;
+  assetKind?: "image" | "video" | "file";
+  downloadName?: string;
 };
 
 export type StoredMessage = {

@@ -1,34 +1,38 @@
-// src/app/utils/fileParser.ts
 import type { AttachedFile } from "../const/pageConst";
 import { parseImageDataUrl } from "../const/pageConst";
 
+function readBinaryFile(file: File): Promise<AttachedFile> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const dataUrl = String(event.target?.result || "");
+      const parsed = parseImageDataUrl(dataUrl);
+      const base64 = parsed?.data || dataUrl.split(",")[1] || "";
+
+      if (!base64) {
+        reject(new Error("媒体文件读取结果无效"));
+        return;
+      }
+
+      resolve({
+        name: file.name,
+        type: parsed?.mimeType || file.type,
+        dataUrl,
+        base64,
+        size: file.size,
+      });
+    };
+
+    reader.onerror = () => reject(new Error("媒体文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function parseSelectedFile(file: File): Promise<AttachedFile> {
-  // 图片：dataUrl 用于预览，base64 使用纯数据供模型请求。
-  if (file.type.startsWith("image/")) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = (event) => {
-        const dataUrl = String(event.target?.result || "");
-        const parsed = parseImageDataUrl(dataUrl);
-
-        if (!parsed?.data) {
-          reject(new Error("图片读取结果无效"));
-          return;
-        }
-
-        resolve({
-          name: file.name,
-          type: parsed.mimeType || file.type,
-          dataUrl,
-          base64: parsed.data,
-          size: file.size,
-        });
-      };
-
-      reader.onerror = () => reject(new Error("图片读取失败"));
-      reader.readAsDataURL(file);
-    });
+  // 图片 / 视频都保留 Data URL，分别供图片理解、改图和视频模式使用。
+  if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+    return readBinaryFile(file);
   }
 
   // PDF 文本层解析。

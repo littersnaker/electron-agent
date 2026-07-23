@@ -51,3 +51,7 @@ out/
 out-server/
 .trae/*
 dist/
+
+agents/*
+
+app.zip

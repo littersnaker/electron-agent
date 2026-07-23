@@ -1,5 +1,5 @@
-import React from "react";
-import { ChatSession, WorkspaceProject } from "../const/pageConst";
+import type { MouseEvent } from "react";
+import type { ChatSession, WorkspaceProject } from "../const/pageConst";
 
 interface ChatSidebarProps {
   sessions: ChatSession[];
@@ -11,7 +11,7 @@ interface ChatSidebarProps {
   addProject: () => void;
   reindexProject: (projectId: string) => void;
   switchSession: (id: string) => void;
-  deleteSession: (id: string, event: React.MouseEvent) => void;
+  deleteSession: (id: string, event: MouseEvent) => void;
 }
 
 const COLORS = {
@@ -113,14 +113,14 @@ function SessionItem({
         tabIndex={0}
         onClick={(event) => {
           event.stopPropagation();
-          deleteSession(session.id, event as unknown as React.MouseEvent);
+          deleteSession(session.id, event as unknown as MouseEvent);
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.stopPropagation();
             deleteSession(
               session.id,
-              event as unknown as React.MouseEvent,
+              event as unknown as MouseEvent,
             );
           }
         }}

@@ -131,9 +131,9 @@ export const LLM_MODEL_CATALOG: readonly LlmModelDefinition[] = [
     chatCompatible: false,
   },
   {
-    id: "qwen:qwen-vl-max",
+    id: "qwen:qwen-image-2.0-pro-2026-06-22",
     provider: "qwen",
-    model: "qwen-vl-max",
+    model: "qwen-image-2.0-pro-2026-06-22",
     name: "Qwen VL Max",
     description: "界面截图、图片理解和图文问答",
     capabilities: ["text", "vision", "stream", "reasoning", "long_context"],

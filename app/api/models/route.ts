@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hasProviderCredential } from "@/app/lib/llm/credentials";
 import { LLM_MODEL_CATALOG } from "@/app/lib/llm/registry/models";
+import { MEDIA_MODEL_CATALOG } from "@/app/lib/media/catalog";
 import { LLM_PROVIDER_CATALOG } from "@/app/lib/llm/registry/providers";
 
 export const runtime = "nodejs";
@@ -26,5 +27,6 @@ export function GET(): Response {
       capabilities: model.capabilities,
       chatCompatible: model.chatCompatible !== false,
     })),
+    mediaModels: MEDIA_MODEL_CATALOG,
   });
 }

@@ -9,7 +9,8 @@ export type AgentKind =
   | "researcher"
   | "coder"
   | "reviewer"
-  | "terminal";
+  | "terminal"
+  | "media";
 
 export type AgentStatus =
   | "idle"
@@ -32,42 +33,13 @@ export interface AgentInstance {
 export const AGENT_BLUEPRINTS: Array<
   Pick<AgentInstance, "id" | "name" | "type" | "currentTask">
 > = [
-  {
-    id: "orchestrator",
-    name: "Orchestrator",
-    type: "orchestrator",
-    currentTask: "等待接收任务",
-  },
-  {
-    id: "planner",
-    name: "Planner",
-    type: "planner",
-    currentTask: "等待任务拆解",
-  },
-  {
-    id: "researcher",
-    name: "Researcher",
-    type: "researcher",
-    currentTask: "等待检索上下文",
-  },
-  {
-    id: "coder",
-    name: "Coding Agent",
-    type: "coder",
-    currentTask: "等待代码任务",
-  },
-  {
-    id: "reviewer",
-    name: "Reviewer",
-    type: "reviewer",
-    currentTask: "等待质量审查",
-  },
-  {
-    id: "terminal",
-    name: "Terminal Agent",
-    type: "terminal",
-    currentTask: "等待终端任务",
-  },
+  { id: "orchestrator", name: "Orchestrator", type: "orchestrator", currentTask: "等待接收任务" },
+  { id: "planner", name: "Planner", type: "planner", currentTask: "等待任务拆解" },
+  { id: "researcher", name: "Researcher", type: "researcher", currentTask: "等待检索上下文" },
+  { id: "coder", name: "Coding Agent", type: "coder", currentTask: "等待代码任务" },
+  { id: "media", name: "Media Agent", type: "media", currentTask: "等待图片或视频任务" },
+  { id: "reviewer", name: "Reviewer", type: "reviewer", currentTask: "等待质量审查" },
+  { id: "terminal", name: "Terminal Agent", type: "terminal", currentTask: "等待终端任务" },
 ];
 
 export function createIdleAgents(): AgentInstance[] {
@@ -107,10 +79,16 @@ const AGENT_META: Record<
     description: "生成、修改并组织代码变更",
     path: "M7.2 6.2 3.5 10l3.7 3.8M12.8 6.2l3.7 3.8-3.7 3.8M11.5 3.8 8.5 16.2",
   },
+  media: {
+    accent: "#bf5af2",
+    soft: "rgba(191,90,242,0.14)",
+    description: "负责生图、改图、视频生成和结果下载",
+    path: "M4.5 14.5 8 11l2.5 2.4 5-5M5 5h10v10H5zM12.6 7.4h.01",
+  },
   reviewer: {
     accent: "#ffd60a",
     soft: "rgba(255,214,10,0.14)",
-    description: "检查差异、风险、测试和可维护性",
+    description: "检查结果、风险和可用性",
     path: "M4.2 10.2 8 14l7.8-8M4.5 4.2h6.2M4.5 7.2h4.2M11.8 14.5h3.7",
   },
   terminal: {
@@ -178,19 +156,23 @@ export default function AgentPanel({
   const [expanded, setExpanded] = useState(true);
 
   const summary = useMemo(() => {
-    const running = agents.filter((agent) =>
+    const participating = agents.filter(
+      (agent) => agent.status !== "idle" && agent.status !== "queued",
+    );
+    const running = participating.filter((agent) =>
       ["running", "thinking"].includes(agent.status),
     ).length;
-    const completed = agents.filter(
+    const completed = participating.filter(
       (agent) => agent.status === "completed",
     ).length;
-    const progress = agents.length
+    const progress = participating.length
       ? Math.round(
-          agents.reduce((total, agent) => total + agent.progress, 0) /
-            agents.length,
+          participating.reduce((total, agent) => total + agent.progress, 0) /
+            participating.length,
         )
       : 0;
-    return { running, completed, progress };
+
+    return { running, completed, participating: participating.length, progress };
   }, [agents]);
 
   return (
@@ -211,63 +193,30 @@ export default function AgentPanel({
         onClick={() => setExpanded((value) => !value)}
         className="flex shrink-0 items-center justify-between px-4 py-4 text-left transition-colors hover:bg-[var(--glass-soft)]"
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[13px] border"
-            style={{
-              background:
-                "linear-gradient(145deg, rgba(10,132,255,0.18), rgba(191,90,242,0.15))",
-              borderColor: "var(--border)",
-              color: "#83c5ff",
-            }}
-          >
-            {isStreaming && (
-              <span className="absolute inset-0 animate-ping rounded-[13px] border border-[#64b5ff]/20" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-[13px] font-semibold">Agent Orchestra</h2>
+            {summary.running > 0 && (
+              <span className="rounded-full bg-[#0a84ff]/15 px-2 py-0.5 text-[9px] font-medium text-[#64b5ff]">
+                {summary.running} 运行中
+              </span>
             )}
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
-              <circle cx="7" cy="7" r="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <circle cx="17" cy="7" r="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <circle cx="12" cy="17" r="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <path d="m8.8 8.5 2 6.2M15.2 8.5l-2 6.2M9.2 7h5.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </span>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-[13px] font-semibold tracking-[-0.01em]" style={{ color: "var(--text-primary)" }}>
-                Agent Orchestra
-              </h2>
-              {summary.running > 0 && (
-                <span className="rounded-full bg-[#0a84ff]/15 px-2 py-0.5 text-[9px] font-medium text-[#64b5ff]">
-                  {summary.running} 运行中
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-              {isStreaming
-                ? `协作进度 ${summary.progress}%`
-                : `${summary.completed}/${agents.length} 个角色已完成`}
-            </p>
           </div>
+          <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+            {isStreaming
+              ? `协作进度 ${summary.progress}%`
+              : `${summary.completed}/${summary.participating} 个参与角色已完成`}
+          </p>
         </div>
-        <svg
-          viewBox="0 0 20 20"
-          className={`h-4 w-4 transition-transform duration-300 ${
-            expanded ? "rotate-180" : ""
-          }`}
-          fill="none"
-          style={{ color: "var(--text-tertiary)" }}
-        >
-          <path d="m5.5 7.5 4.5 4.5 4.5-4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span className="text-[var(--text-tertiary)]">{expanded ? "⌃" : "⌄"}</span>
       </button>
 
-      <div className="mx-4 h-[3px] shrink-0 overflow-hidden rounded-full" style={{ background: "var(--glass)" }}>
+      <div className="mx-4 h-[3px] shrink-0 overflow-hidden rounded-full bg-[var(--glass)]">
         <span
           className="block h-full rounded-full transition-[width] duration-500"
           style={{
             width: `${summary.progress}%`,
             background: "linear-gradient(90deg, #0a84ff, #bf5af2)",
-            boxShadow: "0 0 16px rgba(10,132,255,0.4)",
           }}
         />
       </div>
@@ -282,28 +231,17 @@ export default function AgentPanel({
               return (
                 <article
                   key={agent.id}
-                  className="agent-card relative overflow-hidden rounded-[16px] border px-3 py-3 transition-all duration-300"
+                  className="relative overflow-hidden rounded-[16px] border px-3 py-3 transition-all duration-300"
                   style={{
                     background: active ? meta.soft : "var(--glass-soft)",
                     borderColor: active ? `${meta.accent}38` : "var(--border)",
-                    boxShadow: active ? `0 12px 28px ${meta.soft}` : "none",
                   }}
                 >
-                  {active && (
-                    <span
-                      className="agent-shimmer pointer-events-none absolute inset-y-0 w-20"
-                      style={{
-                        background:
-                          "linear-gradient(90deg, transparent, rgba(255,255,255,0.11), transparent)",
-                      }}
-                    />
-                  )}
-
-                  <div className="relative flex items-start gap-3">
+                  <div className="flex items-start gap-3">
                     <AgentGlyph type={agent.type} status={agent.status} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="truncate text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                        <div className="truncate text-[12px] font-semibold">
                           {agent.name}
                         </div>
                         <span
@@ -315,27 +253,17 @@ export default function AgentPanel({
                                 : active
                                   ? meta.accent
                                   : "var(--text-tertiary)",
-                            background:
-                              agent.status === "error"
-                                ? "rgba(255,69,58,0.12)"
-                                : active
-                                  ? meta.soft
-                                  : "var(--glass)",
+                            background: active ? meta.soft : "var(--glass)",
                           }}
                         >
                           {statusLabel(agent.status)}
                         </span>
                       </div>
-                      <p
-                        className="mt-1 line-clamp-2 text-[10px] leading-4"
-                        style={{ color: "var(--text-secondary)" }}
-                        title={agent.currentTask || meta.description}
-                      >
+                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--text-secondary)]">
                         {agent.currentTask || meta.description}
                       </p>
-
                       <div className="mt-2.5 flex items-center gap-2">
-                        <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full" style={{ background: "var(--glass)" }}>
+                        <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--glass)]">
                           <span
                             className="block h-full rounded-full transition-[width] duration-500"
                             style={{
@@ -344,7 +272,7 @@ export default function AgentPanel({
                             }}
                           />
                         </div>
-                        <span className="w-7 text-right font-mono text-[9px] tabular-nums" style={{ color: "var(--text-tertiary)" }}>
+                        <span className="w-7 text-right font-mono text-[9px] tabular-nums text-[var(--text-tertiary)]">
                           {agent.progress}%
                         </span>
                       </div>
@@ -356,19 +284,6 @@ export default function AgentPanel({
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes agentShimmer {
-          from { transform: translateX(-140%); }
-          to { transform: translateX(420%); }
-        }
-        @keyframes agentCardEnter {
-          from { opacity: 0; transform: translateY(8px) scale(.985); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        .agent-card { animation: agentCardEnter 320ms var(--ease-apple); }
-        .agent-shimmer { animation: agentShimmer 1.8s ease-in-out infinite; }
-      `}</style>
     </aside>
   );
 }

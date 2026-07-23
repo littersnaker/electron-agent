@@ -1,6 +1,5 @@
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance } from "../AgentPanel";
-import { STAGE_DEFINITIONS } from "./config";
 import type {
   PlanningStageDefinition,
   PlanningStageStatus,
@@ -8,10 +7,7 @@ import type {
   PlanningSummary,
 } from "./types";
 
-function matchesActivity(
-  activity: ToolActivity,
-  keys: string[],
-): boolean {
+function matchesActivity(activity: ToolActivity, keys: string[]): boolean {
   const normalized = activity.label.toLocaleLowerCase();
   return keys.some((key) =>
     normalized.includes(key.toLocaleLowerCase()),
@@ -62,9 +58,7 @@ function normalizeSequentialStatuses(
 ): PlanningStageStatus[] {
   const furthestSignalIndex = directStatuses.reduce(
     (furthest, status, index) =>
-      ["active", "completed", "error"].includes(status)
-        ? index
-        : furthest,
+      ["active", "completed", "error"].includes(status) ? index : furthest,
     -1,
   );
 
@@ -111,9 +105,7 @@ function resolveDetail(
   agentStatus?: string,
 ): string {
   const latestActivity = [...activities]
-    .filter((activity) =>
-      matchesActivity(activity, definition.activityKeys),
-    )
+    .filter((activity) => matchesActivity(activity, definition.activityKeys))
     .sort((left, right) => right.startedAt - left.startedAt)[0];
   if (latestActivity) return latestActivity.label;
 
@@ -126,22 +118,23 @@ function resolveDetail(
   return definition.description;
 }
 
-/** 根据 Agent 和工具活动生成纯派生视图，不在 Effect 中维护重复状态。 */
+/**
+ * 根据指定阶段定义派生任务规划视图。
+ * 媒体和代码使用不同 definitions，避免右侧面板显示错误流程。
+ */
 export function buildPlanningStages(
+  definitions: PlanningStageDefinition[],
   agents: AgentInstance[],
   activities: ToolActivity[],
   isStreaming: boolean,
   agentStatus?: string,
 ): PlanningStageView[] {
-  const directStatuses = STAGE_DEFINITIONS.map((definition) =>
+  const directStatuses = definitions.map((definition) =>
     resolveDirectStatus(definition, agents, activities),
   );
-  const statuses = normalizeSequentialStatuses(
-    directStatuses,
-    isStreaming,
-  );
+  const statuses = normalizeSequentialStatuses(directStatuses, isStreaming);
 
-  return STAGE_DEFINITIONS.map((definition, index) => ({
+  return definitions.map((definition, index) => ({
     ...definition,
     status: statuses[index],
     progress: resolveProgress(statuses[index], definition, agents),

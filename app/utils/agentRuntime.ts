@@ -22,6 +22,10 @@ const AGENT_KIND_ALIASES: Record<string, AgentKind> = {
   terminal: "terminal",
   shell: "terminal",
   command: "terminal",
+  media: "media",
+  image: "media",
+  video: "media",
+  draw: "media",
 };
 
 export function buildWelcomeMessages(
@@ -46,6 +50,10 @@ export function normalizeAgentKind(value?: string): AgentKind {
 
 export function inferAgentKind(text: string): AgentKind {
   const normalized = text.toLowerCase();
+
+  if (/media|image|video|draw|生图|改图|视频|绘图|海报/.test(normalized)) {
+    return "media";
+  }
 
   if (
     /terminal|shell|command|run_terminal|终端|命令|npm|pnpm|yarn|test|build/.test(

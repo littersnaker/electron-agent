@@ -1,25 +1,23 @@
+export type AttachmentAssetKind = "image" | "video" | "file";
+
 export type MessageAttachment = {
   name: string;
   type: string;
-  /** 可直接用于浏览器 img src 的完整 Data URL。 */
-  dataUrl: string;
+  /** 本地生成结果或用户上传文件使用 Data URL，能直接预览和下载。 */
+  dataUrl?: string;
+  /** 视频等大文件可保留百炼临时 URL，避免把大文件写入 SQLite。 */
+  url?: string;
+  assetKind?: AttachmentAssetKind;
+  downloadName?: string;
 };
 
 export type Message = {
   role: "user" | "assistant";
   content: string;
-  /** 仅用于聊天记录展示；模型请求仍通过顶层 attachments 单独发送。 */
+  /** 用户附件与 AI 生成结果使用同一种结构，UI 不需要写两套渲染逻辑。 */
   attachments?: MessageAttachment[];
 };
 
-/**
- * 上传附件的统一前端结构。
- *
- * - dataUrl：浏览器预览使用的完整 Data URL；
- * - base64：纯 Base64，保留给模型请求与旧代码兼容；
- * - textContent：PDF / 文本文档提取出的正文；
- * - size：原始文件字节数。
- */
 export type AttachedFile = {
   name: string;
   type: string;
@@ -29,10 +27,48 @@ export type AttachedFile = {
   size?: number;
 };
 
+export type MediaMode =
+  | "text-to-image"
+  | "image-edit"
+  | "text-to-video"
+  | "image-to-video"
+  | "reference-to-video"
+  | "video-edit";
+
+export type ComposerMode = "chat" | MediaMode;
+
+export type TypographyPolicy =
+  | "avoid-generated-text"
+  | "strict-short-text"
+  | "model-default";
+
+/**
+ * 图片编辑保真策略。
+ *
+ * - precise：尽量只改目标区域，适合 UI 截图、商品图和文字替换；
+ * - balanced：保留主要结构，同时允许模型做必要的局部重绘；
+ * - creative：允许大幅重构，适合风格迁移和创意改造。
+ */
+export type ImageEditFidelity = "precise" | "balanced" | "creative";
+
+export function isImageMimeType(mimeType: string | undefined): boolean {
+  return Boolean(mimeType?.startsWith("image/"));
+}
+
+export function isVideoMimeType(mimeType: string | undefined): boolean {
+  return Boolean(mimeType?.startsWith("video/"));
+}
+
 export function isImageAttachment(
   attachment: Pick<AttachedFile, "type"> | null | undefined,
 ): boolean {
-  return Boolean(attachment?.type.startsWith("image/"));
+  return isImageMimeType(attachment?.type);
+}
+
+export function isVideoAttachment(
+  attachment: Pick<AttachedFile, "type"> | null | undefined,
+): boolean {
+  return isVideoMimeType(attachment?.type);
 }
 
 export function parseImageDataUrl(
@@ -44,12 +80,12 @@ export function parseImageDataUrl(
   if (!match) return null;
 
   return {
-    mimeType: match[1] || "image/png",
+    mimeType: match[1] || "application/octet-stream",
     data: match[2].replace(/\s+/gu, ""),
   };
 }
 
-/** 将附件统一为可直接用于 img src 的 Data URL。 */
+/** 将附件统一为可直接用于 img / video src 的 Data URL。 */
 export function resolveAttachmentDataUrl(
   attachment: Pick<AttachedFile, "type" | "base64" | "dataUrl">,
 ): string {
@@ -64,12 +100,14 @@ export function resolveAttachmentDataUrl(
 }
 
 /**
- * 文件解析完成后立即归一化，确保 UI 与请求层读取的是同一份图片数据。
+ * 文件读取后立即归一化，保证预览、聊天请求和媒体请求读取同一份数据。
  */
 export function normalizeAttachedFile(
   attachment: AttachedFile,
 ): AttachedFile {
-  if (!isImageAttachment(attachment)) return attachment;
+  if (!isImageAttachment(attachment) && !isVideoAttachment(attachment)) {
+    return attachment;
+  }
 
   const dataUrl = resolveAttachmentDataUrl(attachment);
   const parsed = dataUrl ? parseImageDataUrl(dataUrl) : null;
@@ -85,7 +123,10 @@ export function normalizeAttachedFile(
 export function toMessageAttachment(
   attachment: AttachedFile | null,
 ): MessageAttachment[] | undefined {
-  if (!attachment || !isImageAttachment(attachment)) return undefined;
+  if (!attachment) return undefined;
+  if (!isImageAttachment(attachment) && !isVideoAttachment(attachment)) {
+    return undefined;
+  }
 
   const dataUrl = resolveAttachmentDataUrl(attachment);
   if (!dataUrl) return undefined;
@@ -95,6 +136,8 @@ export function toMessageAttachment(
       name: attachment.name,
       type: attachment.type,
       dataUrl,
+      assetKind: isVideoAttachment(attachment) ? "video" : "image",
+      downloadName: attachment.name,
     },
   ];
 }

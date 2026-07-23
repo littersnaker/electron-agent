@@ -35,7 +35,7 @@ function parseDataUrl(
   };
 }
 
-function readImageData(
+function readBinaryData(
   attachment: AttachmentLike,
 ): { mimeType: string; data: string } | null {
   const preferredValue = attachment.dataUrl?.trim() || attachment.base64.trim();
@@ -76,7 +76,7 @@ export function buildImageAttachmentPayload(
 ): LlmRequestAttachment[] | undefined {
   if (!attachment?.type.startsWith("image/")) return undefined;
 
-  const image = readImageData(attachment);
+  const image = readBinaryData(attachment);
   if (!image?.data) return undefined;
 
   return [
@@ -84,6 +84,34 @@ export function buildImageAttachmentPayload(
       name: attachment.name,
       mimeType: image.mimeType,
       data: image.data,
+    },
+  ];
+}
+
+
+/**
+ * 图片/视频生成接口使用统一二进制附件结构。
+ * 与 buildImageAttachmentPayload 分开，避免普通聊天误把视频发送给 vision 模型。
+ */
+export function buildMediaAttachmentPayload(
+  attachment: AttachmentLike | null,
+): LlmRequestAttachment[] | undefined {
+  if (!attachment) return undefined;
+  if (
+    !attachment.type.startsWith("image/") &&
+    !attachment.type.startsWith("video/")
+  ) {
+    return undefined;
+  }
+
+  const media = readBinaryData(attachment);
+  if (!media?.data) return undefined;
+
+  return [
+    {
+      name: attachment.name,
+      mimeType: media.mimeType,
+      data: media.data,
     },
   ];
 }

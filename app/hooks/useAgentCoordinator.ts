@@ -29,6 +29,7 @@ export function useAgentCoordinator() {
     setAgents(createIdleAgents());
   }, []);
 
+  /** 普通 QA / Code 任务沿用原有 Agent 编排。 */
   const beginRun = useCallback(() => {
     setAgents(createRunAgents());
   }, []);
@@ -48,6 +49,145 @@ export function useAgentCoordinator() {
     },
     [],
   );
+
+  /**
+   * 媒体任务只激活真正参与的 Orchestrator / Media / Reviewer。
+   * 其余 Code Agent 保持 idle，避免面板出现“全部角色 0%”的假进度。
+   */
+  const beginMediaRun = useCallback((taskName: string) => {
+    const now = Date.now();
+    setAgents(
+      createIdleAgents().map((agent) => {
+        if (agent.type === "orchestrator") {
+          return {
+            ...agent,
+            status: "running" as const,
+            progress: 12,
+            currentTask: `识别并编排${taskName}`,
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "media") {
+          return {
+            ...agent,
+            status: "running" as const,
+            progress: 8,
+            currentTask: `准备${taskName}模型请求`,
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "reviewer") {
+          return {
+            ...agent,
+            status: "queued" as const,
+            progress: 0,
+            currentTask: "等待生成结果后进行检查",
+            updatedAt: now,
+          };
+        }
+        return agent;
+      }),
+    );
+  }, []);
+
+  /** 根据媒体请求等待时长平滑推进进度，但不会在结果返回前超过 90%。 */
+  const updateMediaProgress = useCallback((progress: number, task: string) => {
+    const safeProgress = Math.max(8, Math.min(90, Math.round(progress)));
+    setAgents((current) =>
+      current.map((agent) => {
+        if (agent.type === "orchestrator") {
+          return {
+            ...agent,
+            status: "running" as const,
+            progress: Math.min(88, Math.max(agent.progress, safeProgress - 8)),
+            currentTask: "协调媒体模型并等待结果返回",
+            updatedAt: Date.now(),
+          };
+        }
+        if (agent.type === "media") {
+          return {
+            ...agent,
+            status:
+              safeProgress >= 78
+                ? ("completed" as const)
+                : ("running" as const),
+            progress:
+              safeProgress >= 78
+                ? 100
+                : Math.max(agent.progress, safeProgress),
+            currentTask:
+              safeProgress >= 78
+                ? "媒体内容已生成，正在交给 Reviewer 检查"
+                : task,
+            updatedAt: Date.now(),
+          };
+        }
+        if (agent.type === "reviewer" && safeProgress >= 78) {
+          return {
+            ...agent,
+            status: "running" as const,
+            progress: Math.max(agent.progress, Math.min(86, safeProgress - 8)),
+            currentTask: task.includes("检查")
+              ? task
+              : "正在检查重影、重复元素和无关改动",
+            updatedAt: Date.now(),
+          };
+        }
+        return agent;
+      }),
+    );
+  }, []);
+
+  const completeMediaRun = useCallback((reviewTask: string) => {
+    setAgents((current) =>
+      current.map((agent) => {
+        if (agent.type === "orchestrator") {
+          return {
+            ...agent,
+            status: "completed" as const,
+            progress: 100,
+            currentTask: "媒体任务编排完成",
+            updatedAt: Date.now(),
+          };
+        }
+        if (agent.type === "media") {
+          return {
+            ...agent,
+            status: "completed" as const,
+            progress: 100,
+            currentTask: "媒体文件已生成并保存",
+            updatedAt: Date.now(),
+          };
+        }
+        if (agent.type === "reviewer") {
+          return {
+            ...agent,
+            status: "completed" as const,
+            progress: 100,
+            currentTask: reviewTask,
+            updatedAt: Date.now(),
+          };
+        }
+        return agent;
+      }),
+    );
+  }, []);
+
+  const failMediaRun = useCallback((message: string) => {
+    setAgents((current) =>
+      current.map((agent) =>
+        agent.type === "orchestrator" || agent.type === "media"
+          ? {
+              ...agent,
+              status: "error" as const,
+              progress: 100,
+              currentTask: message,
+              updatedAt: Date.now(),
+            }
+          : agent,
+      ),
+    );
+  }, []);
 
   const activateAgent = useCallback((kind: AgentKind, task: string) => {
     setAgents((current) =>
@@ -135,13 +275,6 @@ export function useAgentCoordinator() {
     [],
   );
 
-  /**
-   * 模型开始输出最终答案时，只结束已经实际运行过的子 Agent。
-   *
-   * `createRunAgents()` 会把尚未启动的阶段标记为 queued。旧实现会把
-   * queued 一并改成 completed，导致工作区查询或只读查询看起来像执行了
-   * Planner、Worker、终端和审查。这里保留未参与阶段的原状态。
-   */
   const markFinalResponse = useCallback(() => {
     setAgents((current) =>
       current.map((agent) => {
@@ -154,7 +287,6 @@ export function useAgentCoordinator() {
             updatedAt: Date.now(),
           };
         }
-
         if (["running", "thinking"].includes(agent.status)) {
           return {
             ...agent,
@@ -163,7 +295,6 @@ export function useAgentCoordinator() {
             updatedAt: Date.now(),
           };
         }
-
         return agent;
       }),
     );
@@ -185,21 +316,11 @@ export function useAgentCoordinator() {
     );
   }, []);
 
-  /**
-   * 一轮流式请求结束后收束 Agent 状态。
-   *
-   * - 报错 Agent 保留 error；
-   * - 终端交互存在时，终端继续保持运行；
-   * - Orchestrator 总是完成本轮协调；
-   * - 只有 running / thinking 的 Agent 才会转为 completed；
-   * - idle / queued Agent 没有参与本轮流程，因此保持原状态。
-   */
   const finalizeAgents = useCallback(
     (interactiveRequest: InteractiveRequest | null) => {
       setAgents((current) =>
         current.map((agent) => {
           if (agent.status === "error") return agent;
-
           if (interactiveRequest && agent.type === "terminal") {
             return {
               ...agent,
@@ -209,7 +330,6 @@ export function useAgentCoordinator() {
               updatedAt: Date.now(),
             };
           }
-
           if (agent.type === "orchestrator") {
             return {
               ...agent,
@@ -219,7 +339,6 @@ export function useAgentCoordinator() {
               updatedAt: Date.now(),
             };
           }
-
           if (["running", "thinking"].includes(agent.status)) {
             return {
               ...agent,
@@ -228,7 +347,6 @@ export function useAgentCoordinator() {
               updatedAt: Date.now(),
             };
           }
-
           return agent;
         }),
       );
@@ -241,6 +359,10 @@ export function useAgentCoordinator() {
     runningAgentCount,
     resetAgents,
     beginRun,
+    beginMediaRun,
+    updateMediaProgress,
+    completeMediaRun,
+    failMediaRun,
     updateAgent,
     activateAgent,
     applyAgentEvent,

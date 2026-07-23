@@ -1,15 +1,9 @@
-/* eslint-disable @next/next/no-img-element */
 /* eslint-disable react-hooks/exhaustive-deps */
 import { memo, useEffect, useRef, useState } from "react";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 import type { Message } from "../const/pageConst";
-
-type ToolCall = {
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-};
+import MessageAttachmentGallery from "./MessageAttachmentGallery";
 
 interface ChatListProps {
   messages: Message[];
@@ -23,7 +17,6 @@ const COLORS = {
   textMuted: "var(--text-secondary)",
   material: "var(--glass)",
   border: "var(--border)",
-  blue: "var(--accent-blue)",
 };
 
 const MemoizedAssistantMessageRow = memo(AssistantMessageRow);
@@ -147,6 +140,7 @@ export default function ChatList({
           const shouldRenderAssistant =
             !isUser &&
             (Boolean(message.content) ||
+              Boolean(message.attachments?.length) ||
               (isLastMessage &&
                 (isStreaming ||
                   toolActivities.length > 0 ||
@@ -167,18 +161,10 @@ export default function ChatList({
                         "0 10px 28px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.18)",
                     }}
                   >
-                    {message.attachments?.map((attachment) => (
-                      <div
-                        key={`${attachment.name}-${attachment.dataUrl.slice(0, 32)}`}
-                        className="mb-2 overflow-hidden rounded-[14px] border border-white/20 bg-black/10"
-                      >
-                        <img
-                          src={attachment.dataUrl}
-                          alt={attachment.name}
-                          className="block max-h-[360px] w-full min-w-[220px] object-contain"
-                        />
-                      </div>
-                    ))}
+                    <MessageAttachmentGallery
+                      attachments={message.attachments}
+                      compact
+                    />
                     {message.content && (
                       <div className="whitespace-pre-wrap break-words">
                         {message.content}
@@ -294,6 +280,9 @@ export default function ChatList({
                     toolActivities={isLastMessage ? toolActivities : []}
                     agentStatus={isLastMessage ? agentStatus : undefined}
                     isStreaming={isLastMessage && isStreaming}
+                  />
+                  <MessageAttachmentGallery
+                    attachments={message.attachments}
                   />
                 </div>
               </div>

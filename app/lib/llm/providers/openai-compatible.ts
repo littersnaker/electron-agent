@@ -197,7 +197,7 @@ function buildRequestBody(
     ),
     tools: request.tools,
     tool_choice: request.tools?.length
-      ? request.toolChoice ?? "auto"
+      ? (request.toolChoice ?? "auto")
       : undefined,
     stream,
     stream_options: stream ? { include_usage: true } : undefined,
@@ -235,9 +235,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     );
   }
 
-  async *stream(
-    request: LlmCompletionRequest,
-  ): AsyncIterable<LlmStreamChunk> {
+  async *stream(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk> {
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -287,8 +285,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
                   completion: usage.completion_tokens ?? 0,
                   total:
                     usage.total_tokens ??
-                    (usage.prompt_tokens ?? 0) +
-                      (usage.completion_tokens ?? 0),
+                    (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
                 }
               : undefined,
           };

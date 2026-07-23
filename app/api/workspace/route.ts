@@ -6,7 +6,10 @@ import {
   listWorkspace,
   updateSession,
 } from "@/app/lib/server/workspace-store";
-import type { StoredMessage } from "@/app/lib/server/workspace-store";
+import type {
+  StoredMessage,
+  StoredMessageAttachment,
+} from "@/app/lib/server/workspace-store";
 
 export const runtime = "nodejs";
 
@@ -16,6 +19,44 @@ type WorkspaceActionBody = Record<string, unknown> & {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readAttachment(value: unknown): StoredMessageAttachment | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const name = readOptionalString(record.name)?.trim();
+  const type = readOptionalString(record.type)?.trim();
+  const dataUrl = readOptionalString(record.dataUrl)?.trim();
+  const url = readOptionalString(record.url)?.trim();
+  const assetKind = record.assetKind;
+  const downloadName = readOptionalString(record.downloadName)?.trim();
+
+  if (!name || !type || (!dataUrl && !url)) return null;
+  if (dataUrl && !dataUrl.startsWith("data:")) return null;
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    name,
+    type,
+    dataUrl,
+    url,
+    assetKind:
+      assetKind === "image" ||
+      assetKind === "video" ||
+      assetKind === "file"
+        ? assetKind
+        : undefined,
+    downloadName,
+  };
 }
 
 function readMessages(value: unknown): StoredMessage[] | undefined {
@@ -33,32 +74,13 @@ function readMessages(value: unknown): StoredMessage[] | undefined {
       return [];
     }
 
-    const rawAttachments =
+    const rawAttachments: unknown[] =
       "attachments" in item && Array.isArray(item.attachments)
         ? item.attachments
         : [];
     const attachments = rawAttachments.flatMap((attachment) => {
-      if (
-        !attachment ||
-        typeof attachment !== "object" ||
-        !("name" in attachment) ||
-        typeof attachment.name !== "string" ||
-        !("type" in attachment) ||
-        typeof attachment.type !== "string" ||
-        !("dataUrl" in attachment) ||
-        typeof attachment.dataUrl !== "string" ||
-        !attachment.dataUrl.startsWith("data:image/")
-      ) {
-        return [];
-      }
-
-      return [
-        {
-          name: attachment.name,
-          type: attachment.type,
-          dataUrl: attachment.dataUrl,
-        },
-      ];
+      const parsed = readAttachment(attachment);
+      return parsed ? [parsed] : [];
     });
 
     return [
@@ -78,9 +100,7 @@ export async function GET(): Promise<Response> {
 
 /**
  * 统一处理工作区写操作。
- *
- * 路径的存在性与目录类型由 workspace-store 再次校验，Route 层只负责
- * 拒绝明显缺失的参数，并把外部 unknown 数据转换成稳定类型。
+ * 媒体结果也通过 messages_json 保存，图片 Data URL 可长期展示，视频保存临时 URL。
  */
 export async function POST(request: Request): Promise<Response> {
   try {

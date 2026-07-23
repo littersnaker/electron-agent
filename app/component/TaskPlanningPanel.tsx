@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { STATUS_META } from "./task-planning/config";
+import {
+  CODE_STAGE_DEFINITIONS,
+  MEDIA_STAGE_DEFINITIONS,
+  STATUS_META,
+} from "./task-planning/config";
 import {
   buildPlanningStages,
   buildPlanningSummary,
@@ -56,17 +60,23 @@ export default function TaskPlanningPanel({
   toolActivities = [],
   agentStatus,
   isStreaming,
+  workflowMode,
   className = "",
 }: TaskPlanningPanelProps) {
+  const definitions =
+    workflowMode === "chat"
+      ? CODE_STAGE_DEFINITIONS
+      : MEDIA_STAGE_DEFINITIONS;
   const stages = useMemo(
     () =>
       buildPlanningStages(
+        definitions,
         agents,
         toolActivities,
         isStreaming,
         agentStatus,
       ),
-    [agentStatus, agents, isStreaming, toolActivities],
+    [agentStatus, agents, definitions, isStreaming, toolActivities],
   );
   const summary = useMemo(() => buildPlanningSummary(stages), [stages]);
 

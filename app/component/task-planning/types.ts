@@ -1,3 +1,4 @@
+import type { ComposerMode } from "../../const/pageConst";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance, AgentKind } from "../AgentPanel";
 
@@ -13,6 +14,7 @@ export interface TaskPlanningPanelProps {
   toolActivities?: ToolActivity[];
   agentStatus?: string;
   isStreaming: boolean;
+  workflowMode: ComposerMode;
   className?: string;
 }
 
