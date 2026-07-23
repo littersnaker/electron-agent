@@ -23,17 +23,57 @@ import type {
 
 export const runtime = "nodejs";
 
-/** 将前端消息转换成 LangGraph 使用的 BaseMessage。 */
+function parseDataUrl(
+  value: string,
+): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/iu.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+
+  return {
+    mimeType: match[1] || "image/png",
+    data: match[2].replace(/\s+/gu, ""),
+  };
+}
+
+function normalizeFrontendAttachment(
+  attachment: FrontendAttachment,
+): Record<string, unknown> {
+  const legacyDataUrl = attachment.dataUrl?.trim();
+  const parsedLegacy = legacyDataUrl ? parseDataUrl(legacyDataUrl) : null;
+  const mimeType = parsedLegacy?.mimeType || attachment.mimeType?.trim();
+  const data = (parsedLegacy?.data || attachment.data?.trim() || "").replace(
+    /\s+/gu,
+    "",
+  );
+
+  if (!mimeType?.startsWith("image/")) {
+    throw new Error(`附件 ${attachment.name || "未命名图片"} 的 MIME 类型无效`);
+  }
+  if (!data) {
+    throw new Error(`附件 ${attachment.name || "未命名图片"} 缺少图片数据`);
+  }
+
+  return {
+    type: "image",
+    mimeType,
+    data,
+    name: attachment.name,
+  };
+}
+
+/**
+ * 将前端附件转换为 Provider 无关的 LangChain 内容块。
+ * OpenAI image_url / Gemini inlineData 的差异只在 Provider 层处理。
+ */
 function toMultimodalParts(
   content: string,
   attachments: readonly FrontendAttachment[],
 ): Array<Record<string, unknown>> {
   return [
     { type: "text", text: content },
-    ...attachments.map((attachment) => ({
-      type: "image_url",
-      image_url: { url: attachment.dataUrl },
-    })),
+    ...attachments.map(normalizeFrontendAttachment),
   ];
 }
 

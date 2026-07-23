@@ -28,50 +28,102 @@ function readString(value: unknown): string {
     .join("\n");
 }
 
+function cleanBase64(value: string): string {
+  return value.replace(/\s+/gu, "");
+}
+
 function parseDataUrl(value: string): LlmImagePart | undefined {
-  const match = /^data:([^;,]+);base64,(.+)$/u.exec(value);
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/iu.exec(
+    value.trim(),
+  );
   if (!match) return undefined;
   return {
     type: "image",
     mimeType: match[1] || "image/png",
-    data: match[2],
+    data: cleanBase64(match[2]),
   };
 }
 
+function readStringProperty(
+  value: Record<string, unknown>,
+  ...keys: string[]
+): string | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
 function readImagePart(value: Record<string, unknown>): LlmImagePart | undefined {
-  if (value.type === "image" && typeof value.data === "string") {
-    return {
-      type: "image",
-      mimeType:
-        typeof value.mimeType === "string"
-          ? value.mimeType
-          : "image/png",
-      data: value.data,
-      name: typeof value.name === "string" ? value.name : undefined,
-    };
+  const name = readStringProperty(value, "name");
+
+  if (value.type === "image") {
+    const rawData = readStringProperty(value, "data");
+    const rawUrl = readStringProperty(value, "url", "dataUrl");
+    const parsedData = rawData?.startsWith("data:")
+      ? parseDataUrl(rawData)
+      : undefined;
+    const parsedUrl = rawUrl?.startsWith("data:")
+      ? parseDataUrl(rawUrl)
+      : undefined;
+
+    if (parsedData || parsedUrl) {
+      return { ...(parsedData || parsedUrl)!, name };
+    }
+
+    if (rawData) {
+      return {
+        type: "image",
+        mimeType:
+          readStringProperty(value, "mimeType", "mime_type") || "image/png",
+        data: cleanBase64(rawData),
+        name,
+      };
+    }
+
+    if (rawUrl) {
+      return {
+        type: "image",
+        mimeType:
+          readStringProperty(value, "mimeType", "mime_type") || "image/*",
+        url: rawUrl,
+        name,
+      };
+    }
   }
 
-  if (value.type !== "image_url" || !("image_url" in value)) {
-    return undefined;
+  if (
+    (value.type === "image_url" || value.type === "input_image") &&
+    ("image_url" in value || "url" in value)
+  ) {
+    const raw = "image_url" in value ? value.image_url : value.url;
+    const url =
+      typeof raw === "string"
+        ? raw
+        : raw &&
+            typeof raw === "object" &&
+            "url" in raw &&
+            typeof raw.url === "string"
+          ? raw.url
+          : undefined;
+    if (!url) return undefined;
+
+    const parsed = parseDataUrl(url);
+    return parsed
+      ? { ...parsed, name }
+      : {
+          type: "image",
+          mimeType:
+            readStringProperty(value, "mimeType", "mime_type") || "image/*",
+          url,
+          name,
+        };
   }
 
-  const raw = value.image_url;
-  const url =
-    typeof raw === "string"
-      ? raw
-      : raw &&
-          typeof raw === "object" &&
-          "url" in raw &&
-          typeof raw.url === "string"
-        ? raw.url
-        : undefined;
-  if (!url) return undefined;
-
-  return parseDataUrl(url) || {
-    type: "image",
-    mimeType: "image/*",
-    url,
-  };
+  return undefined;
 }
 
 function readContentParts(value: unknown): LlmContentPart[] | undefined {
@@ -130,14 +182,17 @@ export function normalizeLlmMessages(
         ? roleValue
         : "user";
     const rawContent = "content" in value ? value.content : "";
+    const explicitParts =
+      "parts" in value && Array.isArray(value.parts)
+        ? readContentParts(value.parts)
+        : undefined;
 
     return {
       role,
       content: readString(rawContent),
-      parts:
-        "parts" in value && Array.isArray(value.parts)
-          ? (value.parts as LlmContentPart[])
-          : readContentParts(rawContent),
+      // 无论来源是 content 数组还是 parts，都统一重新解析，确保 image_url
+      // 会变成 type=image，供 vision 路由和 Provider 适配器共同使用。
+      parts: explicitParts || readContentParts(rawContent),
       toolCalls:
         "toolCalls" in value
           ? readToolCalls(value.toolCalls)

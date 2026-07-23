@@ -1,7 +1,12 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import type { ChangeEvent, RefObject } from "react";
 import TextareaAutosize from "react-textarea-autosize";
+import {
+  isImageAttachment,
+  resolveAttachmentDataUrl,
+} from "../const/pageConst";
 import type { AttachedFile } from "../const/pageConst";
 import type { ModelOption } from "../const/modelList";
 import ModelSelector from "./ModelSelector";
@@ -38,40 +43,111 @@ export default function ChatComposer({
   onSubmit,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
+  const showImagePreview = isImageAttachment(attachedFile);
+  const imagePreviewUrl =
+    attachedFile && showImagePreview
+      ? resolveAttachmentDataUrl(attachedFile)
+      : "";
 
   return (
     <>
       {attachedFile && (
-        <div
-          className="mb-2 flex items-center gap-2 rounded-[12px] border px-3 py-2 text-[11px]"
-          style={{
-            background: "var(--glass)",
-            borderColor: "var(--border)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-lg"
-            style={{ background: "rgba(10,132,255,0.12)", color: "#64b5ff" }}
+        showImagePreview ? (
+          <div
+            className="mb-2 flex items-start gap-3 rounded-[16px] border p-2.5"
+            style={{
+              background: "var(--glass)",
+              borderColor: "var(--border)",
+              color: "var(--text-secondary)",
+            }}
           >
-            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none">
-              <path
-                d="m7 10.5 4.7-4.7a2.2 2.2 0 0 1 3.1 3.1L9 14.7a3.2 3.2 0 0 1-4.5-4.5l5.1-5.1"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
+            <div
+              className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[12px] border"
+              style={{
+                background: "var(--glass-black)",
+                borderColor: "var(--border)",
+              }}
+            >
+              <img
+                src={imagePreviewUrl}
+                alt={attachedFile.name}
+                className="h-full w-full object-cover"
               />
-            </svg>
-          </span>
-          <span className="min-w-0 flex-1 truncate">{attachedFile.name}</span>
-          <button
-            type="button"
-            onClick={onRemoveFile}
-            className="flex h-6 w-6 items-center justify-center rounded-full text-[14px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--glass-hover)] hover:text-[var(--text-primary)]"
+            </div>
+
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-2 pt-1">
+              <div className="min-w-0">
+                <div
+                  className="text-[10px] font-medium uppercase tracking-[0.08em]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  图片附件
+                </div>
+                <div
+                  className="mt-1 truncate text-[12px] font-medium"
+                  style={{ color: "var(--text-primary)" }}
+                  title={attachedFile.name}
+                >
+                  {attachedFile.name}
+                </div>
+                <div
+                  className="mt-1 text-[10px]"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  {attachedFile.type || "image/*"}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={onRemoveFile}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[15px] transition-colors hover:bg-[var(--glass-hover)] hover:text-[var(--text-primary)]"
+                style={{ color: "var(--text-tertiary)" }}
+                aria-label="移除图片附件"
+                title="移除图片"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            className="mb-2 flex items-center gap-2 rounded-[12px] border px-3 py-2 text-[11px]"
+            style={{
+              background: "var(--glass)",
+              borderColor: "var(--border)",
+              color: "var(--text-secondary)",
+            }}
           >
-            ×
-          </button>
-        </div>
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-lg"
+              style={{
+                background: "rgba(10,132,255,0.12)",
+                color: "#64b5ff",
+              }}
+            >
+              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none">
+                <path
+                  d="m7 10.5 4.7-4.7a2.2 2.2 0 0 1 3.1 3.1L9 14.7a3.2 3.2 0 0 1-4.5-4.5l5.1-5.1"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1 truncate">
+              {attachedFile.name}
+            </span>
+            <button
+              type="button"
+              onClick={onRemoveFile}
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[14px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--glass-hover)] hover:text-[var(--text-primary)]"
+              aria-label="移除附件"
+            >
+              ×
+            </button>
+          </div>
+        )
       )}
 
       <input

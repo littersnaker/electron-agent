@@ -139,6 +139,8 @@ export interface LlmModelDefinition {
   speed: number;
   costEfficiency: number;
   enabledByDefault?: boolean;
+  /** false 表示该模型需要独立媒体生成接口，不能进入 Chat/Gateway 路由。 */
+  chatCompatible?: boolean;
 }
 
 export interface LlmModelRoute {

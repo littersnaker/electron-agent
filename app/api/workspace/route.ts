@@ -21,16 +21,54 @@ function readOptionalString(value: unknown): string | undefined {
 function readMessages(value: unknown): StoredMessage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
-  return value.filter((item): item is StoredMessage =>
-    Boolean(
-      item &&
-        typeof item === "object" &&
-        "role" in item &&
-        (item.role === "user" || item.role === "assistant") &&
-        "content" in item &&
-        typeof item.content === "string",
-    ),
-  );
+  return value.flatMap((item): StoredMessage[] => {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !("role" in item) ||
+      (item.role !== "user" && item.role !== "assistant") ||
+      !("content" in item) ||
+      typeof item.content !== "string"
+    ) {
+      return [];
+    }
+
+    const rawAttachments =
+      "attachments" in item && Array.isArray(item.attachments)
+        ? item.attachments
+        : [];
+    const attachments = rawAttachments.flatMap((attachment) => {
+      if (
+        !attachment ||
+        typeof attachment !== "object" ||
+        !("name" in attachment) ||
+        typeof attachment.name !== "string" ||
+        !("type" in attachment) ||
+        typeof attachment.type !== "string" ||
+        !("dataUrl" in attachment) ||
+        typeof attachment.dataUrl !== "string" ||
+        !attachment.dataUrl.startsWith("data:image/")
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          name: attachment.name,
+          type: attachment.type,
+          dataUrl: attachment.dataUrl,
+        },
+      ];
+    });
+
+    return [
+      {
+        role: item.role,
+        content: item.content,
+        attachments: attachments.length ? attachments : undefined,
+      },
+    ];
+  });
 }
 
 /** 返回本地持久化的项目和会话列表。 */

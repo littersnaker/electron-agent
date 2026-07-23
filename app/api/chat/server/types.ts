@@ -6,10 +6,14 @@ export interface FrontendMessage {
   content: string;
 }
 
+/** 前端传入的 Provider 无关图片附件。 */
 export interface FrontendAttachment {
   name: string;
   mimeType: string;
-  dataUrl: string;
+  /** 新格式：纯 Base64，不包含 data: 前缀。 */
+  data?: string;
+  /** 兼容旧客户端；Route 会在入口处转换为 data。 */
+  dataUrl?: string;
 }
 
 export interface ChatRequestBody {

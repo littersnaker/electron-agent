@@ -1,5 +1,7 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import { completeWithLlm } from "@/app/lib/llm/gateway";
+import { normalizeLlmMessages } from "@/app/lib/llm/normalizers";
+import type { LlmContentPart } from "@/app/lib/llm/types";
 import { getRequestLlmCredentials } from "@/app/lib/llm/request-context";
 import { ReadOnlyPromptText } from "../prompt";
 import type { PlannerValidationStatus } from "./types";
@@ -50,6 +52,25 @@ function getLatestUserRequest(state: AgentRuntimeState): string {
   return latest
     ? messageContentToText(latest.content).trim()
     : "请分析当前项目并完成用户请求。";
+}
+
+
+function getLatestUserImageParts(
+  state: AgentRuntimeState,
+): LlmContentPart[] {
+  const humanMessages = state.messages.filter(
+    (message: BaseMessage) => message._getType() === "human",
+  );
+  const latest = humanMessages[humanMessages.length - 1];
+  if (!latest) return [];
+
+  const normalized = normalizeLlmMessages([
+    { role: "user", content: latest.content },
+  ]);
+  return (normalized[0]?.parts || []).filter(
+    (part): part is Extract<LlmContentPart, { type: "image" }> =>
+      part.type === "image",
+  );
 }
 
 /**
@@ -147,6 +168,12 @@ export function workspaceInfoAnswerNode(
 export async function readOnlyAnswerNode(
   state: AgentRuntimeState,
 ): Promise<Record<string, unknown>> {
+  const content = [
+    `用户问题：\n${state.currentUserRequest}`,
+    `项目上下文：\n${state.mergedContext}`,
+  ].join("\n\n");
+  const imageParts = getLatestUserImageParts(state);
+
   const payload = await completeWithLlm({
     task: "read_only",
     preferredModelId: state.model,
@@ -155,10 +182,10 @@ export async function readOnlyAnswerNode(
       { role: "system", content: ReadOnlyPromptText },
       {
         role: "user",
-        content: [
-          `用户问题：\n${state.currentUserRequest}`,
-          `项目上下文：\n${state.mergedContext}`,
-        ].join("\n\n"),
+        content,
+        parts: imageParts.length
+          ? [{ type: "text", text: content }, ...imageParts]
+          : undefined,
       },
     ],
   });

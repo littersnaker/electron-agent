@@ -2,6 +2,7 @@ import {
   LlmProviderError,
   type LlmChatResponse,
   type LlmCompletionRequest,
+  type LlmContentPart,
   type LlmFunctionTool,
   type LlmMessage,
   type LlmProvider,
@@ -48,6 +49,59 @@ function buildToolNameMap(messages: readonly LlmMessage[]): Map<string, string> 
   return result;
 }
 
+function parseDataUrl(
+  value: string,
+): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/iu.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+  return {
+    mimeType: match[1] || "image/png",
+    data: match[2].replace(/\s+/gu, ""),
+  };
+}
+
+function toGeminiImagePart(
+  part: Extract<LlmContentPart, { type: "image" }>,
+): Record<string, unknown> {
+  const directData = part.data?.replace(/\s+/gu, "");
+  if (directData) {
+    return {
+      inlineData: {
+        mimeType:
+          part.mimeType && part.mimeType !== "image/*"
+            ? part.mimeType
+            : "image/png",
+        data: directData,
+      },
+    };
+  }
+
+  const url = part.url?.trim();
+  const parsedDataUrl = url ? parseDataUrl(url) : null;
+  if (parsedDataUrl) {
+    return { inlineData: parsedDataUrl };
+  }
+
+  if (url && (url.startsWith("gs://") || url.includes("/files/"))) {
+    return {
+      fileData: {
+        mimeType: part.mimeType || "image/*",
+        fileUri: url,
+      },
+    };
+  }
+
+  throw new LlmProviderError({
+    provider: "gemini",
+    retryable: false,
+    detail: url
+      ? `图片附件 ${part.name || "未命名图片"} 是普通远程 URL；请先转为 Base64 或通过 Gemini Files API 上传`
+      : `图片附件 ${part.name || "未命名图片"} 缺少图片数据`,
+  });
+}
+
 function toGeminiUserParts(message: LlmMessage): Array<Record<string, unknown>> {
   const parts: Array<Record<string, unknown>> = [];
   const textParts = message.parts?.filter((part) => part.type === "text") || [];
@@ -60,22 +114,7 @@ function toGeminiUserParts(message: LlmMessage): Array<Record<string, unknown>> 
   }
 
   for (const part of message.parts || []) {
-    if (part.type !== "image") continue;
-    if (part.data) {
-      parts.push({
-        inlineData: {
-          mimeType: part.mimeType,
-          data: part.data,
-        },
-      });
-    } else if (part.url) {
-      parts.push({
-        fileData: {
-          mimeType: part.mimeType,
-          fileUri: part.url,
-        },
-      });
-    }
+    if (part.type === "image") parts.push(toGeminiImagePart(part));
   }
   return parts.length ? parts : [{ text: "" }];
 }

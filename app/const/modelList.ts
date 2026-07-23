@@ -11,15 +11,17 @@ export interface ModelOption {
   description: string;
 }
 
-/** 前端模型列表直接由 V7 注册表生成。 */
+/** 聊天选择器只展示可通过 LLM Gateway 调用的模型。 */
 export const AVAILABLE_MODELS: readonly ModelOption[] = [
   {
     id: AUTO_MODEL_ID,
     name: "Auto Orchestration",
     provider: "自动编排",
-    description: "仅从已配置模型池中按能力评分，并在调用失败时自动降级",
+    description: "按任务能力选择聊天模型；图片输入时仅使用 vision 模型",
   },
-  ...LLM_MODEL_CATALOG.map((model) => ({
+  ...LLM_MODEL_CATALOG.filter(
+    (model) => model.chatCompatible !== false,
+  ).map((model) => ({
     id: model.id,
     name: model.name,
     provider: getProviderDefinition(model.provider).name,

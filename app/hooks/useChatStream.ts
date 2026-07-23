@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { toMessageAttachment } from "../const/pageConst";
 import type {
   AttachedFile,
   ChatSession,
@@ -49,7 +50,10 @@ function buildVisibleUserContent(
   attachment: AttachedFile | null,
 ): string {
   if (!attachment) return prompt;
-  return [prompt || "请分析这份文件", `📎 ${attachment.name}`].join("\n\n");
+  return prompt ||
+    (attachment.type.startsWith("image/")
+      ? "请分析这张图片"
+      : "请分析这份文件");
 }
 
 function buildRequestUserContent(
@@ -139,6 +143,7 @@ export function useChatStream({
       if (!prompt && !fileOverride) return;
 
       const visibleUserContent = buildVisibleUserContent(prompt, fileOverride);
+      const visibleAttachments = toMessageAttachment(fileOverride);
       const workspaceError = validateCodeWorkspace(
         activeSession,
         activeProject,
@@ -147,7 +152,11 @@ export function useChatStream({
       if (workspaceError) {
         const errorHistory: Message[] = [
           ...messages,
-          { role: "user", content: visibleUserContent },
+          {
+            role: "user",
+            content: visibleUserContent,
+            attachments: visibleAttachments,
+          },
           { role: "assistant", content: `⚠️ ${workspaceError}` },
         ];
         const title =
@@ -182,12 +191,16 @@ export function useChatStream({
       );
       const visibleHistory: Message[] = [
         ...messages,
-        { role: "user", content: visibleUserContent },
+        {
+          role: "user",
+          content: visibleUserContent,
+          attachments: visibleAttachments,
+        },
         { role: "assistant", content: "" },
       ];
-      const requestMessages: Message[] = [
-        ...messages,
-        { role: "user", content: requestUserContent },
+      const requestMessages = [
+        ...messages.map(({ role, content }) => ({ role, content })),
+        { role: "user" as const, content: requestUserContent },
       ];
       const title =
         activeSession.title === "新对话"

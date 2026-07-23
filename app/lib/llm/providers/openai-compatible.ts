@@ -44,12 +44,32 @@ interface CompatibleStreamBody {
   usage?: CompatibleResponseBody["usage"];
 }
 
-function toDataUrl(part: Extract<LlmContentPart, { type: "image" }>): string {
-  if (part.url) return part.url;
-  return `data:${part.mimeType};base64,${part.data || ""}`;
+function toDataUrl(
+  part: Extract<LlmContentPart, { type: "image" }>,
+  provider: LlmProviderId,
+): string {
+  if (part.url?.trim()) return part.url.trim();
+
+  const data = part.data?.replace(/\s+/gu, "");
+  if (data) {
+    const mimeType =
+      part.mimeType && part.mimeType !== "image/*"
+        ? part.mimeType
+        : "image/png";
+    return `data:${mimeType};base64,${data}`;
+  }
+
+  throw new LlmProviderError({
+    provider,
+    retryable: false,
+    detail: `图片附件 ${part.name || "未命名图片"} 缺少 data 或 url`,
+  });
 }
 
-function toCompatibleContent(message: LlmMessage): unknown {
+function toCompatibleContent(
+  message: LlmMessage,
+  provider: LlmProviderId,
+): unknown {
   if (!message.parts?.some((part) => part.type === "image")) {
     return message.content;
   }
@@ -60,9 +80,12 @@ function toCompatibleContent(message: LlmMessage): unknown {
       if (part.text) parts.push({ type: "text", text: part.text });
       continue;
     }
+
+    // OpenAI Chat Completions 兼容协议统一使用 image_url。
+    // 本地图片在这里才被组装为 Data URL，前端和 Gateway 均保持 Provider 无关。
     parts.push({
       type: "image_url",
-      image_url: { url: toDataUrl(part) },
+      image_url: { url: toDataUrl(part, provider) },
     });
   }
 
@@ -77,10 +100,13 @@ function toCompatibleContent(message: LlmMessage): unknown {
   return parts;
 }
 
-function toCompatibleMessage(message: LlmMessage): Record<string, unknown> {
+function toCompatibleMessage(
+  message: LlmMessage,
+  provider: LlmProviderId,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {
     role: message.role,
-    content: toCompatibleContent(message),
+    content: toCompatibleContent(message, provider),
   };
   if (message.toolCalls?.length) {
     result.tool_calls = message.toolCalls.map((toolCall) => ({
@@ -166,7 +192,9 @@ function buildRequestBody(
 ): Record<string, unknown> {
   return {
     model: request.route.model,
-    messages: request.messages.map(toCompatibleMessage),
+    messages: request.messages.map((message) =>
+      toCompatibleMessage(message, request.route.provider),
+    ),
     tools: request.tools,
     tool_choice: request.tools?.length
       ? request.toolChoice ?? "auto"

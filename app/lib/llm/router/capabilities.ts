@@ -25,13 +25,17 @@ export function getTaskCapabilities(
   return TASK_CAPABILITIES[task];
 }
 
+/** 统一从规范化后的 message.parts 判断本轮是否含视觉输入。 */
+export function hasVisionInput(messages: readonly LlmMessage[]): boolean {
+  return messages.some((message) =>
+    message.parts?.some((part) => part.type === "image"),
+  );
+}
+
 export function inferMessageCapabilities(
   messages: readonly LlmMessage[],
 ): readonly LlmCapability[] {
-  const hasImage = messages.some((message) =>
-    message.parts?.some((part) => part.type === "image"),
-  );
-  return hasImage ? ["vision"] : [];
+  return hasVisionInput(messages) ? ["vision"] : [];
 }
 
 export function mergeCapabilities(
@@ -46,5 +50,14 @@ export function modelSupportsCapabilities(
 ): boolean {
   return required.every((capability) =>
     modelCapabilities.includes(capability),
+  );
+}
+
+export function getMissingCapabilities(
+  modelCapabilities: readonly LlmCapability[],
+  required: readonly LlmCapability[],
+): readonly LlmCapability[] {
+  return required.filter(
+    (capability) => !modelCapabilities.includes(capability),
   );
 }

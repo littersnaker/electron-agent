@@ -9,9 +9,16 @@ import {
 
 export type SessionMode = "qa" | "code";
 
+export type StoredMessageAttachment = {
+  name: string;
+  type: string;
+  dataUrl: string;
+};
+
 export type StoredMessage = {
   role: "user" | "assistant";
   content: string;
+  attachments?: StoredMessageAttachment[];
 };
 
 export type WorkspaceProject = {

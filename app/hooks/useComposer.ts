@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { normalizeAttachedFile } from "../const/pageConst";
 import type { AttachedFile } from "../const/pageConst";
 import { parseSelectedFile } from "../utils/fileParser";
 
@@ -18,7 +19,8 @@ export function useComposer() {
 
       setIsParsingFile(true);
       try {
-        setAttachedFile(await parseSelectedFile(file));
+        const parsedFile = await parseSelectedFile(file);
+        setAttachedFile(normalizeAttachedFile(parsedFile));
       } finally {
         setIsParsingFile(false);
       }
