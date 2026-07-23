@@ -518,6 +518,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
       return;
     }
 
+    // eslint-disable-next-line prefer-const
     let timer: ReturnType<typeof setTimeout> | undefined;
     const handleAbort = () => {
       if (timer) clearTimeout(timer);

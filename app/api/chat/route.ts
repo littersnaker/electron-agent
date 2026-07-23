@@ -9,11 +9,7 @@ import { resolveLlmCredentials } from "@/app/lib/llm/credentials";
 import { AUTO_MODEL_ID } from "@/app/lib/llm/model-catalog";
 import { resolveChatWorkspace } from "./server/resolve-chat-workspace";
 import { runAgentGraph } from "./server/run-agent-graph";
-import {
-  sendSse,
-  sendSseComment,
-  sendUsage,
-} from "./server/sse";
+import { sendSse, sendSseComment, sendUsage } from "./server/sse";
 import { streamFinalAnswer } from "./server/stream-final-answer";
 import type {
   ChatRequestBody,
@@ -70,10 +66,33 @@ function normalizeFrontendAttachment(
 function toMultimodalParts(
   content: string,
   attachments: readonly FrontendAttachment[],
-): Array<Record<string, unknown>> {
+): Array<
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
+    }
+> {
   return [
-    { type: "text", text: content },
-    ...attachments.map(normalizeFrontendAttachment),
+    {
+      type: "text",
+      text: content,
+    },
+    ...attachments.map((attachment) => {
+      const normalized = normalizeFrontendAttachment(attachment);
+
+      return {
+        type: "image_url" as const,
+        image_url: {
+          url: `data:${normalized.mimeType};base64,${normalized.data}`,
+        },
+      };
+    }),
   ];
 }
 
@@ -81,15 +100,22 @@ function toLangChainMessage(
   message: FrontendMessage,
   attachments: readonly FrontendAttachment[] = [],
 ): BaseMessage {
-  if (message.role === "user") {
-    return attachments.length
-      ? new HumanMessage({
-          content: toMultimodalParts(message.content, attachments),
-        })
-      : new HumanMessage(message.content);
+  switch (message.role) {
+    case "user":
+      if (attachments.length) {
+        return new HumanMessage({
+          content: toMultimodalParts(message.content, attachments) as never,
+        });
+      }
+
+      return new HumanMessage(message.content);
+
+    case "assistant":
+      return new AIMessage(message.content);
+
+    default:
+      return new SystemMessage(message.content);
   }
-  if (message.role === "assistant") return new AIMessage(message.content);
-  return new SystemMessage(message.content);
 }
 
 /**
@@ -110,17 +136,12 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const body = (await request.json()) as ChatRequestBody;
-    const workspace = resolveChatWorkspace(
-      body.projectId,
-      body.workingDir,
-    );
+    const workspace = resolveChatWorkspace(body.projectId, body.workingDir);
     const sourceMessages = body.messages || [];
     const inputMessages = sourceMessages.map((message, index) =>
       toLangChainMessage(
         message,
-        index === sourceMessages.length - 1
-          ? body.attachments || []
-          : [],
+        index === sourceMessages.length - 1 ? body.attachments || [] : [],
       ),
     );
     const sessionId = body.sessionId?.trim() || "default-code-thread";
@@ -188,10 +209,9 @@ export async function POST(request: Request): Promise<Response> {
             return;
           }
 
-          const graphSeconds = (
-            (performance.now() - startedAt) /
-            1000
-          ).toFixed(1);
+          const graphSeconds = ((performance.now() - startedAt) / 1000).toFixed(
+            1,
+          );
           sendSse(controller, encoder, {
             type: "STATUS",
             content: `✨ Code Agent 工作流已完成（${graphSeconds}s），正在整理最终回答…`,

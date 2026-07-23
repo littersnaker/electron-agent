@@ -21,7 +21,6 @@ import {
   DEFAULT_REVIEW_PAYLOAD,
   DEFAULT_VERIFICATION_RESULT,
   CommandExecutionMode,
-  HighLevelPlanItem,
   HighLevelPlanPayload,
   InteractiveRequest,
   InteractiveResponseMode,

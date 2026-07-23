@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/purity */
 "use client";
 
 import { useMemo, useState } from "react";
@@ -114,7 +113,7 @@ function AgentGlyph({ type, status }: { type: AgentKind; status: AgentStatus }) 
 
   return (
     <span
-      className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border"
       style={{
         background: meta.soft,
         borderColor: active ? `${meta.accent}55` : "var(--border)",
@@ -124,11 +123,11 @@ function AgentGlyph({ type, status }: { type: AgentKind; status: AgentStatus }) 
     >
       {active && (
         <span
-          className="absolute inset-[-3px] animate-pulse rounded-[15px] border"
+          className="absolute -inset-0.75 animate-pulse rounded-[15px] border"
           style={{ borderColor: `${meta.accent}33` }}
         />
       )}
-      <svg viewBox="0 0 20 20" className="h-[17px] w-[17px]" fill="none">
+      <svg viewBox="0 0 20 20" className="h-4.25 w-4.25" fill="none">
         <path
           d={meta.path}
           stroke="currentColor"
@@ -191,7 +190,7 @@ export default function AgentPanel({
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex shrink-0 items-center justify-between px-4 py-4 text-left transition-colors hover:bg-[var(--glass-soft)]"
+        className="flex shrink-0 items-center justify-between px-4 py-4 text-left transition-colors hover:bg-(--glass-soft)"
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -202,16 +201,16 @@ export default function AgentPanel({
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+          <p className="mt-0.5 text-[10px] text-(--text-tertiary)">
             {isStreaming
               ? `协作进度 ${summary.progress}%`
               : `${summary.completed}/${summary.participating} 个参与角色已完成`}
           </p>
         </div>
-        <span className="text-[var(--text-tertiary)]">{expanded ? "⌃" : "⌄"}</span>
+        <span className="text-(--text-tertiary)">{expanded ? "⌃" : "⌄"}</span>
       </button>
 
-      <div className="mx-4 h-[3px] shrink-0 overflow-hidden rounded-full bg-[var(--glass)]">
+      <div className="mx-4 h-0.75 shrink-0 overflow-hidden rounded-full bg-(--glass)">
         <span
           className="block h-full rounded-full transition-[width] duration-500"
           style={{
@@ -231,7 +230,7 @@ export default function AgentPanel({
               return (
                 <article
                   key={agent.id}
-                  className="relative overflow-hidden rounded-[16px] border px-3 py-3 transition-all duration-300"
+                  className="relative overflow-hidden rounded-2xl border px-3 py-3 transition-all duration-300"
                   style={{
                     background: active ? meta.soft : "var(--glass-soft)",
                     borderColor: active ? `${meta.accent}38` : "var(--border)",
@@ -259,11 +258,11 @@ export default function AgentPanel({
                           {statusLabel(agent.status)}
                         </span>
                       </div>
-                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--text-secondary)]">
+                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-(--text-secondary)">
                         {agent.currentTask || meta.description}
                       </p>
                       <div className="mt-2.5 flex items-center gap-2">
-                        <div className="h-[3px] min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--glass)]">
+                        <div className="h-0.75 min-w-0 flex-1 overflow-hidden rounded-full bg-(--glass)">
                           <span
                             className="block h-full rounded-full transition-[width] duration-500"
                             style={{
@@ -272,7 +271,7 @@ export default function AgentPanel({
                             }}
                           />
                         </div>
-                        <span className="w-7 text-right font-mono text-[9px] tabular-nums text-[var(--text-tertiary)]">
+                        <span className="w-7 text-right font-mono text-[9px] tabular-nums text-(--text-tertiary)">
                           {agent.progress}%
                         </span>
                       </div>

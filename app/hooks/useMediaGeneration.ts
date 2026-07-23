@@ -159,7 +159,7 @@ export function useMediaGeneration({
   const [status, setStatus] = useState("");
   const [usageInfo, setUsageInfo] = useState<TokenInfo | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressTimerRef = useRef<number | null>(null);
   const progressRef = useRef(18);
 
   const stopProgressTimer = useCallback(() => {

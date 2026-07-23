@@ -58,7 +58,7 @@ export default function ChatList({
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(
     null,
   );
-  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyResetTimerRef = useRef<number | null>(null);
 
   const fallbackCopyText = (text: string) => {
     const textarea = document.createElement("textarea");
@@ -175,7 +175,9 @@ export default function ChatList({
                   <div className="mt-1 flex h-7 items-center justify-end pr-0.5">
                     <button
                       type="button"
-                      onClick={() => void copyUserMessage(message.content, index)}
+                      onClick={() =>
+                        void copyUserMessage(message.content, index)
+                      }
                       className="message-copy-button relative flex h-7 w-7 items-center justify-center rounded-[9px] border border-transparent opacity-100 outline-none transition-[opacity,transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--glass-hover)] hover:shadow-[0_5px_16px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] active:translate-y-0 active:scale-[0.94] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--glass-hover)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-blue)_24%,transparent)] sm:pointer-events-none sm:translate-y-[2px] sm:opacity-0 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
                       style={{
                         background: copied
@@ -281,9 +283,7 @@ export default function ChatList({
                     agentStatus={isLastMessage ? agentStatus : undefined}
                     isStreaming={isLastMessage && isStreaming}
                   />
-                  <MessageAttachmentGallery
-                    attachments={message.attachments}
-                  />
+                  <MessageAttachmentGallery attachments={message.attachments} />
                 </div>
               </div>
             </div>
