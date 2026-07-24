@@ -1,13 +1,20 @@
 import type { AgentKind, AgentStatus } from "../component/AgentPanel";
 import type { ChatSession, WorkspaceProject } from "../const/pageConst";
+import type { CommerceProgressEvent, CommerceResearchReport } from "../lib/commerce/types";
 
 export interface WorkspaceResponse {
   projects: WorkspaceProject[];
   sessions: ChatSession[];
 }
 
+export type InteractiveRequestSource =
+  | "terminal"
+  | "file_create_confirmation";
+
 export interface InteractiveRequest {
   id: string;
+  /** 旧 checkpoint 的终端请求可能没有 source，因此保持可选兼容。 */
+  source?: InteractiveRequestSource;
   command: string;
   prompt: string;
   mode: "normal" | "pty";
@@ -15,6 +22,10 @@ export interface InteractiveRequest {
   options: Array<{ label: string; value: string }>;
   promptRound: number;
   recentOutput: string;
+  title?: string;
+  description?: string;
+  filePath?: string;
+  originalUserRequest?: string;
 }
 
 export interface ToolActivity {
@@ -50,12 +61,35 @@ export interface AgentEventPayload {
   task?: string;
 }
 
+/**
+ * 后端 LangGraph 节点直接上报的真实生命周期事件。
+ *
+ * 与旧 AGENT_* 事件不同，这个结构包含 role + iteration，
+ * 因此前端可以正确展示 Reviewer -> Worker 的返工回环。
+ */
+export interface AgentLifecycleEventPayload {
+  id: string;
+  agentId: string;
+  role: string;
+  status: string;
+  previousStatus?: string;
+  slot?: number;
+  iteration: number;
+  sequence?: number;
+  detail: string;
+  toolName?: string;
+  createdAt: string;
+}
+
 export type StreamPacketType =
   | "TEXT"
   | "STATUS"
   | "TOOL_STATUS"
   | "USAGE"
   | "INTERACTIVE_REQUEST"
+  | "AGENT_LIFECYCLE"
+  | "COMMERCE_PROGRESS"
+  | "COMMERCE_REPORT"
   | "AGENT_START"
   | "AGENT_STATUS"
   | "AGENT_PROGRESS"
@@ -65,6 +99,10 @@ export type StreamPacketType =
 export interface StreamPacket {
   type?: StreamPacketType;
   content?: string | TokenInfo;
-  payload?: InteractiveRequest;
+  payload?:
+    | InteractiveRequest
+    | AgentLifecycleEventPayload
+    | CommerceProgressEvent
+    | CommerceResearchReport;
   agent?: AgentEventPayload;
 }

@@ -33,6 +33,7 @@ import {
   PlannerValidationStatus,
   ReviewPayload,
   VerificationCheckResult,
+  VerificationProfile,
   VerificationResult,
   WorkerFileChange,
   WorkerMemory,
@@ -76,6 +77,8 @@ const MAX_HIGH_LEVEL_ITEMS = 4;
 const MAX_PLANNER_RETRIES = 2;
 const MAX_REVIEW_RETRIES = 2;
 const MAX_WORKER_TOOL_ROUNDS = 10;
+/** simple_edit 只允许少量工具往返，避免单文档任务反复压缩上下文。 */
+const MAX_SIMPLE_WORKER_TOOL_ROUNDS = 5;
 const WORKER_MEMORY_COMPRESS_EVERY_ROUNDS = 3;
 const WORKER_MEMORY_MAX_CONTEXT_CHARS = 14_000;
 
@@ -660,7 +663,7 @@ function buildWorkerContinuationMessage(
       `只读共享上下文摘要:\n${truncateText(sharedMemory.mergedContext, 3500)}`,
       `当前 Worker 压缩记忆:\n${JSON.stringify(workerMemory, null, 2)}`,
       `Reviewer 反馈:\n${reviewFeedback || "暂无"}`,
-      "继续遵守 read -> propose -> get_diff -> apply_file_change 闭环。",
+      "继续遵守 read -> propose_file_change -> 检查返回 diff -> apply_file_change 闭环；不要重复调用 get_diff。",
       "不要声称未调用工具的操作已经完成。",
     ].join("\n\n"),
   };
@@ -1055,7 +1058,8 @@ function resolveRetryTaskSlots(state: AgentRuntimeState): number[] {
   }
 
   const fallbackSlot = (state.modifyResults || []).find(
-    (item: ModifyTaskResult) => item.status === "done",
+    (item: ModifyTaskResult) =>
+      item.status === "done" || item.status === "satisfied",
   )?.slot;
 
   return fallbackSlot === undefined ? [] : [fallbackSlot];
@@ -1172,6 +1176,29 @@ async function readRawFile(
   return { exists: true, content: fs.readFileSync(safePath, "utf-8") };
 }
 
+/**
+ * 判断上一轮 Worker 生成的目标内容是否已经由 Merge 写入正式工作区。
+ *
+ * Reviewer 返工时最常见的 no-op 场景是：第一轮修改已经落盘，但后续校验或
+ * Review 又把同一槽位派回来。此时不应该强迫 Worker 再生成一份相同提案。
+ */
+async function arePreviousChangesAlreadyApplied(
+  previousResult: ModifyTaskResult | null,
+  workingDir: string,
+): Promise<boolean> {
+  const previousChanges = previousResult?.fileChanges || [];
+  if (!previousChanges.length) return false;
+
+  for (const change of previousChanges) {
+    const current = await readRawFile(change.filePath, workingDir);
+    if (hashContent(current.content) !== change.proposedContentHash) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Worker 读取文件时优先读取自己的内存提案，避免同一 Worker 多轮修改丢失上下文。
 async function readFileFromLocalDisk(
   filePath: string,
@@ -1246,7 +1273,6 @@ async function stageWorkerFileChange(
 
 async function getWorkerDiff(
   filePath: string,
-  workingDir: string,
   runtime: WorkerToolRuntime,
 ): Promise<string> {
   const change = runtime.proposals.get(normalizeFileKey(filePath));
@@ -1552,7 +1578,7 @@ async function executeSingleTool(
             currentWorkingDir,
           );
       const diffMessage = state.workerRuntime
-        ? await getWorkerDiff(filePath, currentWorkingDir, state.workerRuntime)
+        ? await getWorkerDiff(filePath, state.workerRuntime)
         : await getDiff(filePath, currentWorkingDir);
 
       return {
@@ -1570,7 +1596,7 @@ async function executeSingleTool(
         messages: [
           makeMessage(
             state.workerRuntime
-              ? await getWorkerDiff(filePath, currentWorkingDir, state.workerRuntime)
+              ? await getWorkerDiff(filePath, state.workerRuntime)
               : await getDiff(filePath, currentWorkingDir),
           ),
         ],
@@ -2268,12 +2294,36 @@ export async function modifyWorkerNode(
           5000,
         )}`,
         `前序 Worker 压缩记忆:\n${JSON.stringify(workerMemory, null, 2)}`,
+        `前序同槽位结果:\n${
+          input.previousResult
+            ? JSON.stringify(
+                {
+                  workerId: input.previousResult.workerId,
+                  status: input.previousResult.status,
+                  summary: input.previousResult.summary,
+                  touchedFiles: input.previousResult.touchedFiles,
+                  fileChanges: input.previousResult.fileChanges.map((change) => ({
+                    filePath: change.filePath,
+                    proposedContentHash: change.proposedContentHash,
+                    ready: change.ready,
+                  })),
+                },
+                null,
+                2,
+              )
+            : "无"
+        }`,
         `Review 轮次: ${input.reviewIteration || 0}`,
         `Reviewer 反馈:\n${input.reviewFeedback || "暂无反馈"}`,
+        `用户已确认可新建的缺失文件:\n${
+          input.approvedMissingFiles.length
+            ? input.approvedMissingFiles.join(", ")
+            : "无"
+        }`,
         "执行要求:",
         "1. 只处理当前任务，不读取或推测其他 Worker 的消息和执行过程。",
-        "2. 必须先定位并读取真实文件，再生成完整文件内容。",
-        "3. 文件闭环使用 propose_file_change -> get_diff -> apply_file_change。",
+        "2. 必须先定位并读取真实文件。若读取结果为文件不存在，只有该路径出现在“用户已确认可新建的缺失文件”列表中，才可以按新文件生成完整内容；否则不得擅自创建。",
+        "3. 文件闭环使用 read -> propose_file_change -> 检查返回 diff -> apply_file_change；propose_file_change 已自动返回 diff，无需重复调用 get_diff。",
         "4. apply_file_change 只表示加入 Merge 队列，不会立即覆盖正式文件。",
         "5. 并发 Worker 阶段不要执行终端命令，验证会在 Merge 后统一运行。",
         "6. 尽量只修改 Planner 分配的文件；确需扩散时必须说明原因。",
@@ -2289,10 +2339,11 @@ export async function modifyWorkerNode(
     summary: string,
     status: ModifyTaskResult["status"],
     interactiveRequest: InteractiveRequest | null = null,
+    fileChangesOverride?: WorkerFileChange[],
   ): Record<string, unknown> => {
-    const changes = Array.from(proposals.values()).sort((left, right) =>
-      left.filePath.localeCompare(right.filePath),
-    );
+    const changes = (
+      fileChangesOverride || Array.from(proposals.values())
+    ).sort((left, right) => left.filePath.localeCompare(right.filePath));
     const lifecycleUpdate = buildLifecycleStateUpdate(tracker);
     return {
       modifyResults: [
@@ -2315,7 +2366,12 @@ export async function modifyWorkerNode(
   };
 
   try {
-    for (let attempt = 0; attempt < MAX_WORKER_TOOL_ROUNDS; attempt += 1) {
+    const maxToolRounds =
+      input.requestMode === "simple_edit"
+        ? MAX_SIMPLE_WORKER_TOOL_ROUNDS
+        : MAX_WORKER_TOOL_ROUNDS;
+
+    for (let attempt = 0; attempt < maxToolRounds; attempt += 1) {
       const response = await invokeLlm(
         runtimeState,
         [
@@ -2413,7 +2469,31 @@ export async function modifyWorkerNode(
           );
         }
 
+        /**
+         * simple_edit 只处理单文档任务。apply_file_change 已把全部提案标记 ready 后，
+         * 可以直接交给 Merge，不需要再消耗一次模型调用来重复说“完成”。
+         */
         if (
+          input.requestMode === "simple_edit" &&
+          proposals.size > 0 &&
+          Array.from(proposals.values()).every((change) => change.ready)
+        ) {
+          tracker.transition(
+            "READY_TO_MERGE",
+            `轻量修改已生成 ${proposals.size} 个可合并文件提案。`,
+          );
+          tracker.transition(
+            "COMPLETED",
+            `Worker ${workerId} 已完成轻量修改，等待 Merge。`,
+          );
+          return buildResultUpdate(
+            `${workerId} 已完成轻量单文件修改并准备交给 Merge。`,
+            "done",
+          );
+        }
+
+        if (
+          input.requestMode !== "simple_edit" &&
           shouldCompressWorkerMemory(runtimeMessages, toolRound, workerMemory)
         ) {
           tracker.transition(
@@ -2477,12 +2557,32 @@ export async function modifyWorkerNode(
         assistantMessage?.content?.trim() || `${workerId} 已完成当前任务。`;
 
       if (changes.length === 0) {
+        if (
+          input.reviewIteration > 0 &&
+          input.previousResult &&
+          (await arePreviousChangesAlreadyApplied(
+            input.previousResult,
+            input.workingDir,
+          ))
+        ) {
+          tracker.transition(
+            "COMPLETED",
+            "Worker 未生成新提案，但上一轮目标内容仍已落盘。",
+          );
+          return buildResultUpdate(
+            `${baseSummary}\n已确认上一轮目标内容仍在工作区中，本轮无需重复修改。`,
+            "satisfied",
+            null,
+            input.previousResult.fileChanges,
+          );
+        }
+
         tracker.transition(
           "FAILED",
-          "Worker 未生成任何文件提案，无法证明当前修改任务已经完成。",
+          "Worker 未生成任何文件提案，且无法确认已有目标内容已落盘。",
         );
         return buildResultUpdate(
-          `${baseSummary}\n当前任务未产生文件提案。`,
+          `${baseSummary}\n当前任务未产生文件提案，也没有可复用的已落盘结果。`,
           "failed",
         );
       }
@@ -3297,6 +3397,39 @@ function detectProjectPackageManager(workingDir: string): {
   };
 }
 
+const DOCUMENT_FILE_EXTENSIONS = new Set([
+  ".md",
+  ".mdx",
+  ".txt",
+  ".rst",
+  ".adoc",
+]);
+
+/** 根据真实落盘文件决定验证强度，避免文档修改触发整个项目的 build/test。 */
+function resolveVerificationProfile(
+  touchedFiles: string[],
+): VerificationProfile {
+  if (!touchedFiles.length) return "none";
+
+  if (
+    touchedFiles.every((file) =>
+      DOCUMENT_FILE_EXTENSIONS.has(path.extname(file).toLowerCase()),
+    )
+  ) {
+    return "document";
+  }
+
+  if (
+    touchedFiles.every((file) =>
+      [".ts", ".tsx", ".js", ".jsx"].includes(path.extname(file).toLowerCase()),
+    )
+  ) {
+    return "targeted";
+  }
+
+  return "full";
+}
+
 export async function lintBuildTestNode(
   state: AgentRuntimeState,
   config?: LangGraphRunnableConfig,
@@ -3307,7 +3440,7 @@ export async function lintBuildTestNode(
     state.reviewIteration || 0,
     config,
   );
-  tracker.transition("VERIFYING", "正在执行 Lint / Build / Test 工程验证。" );
+  tracker.transition("VERIFYING", "正在根据变更类型选择工程验证策略。");
 
   const buildCheck = (
     status: VerificationCheckResult["status"],
@@ -3381,8 +3514,60 @@ export async function lintBuildTestNode(
     };
   }
 
-  const touchedFiles = state.touchedFiles || [];
+  const touchedFiles: string[] = state.touchedFiles || [];
   const workingDir = state.workingDir || process.cwd();
+  const verificationProfile = resolveVerificationProfile(touchedFiles);
+
+  /**
+   * 文档修改的正确验证目标是“文件是否已经成功落盘”，而不是整个应用能否构建。
+   * 项目原有的 TypeScript/build 错误不能反向把 README 修改判成失败。
+   */
+  if (verificationProfile === "document") {
+    const missingFiles = touchedFiles.filter((file) => {
+      try {
+        return !fs.existsSync(path.resolve(workingDir, file));
+      } catch {
+        return true;
+      }
+    });
+    const overall: VerificationResult["overall"] = missingFiles.length
+      ? "failed"
+      : "passed";
+    const verificationResult: VerificationResult = {
+      ...DEFAULT_VERIFICATION_RESULT,
+      profile: "document",
+      lint: buildCheck(
+        "skipped",
+        null,
+        "仅修改文档文件，不运行代码 lint。",
+      ),
+      build: buildCheck(
+        "skipped",
+        null,
+        "仅修改文档文件，不运行项目 build。",
+      ),
+      test: buildCheck(
+        "skipped",
+        null,
+        "仅修改文档文件，不运行项目 test。",
+      ),
+      overall,
+      summary: missingFiles.length
+        ? `文档落盘检查失败，缺少文件: ${missingFiles.join(", ")}`
+        : `文档落盘检查通过：${touchedFiles.join(", ")}。`,
+    };
+
+    tracker.transition(
+      overall === "passed" ? "COMPLETED" : "FAILED",
+      verificationResult.summary,
+    );
+    return {
+      verificationResult,
+      lintSummary: formatVerification(verificationResult),
+      ...buildLifecycleStateUpdate(tracker),
+    };
+  }
+
   const packageJsonPath = path.join(workingDir, "package.json");
   const packageManager = detectProjectPackageManager(workingDir);
   const lintableFiles = touchedFiles.filter((file: string) =>
@@ -3479,6 +3664,7 @@ export async function lintBuildTestNode(
       : "skipped";
   const verificationResult: VerificationResult = {
     packageManager: packageManager.name,
+    profile: verificationProfile,
     lint,
     build,
     test,

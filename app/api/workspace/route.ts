@@ -10,6 +10,7 @@ import type {
   StoredMessage,
   StoredMessageAttachment,
 } from "@/app/lib/server/workspace-store";
+import type { CommerceResearchReport } from "@/app/lib/commerce/types";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,62 @@ function readAttachment(value: unknown): StoredMessageAttachment | null {
   };
 }
 
+
+function readCommerceReport(value: unknown): CommerceResearchReport | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.query !== "string" ||
+    typeof raw.marketplace !== "string" ||
+    !raw.category ||
+    !raw.metrics ||
+    !raw.insights ||
+    !Array.isArray(raw.products)
+  ) {
+    return undefined;
+  }
+
+  if ((raw.version === 2 || raw.version === 3) && Array.isArray(raw.sources)) {
+    return raw as unknown as CommerceResearchReport;
+  }
+
+  // v6 以前的单 Amazon 数据源报告仍按 v2 兼容读取；v9 新报告使用 v3。
+  if (raw.version === 1) {
+    const legacyDataSource =
+      raw.dataSource && typeof raw.dataSource === "object"
+        ? (raw.dataSource as Record<string, unknown>)
+        : {};
+    return {
+      ...(raw as unknown as Omit<CommerceResearchReport, "version" | "sources" | "confidenceScore">),
+      version: 2,
+      sources: [
+        {
+          id: "amazon",
+          label: "Amazon",
+          status: "collected",
+          provider:
+            typeof legacyDataSource.provider === "string"
+              ? (legacyDataSource.provider as CommerceResearchReport["sources"][number]["provider"])
+              : undefined,
+          quality:
+            legacyDataSource.quality === "high" ||
+            legacyDataSource.quality === "medium" ||
+            legacyDataSource.quality === "low"
+              ? legacyDataSource.quality
+              : "low",
+          sampleSize: raw.products.length,
+          coverage: ["历史单源报告"],
+          summary: "该报告由旧版本生成，仅包含 Amazon 单源数据。",
+          warnings: [],
+        },
+      ],
+      confidenceScore: 55,
+    };
+  }
+
+  return undefined;
+}
+
 function readMessages(value: unknown): StoredMessage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
@@ -83,19 +140,34 @@ function readMessages(value: unknown): StoredMessage[] | undefined {
       return parsed ? [parsed] : [];
     });
 
+    const commerceReport =
+      "commerceReport" in item
+        ? readCommerceReport(item.commerceReport)
+        : undefined;
+
     return [
       {
         role: item.role,
         content: item.content,
         attachments: attachments.length ? attachments : undefined,
+        commerceReport,
       },
     ];
   });
 }
 
-/** 返回本地持久化的项目和会话列表。 */
-export async function GET(): Promise<Response> {
-  return NextResponse.json(listWorkspace());
+/**
+ * 返回本地持久化工作区。Code / Commerce 会话按插件开关按需查询，避免核心 QA
+ * 启动时反序列化大量低频 Agent 历史。
+ */
+export async function GET(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  return NextResponse.json(
+    listWorkspace({
+      includeCode: url.searchParams.get("code") === "1",
+      includeCommerce: url.searchParams.get("commerce") === "1",
+    }),
+  );
 }
 
 /**
@@ -121,7 +193,12 @@ export async function POST(request: Request): Promise<Response> {
     if (body.action === "createSession") {
       return NextResponse.json({
         session: createSession({
-          mode: body.mode === "code" ? "code" : "qa",
+          mode:
+            body.mode === "code"
+              ? "code"
+              : body.mode === "commerce"
+                ? "commerce"
+                : "qa",
           projectId: readOptionalString(body.projectId) ?? null,
           title: readOptionalString(body.title),
           messages: readMessages(body.messages),

@@ -18,6 +18,8 @@ const ALL_TEXT_TASKS: readonly LlmTaskType[] = [
   "reviewer",
   "final_report",
   "final_answer",
+  "commerce_intent",
+  "commerce_analysis",
 ];
 
 const TEXT_AGENT_CAPABILITIES: readonly LlmCapability[] = [
@@ -112,7 +114,14 @@ export const LLM_MODEL_CATALOG: readonly LlmModelDefinition[] = [
       "fast",
       "structured_output",
     ],
-    recommendedTasks: ["chat", "read_only", "cli", "memory", "final_answer"],
+    recommendedTasks: [
+      "chat",
+      "read_only",
+      "cli",
+      "memory",
+      "final_answer",
+      "commerce_intent",
+    ],
     quality: 80,
     speed: 88,
     costEfficiency: 88,
@@ -171,7 +180,15 @@ export const LLM_MODEL_CATALOG: readonly LlmModelDefinition[] = [
       "fast",
       "structured_output",
     ],
-    recommendedTasks: ["chat", "read_only", "cli", "memory", "final_answer"],
+    recommendedTasks: [
+      "chat",
+      "read_only",
+      "cli",
+      "memory",
+      "final_answer",
+      "commerce_intent",
+      "commerce_analysis",
+    ],
     quality: 86,
     speed: 94,
     costEfficiency: 90,

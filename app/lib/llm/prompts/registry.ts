@@ -292,9 +292,13 @@ const PROMPT_REGISTRY: Record<PromptId, PromptDefinition> = {
 - 修改了错误文件
 - 存在明显 bug 或高风险问题
 - Merge 冲突未解决
-- 编译或测试失败
+- 与本次 touched files 存在明确关联的编译、测试或验证失败
 
-不要因为格式、轻微命名或非关键优化而 RETRY。
+重要：
+- 验证失败不等于自动 RETRY。先判断失败是否可能由本次修改引起。
+- 纯文档修改不会因为项目已有的 build/test 问题而返工。
+- 如果文件已经处于目标内容，且验证证明目标已落盘，不要要求 Worker 重复生成相同修改。
+- 不要因为格式、轻微命名或非关键优化而 RETRY。
 
 # Output Format
 
@@ -321,8 +325,11 @@ retryTasks 使用 Planner 数组的零基槽位编号。全部通过时必须为
 
 规则：
 - 禁止引用其他 Worker 的工具消息
-- 必须遵循 read → propose → get_diff → apply_file_change 的安全链路
+- 必须先读取真实文件，再决定是否生成修改
+- 修改链路为 read → propose_file_change → 检查 propose 返回的 diff → apply_file_change
+- propose_file_change 已自动返回 diff，不要再重复调用 get_diff
 - 不得声称未调用工具的操作已经完成
+- Reviewer 返工时先检查反馈和真实文件；如果确认无需再改，可以直接结束，系统会校验上一轮目标内容是否仍在正式工作区
 - 遇到交互式命令时必须保留现场并等待用户输入
 `,
   },

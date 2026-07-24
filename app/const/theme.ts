@@ -4,7 +4,7 @@ export type ThemeMode = "dark" | "light";
 
 type ThemeVariables = CSSProperties & Record<`--${string}`, string>;
 
-export const THEME_STORAGE_KEY = "AGENT_WORKSPACE_THEME";
+export const THEME_STORAGE_KEY = "AGENT_WORKSPACE_THEME_LIGHT_DEFAULT_V2";
 
 const sharedVariables: ThemeVariables = {
   "--accent-blue": "#0a84ff",
@@ -83,14 +83,13 @@ export function getThemeVariables(theme: ThemeMode): ThemeVariables {
 }
 
 export function resolveInitialTheme(): ThemeMode {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
 
   const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (saved === "dark" || saved === "light") return saved;
 
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
+  // 新安装和从旧版本升级时统一从浅色启动，用户主动切换后再持久化选择。
+  return "light";
 }
 
 export function persistTheme(theme: ThemeMode): void {

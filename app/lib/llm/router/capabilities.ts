@@ -17,6 +17,8 @@ const TASK_CAPABILITIES: Record<
   reviewer: ["text", "reasoning", "coding", "structured_output"],
   final_report: ["text", "reasoning", "structured_output"],
   final_answer: ["text", "stream"],
+  commerce_intent: ["text", "structured_output", "fast"],
+  commerce_analysis: ["text", "reasoning", "structured_output"],
 };
 
 export function getTaskCapabilities(

@@ -1,3 +1,4 @@
+import type { AgentLifecycleEventPayload } from "../../types/workspace";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance } from "../AgentPanel";
 import type {
@@ -9,9 +10,7 @@ import type {
 
 function matchesActivity(activity: ToolActivity, keys: string[]): boolean {
   const normalized = activity.label.toLocaleLowerCase();
-  return keys.some((key) =>
-    normalized.includes(key.toLocaleLowerCase()),
-  );
+  return keys.some((key) => normalized.includes(key.toLocaleLowerCase()));
 }
 
 function resolveDirectStatus(
@@ -52,28 +51,160 @@ function resolveDirectStatus(
   return "idle";
 }
 
-function normalizeSequentialStatuses(
+/**
+ * 兼容没有 lifecycle 的媒体任务和旧后端。
+ *
+ * 与旧实现不同，优先使用“当前 active/error 阶段”作为流程光标。
+ * 因此 Reviewer 已完成后 Worker 再次 active 时，后续阶段会重新变成 queued，
+ * 不会因为历史最远 completed 阶段而继续显示 100%。
+ */
+function normalizeFallbackStatuses(
   directStatuses: PlanningStageStatus[],
   isStreaming: boolean,
 ): PlanningStageStatus[] {
-  const furthestSignalIndex = directStatuses.reduce(
-    (furthest, status, index) =>
-      ["active", "completed", "error"].includes(status) ? index : furthest,
+  if (!isStreaming) return directStatuses;
+
+  const activeIndex = directStatuses.reduce(
+    (latest, status, index) =>
+      status === "active" || status === "error" ? index : latest,
+    -1,
+  );
+
+  if (activeIndex >= 0) {
+    return directStatuses.map((status, index) => {
+      if (index < activeIndex && status !== "error") return "completed";
+      if (index > activeIndex) return "queued";
+      return status;
+    });
+  }
+
+  const furthestCompletedIndex = directStatuses.reduce(
+    (latest, status, index) => (status === "completed" ? index : latest),
     -1,
   );
 
   return directStatuses.map((status, index) => {
-    if (index < furthestSignalIndex && status !== "error") {
-      return "completed";
-    }
-    if (!isStreaming) return status;
-    if (furthestSignalIndex === -1) {
+    if (furthestCompletedIndex === -1) {
       return index === 0 ? "active" : "queued";
     }
-    if (index > furthestSignalIndex && status === "idle") {
+    if (index < furthestCompletedIndex && status !== "error") {
+      return "completed";
+    }
+    if (index > furthestCompletedIndex && status === "idle") {
       return "queued";
     }
     return status;
+  });
+}
+
+function compareLifecycleEvents(
+  left: AgentLifecycleEventPayload,
+  right: AgentLifecycleEventPayload,
+): number {
+  const leftTime = Date.parse(left.createdAt || "");
+  const rightTime = Date.parse(right.createdAt || "");
+  const timeDiff =
+    Number.isNaN(leftTime) || Number.isNaN(rightTime)
+      ? 0
+      : leftTime - rightTime;
+
+  if (timeDiff !== 0) return timeDiff;
+  return (left.sequence || 0) - (right.sequence || 0);
+}
+
+function findLifecycleStageIndex(
+  definitions: PlanningStageDefinition[],
+  event: AgentLifecycleEventPayload,
+): number {
+  return definitions.findIndex((definition) =>
+    definition.lifecycleRoles?.includes(event.role),
+  );
+}
+
+function lifecycleStatusToPlanningStatus(
+  events: AgentLifecycleEventPayload[],
+): PlanningStageStatus {
+  if (!events.length) return "idle";
+
+  const latestByAgent = new Map<string, AgentLifecycleEventPayload>();
+  [...events].sort(compareLifecycleEvents).forEach((event) => {
+    latestByAgent.set(event.agentId, event);
+  });
+  const statuses = Array.from(latestByAgent.values()).map(
+    (event) => event.status,
+  );
+
+  if (statuses.some((status) => status === "FAILED")) return "error";
+  if (
+    statuses.some(
+      (status) => status !== "COMPLETED" && status !== "FAILED",
+    )
+  ) {
+    return "active";
+  }
+  return "completed";
+}
+
+function buildLifecycleStages(
+  definitions: PlanningStageDefinition[],
+  activities: ToolActivity[],
+  lifecycleEvents: AgentLifecycleEventPayload[],
+  isStreaming: boolean,
+): PlanningStageView[] | null {
+  const mappedEvents = [...lifecycleEvents]
+    .filter((event) => findLifecycleStageIndex(definitions, event) >= 0)
+    .sort(compareLifecycleEvents);
+
+  if (!mappedEvents.length) return null;
+
+  const latestEvent = mappedEvents[mappedEvents.length - 1];
+  const currentStageIndex = findLifecycleStageIndex(definitions, latestEvent);
+
+  return definitions.map((definition, index) => {
+    const stageEvents = mappedEvents.filter((event) =>
+      definition.lifecycleRoles?.includes(event.role),
+    );
+    const latestStageEvent = stageEvents[stageEvents.length - 1];
+    const iteration = latestStageEvent?.iteration || 0;
+
+    let status: PlanningStageStatus;
+    if (index < currentStageIndex) {
+      status = "completed";
+    } else if (index > currentStageIndex) {
+      status = isStreaming ? "queued" : "idle";
+    } else {
+      const currentIterationEvents = stageEvents.filter(
+        (event) => event.iteration === latestEvent.iteration,
+      );
+      status = lifecycleStatusToPlanningStatus(
+        currentIterationEvents.length ? currentIterationEvents : stageEvents,
+      );
+    }
+
+    const detail =
+      index === currentStageIndex && latestStageEvent
+        ? `${
+            latestStageEvent.iteration > 0
+              ? `第 ${latestStageEvent.iteration + 1} 轮返工 · `
+              : ""
+          }${latestStageEvent.detail}`
+        : definition.description;
+
+    return {
+      ...definition,
+      status,
+      progress:
+        status === "completed" || status === "error"
+          ? 100
+          : status === "active"
+            ? 58
+            : 0,
+      detail,
+      activityCount: activities.filter((activity) =>
+        matchesActivity(activity, definition.activityKeys),
+      ).length,
+      iteration,
+    };
   });
 }
 
@@ -120,7 +251,9 @@ function resolveDetail(
 
 /**
  * 根据指定阶段定义派生任务规划视图。
- * 媒体和代码使用不同 definitions，避免右侧面板显示错误流程。
+ *
+ * Code Agent 优先消费后端 AGENT_LIFECYCLE；只有旧后端或媒体任务没有 lifecycle
+ * 时才回退到 Agent/Tool 文案推断。
  */
 export function buildPlanningStages(
   definitions: PlanningStageDefinition[],
@@ -128,11 +261,20 @@ export function buildPlanningStages(
   activities: ToolActivity[],
   isStreaming: boolean,
   agentStatus?: string,
+  lifecycleEvents: AgentLifecycleEventPayload[] = [],
 ): PlanningStageView[] {
+  const lifecycleStages = buildLifecycleStages(
+    definitions,
+    activities,
+    lifecycleEvents,
+    isStreaming,
+  );
+  if (lifecycleStages) return lifecycleStages;
+
   const directStatuses = definitions.map((definition) =>
     resolveDirectStatus(definition, agents, activities),
   );
-  const statuses = normalizeSequentialStatuses(directStatuses, isStreaming);
+  const statuses = normalizeFallbackStatuses(directStatuses, isStreaming);
 
   return definitions.map((definition, index) => ({
     ...definition,
@@ -148,6 +290,7 @@ export function buildPlanningStages(
     activityCount: activities.filter((activity) =>
       matchesActivity(activity, definition.activityKeys),
     ).length,
+    iteration: 0,
   }));
 }
 

@@ -234,6 +234,14 @@ export const AgentState = Annotation.Root({
     reducer: (_currentState, newValue) => newValue ?? null,
     default: () => null,
   }),
+  /**
+   * 当前用户任务中，已经通过 UI 明确允许新建的缺失文件。
+   * 每个普通新任务都会在 Router 中清空，避免授权跨任务泄漏。
+   */
+  approvedMissingFiles: Annotation<string[]>({
+    reducer: replaceValue,
+    default: () => [],
+  }),
 
   // Lifecycle Snapshot 供 UI 快速读取当前状态，Events 供审计/时间线使用。
   agentLifecycles: Annotation<Record<string, AgentLifecycleSnapshot>>({
@@ -278,6 +286,18 @@ export const ModifyWorkerState = Annotation.Root({
   previousMemory: Annotation<WorkerMemory>({
     reducer: replaceValue,
     default: createDefaultWorkerMemory,
+  }),
+  previousResult: Annotation<ModifyTaskResult | null>({
+    reducer: replaceValue,
+    default: () => null,
+  }),
+  requestMode: Annotation<AgentRequestMode>({
+    reducer: replaceValue,
+    default: () => "code_change",
+  }),
+  approvedMissingFiles: Annotation<string[]>({
+    reducer: replaceValue,
+    default: () => [],
   }),
   model: Annotation<string>,
   workingDir: Annotation<string>,

@@ -2,12 +2,13 @@ import { createHash, randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
+import type { CommerceResearchReport } from "../commerce/types";
 import {
   assertExistingWorkspaceDirectory,
   normalizeAndValidateWorkspacePath,
 } from "./workspace-path";
 
-export type SessionMode = "qa" | "code";
+export type SessionMode = "qa" | "code" | "commerce";
 
 export type StoredMessageAttachment = {
   name: string;
@@ -22,6 +23,7 @@ export type StoredMessage = {
   role: "user" | "assistant";
   content: string;
   attachments?: StoredMessageAttachment[];
+  commerceReport?: CommerceResearchReport;
 };
 
 export type WorkspaceProject = {
@@ -73,6 +75,37 @@ function getDatabasePath(): string {
   return path.join(dataDir, "agent-workspace.sqlite");
 }
 
+
+/**
+ * 旧版 SQLite 的 sessions.mode CHECK 只允许 qa/code。
+ * SQLite 无法直接修改 CHECK，因此检测到旧表时用事务无损重建表结构。
+ */
+function ensureSessionModeSchema(db: DatabaseSync): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'")
+    .get() as { sql?: string } | undefined;
+  if (!row?.sql || row.sql.includes("'commerce'")) return;
+
+  db.exec(`
+    BEGIN IMMEDIATE;
+    ALTER TABLE sessions RENAME TO sessions_legacy_mode_v2;
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('qa', 'code', 'commerce')),
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      messages_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO sessions (id, title, mode, project_id, messages_json, created_at, updated_at)
+    SELECT id, title, mode, project_id, messages_json, created_at, updated_at
+    FROM sessions_legacy_mode_v2;
+    DROP TABLE sessions_legacy_mode_v2;
+    COMMIT;
+  `);
+}
+
 function getDatabase(): DatabaseSync {
   if (database) return database;
   database = new DatabaseSync(getDatabasePath());
@@ -92,7 +125,7 @@ function getDatabase(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      mode TEXT NOT NULL CHECK(mode IN ('qa', 'code')),
+      mode TEXT NOT NULL CHECK(mode IN ('qa', 'code', 'commerce')),
       project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
       messages_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -141,6 +174,11 @@ function getDatabase(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_symbols_project_name ON symbol_index(project_id, symbol_name);
     CREATE INDEX IF NOT EXISTS idx_code_content_project_path ON code_content(project_id, file_path);
   `);
+  ensureSessionModeSchema(database);
+  // 迁移重建 sessions 表时旧索引会随 legacy 表删除，因此这里再次确保索引存在。
+  database.exec(
+    "CREATE INDEX IF NOT EXISTS idx_sessions_project_updated ON sessions(project_id, updated_at DESC);",
+  );
   return database;
 }
 
@@ -166,17 +204,41 @@ function mapSession(row: SessionRow): WorkspaceSession {
   };
 }
 
-export function listWorkspace(): {
+export interface WorkspaceListOptions {
+  includeCode?: boolean;
+  includeCommerce?: boolean;
+}
+
+/**
+ * 按已启用插件裁剪工作区数据。
+ *
+ * messages_json 可能包含长代码对话或完整 Commerce 报告，因此插件关闭时直接在 SQL
+ * 层排除对应会话，比客户端拿到全部数据后再隐藏更能减少首屏解析与 IPC/HTTP 负担。
+ */
+export function listWorkspace(
+  options: WorkspaceListOptions = {},
+): {
   projects: WorkspaceProject[];
   sessions: WorkspaceSession[];
 } {
   const db = getDatabase();
-  const projects = db
-    .prepare("SELECT * FROM projects ORDER BY last_opened_at DESC")
-    .all() as unknown as ProjectRow[];
-  const sessions = db
-    .prepare("SELECT * FROM sessions ORDER BY updated_at DESC")
-    .all() as unknown as SessionRow[];
+  const includeCode = options.includeCode === true;
+  const includeCommerce = options.includeCommerce === true;
+  const projects = includeCode
+    ? (db
+        .prepare("SELECT * FROM projects ORDER BY last_opened_at DESC")
+        .all() as unknown as ProjectRow[])
+    : [];
+
+  const sessionSql = includeCode && includeCommerce
+    ? "SELECT * FROM sessions ORDER BY updated_at DESC"
+    : includeCode
+      ? "SELECT * FROM sessions WHERE mode IN ('qa', 'code') ORDER BY updated_at DESC"
+      : includeCommerce
+        ? "SELECT * FROM sessions WHERE mode IN ('qa', 'commerce') ORDER BY updated_at DESC"
+        : "SELECT * FROM sessions WHERE mode = 'qa' ORDER BY updated_at DESC";
+  const sessions = db.prepare(sessionSql).all() as unknown as SessionRow[];
+
   return {
     projects: projects.map(mapProject),
     sessions: sessions.map(mapSession),

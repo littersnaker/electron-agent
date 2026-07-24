@@ -5,7 +5,7 @@ import { persistTheme, resolveInitialTheme } from "../const/theme";
 import type { ThemeMode } from "../const/theme";
 
 export function useThemeMode() {
-  const [theme, setTheme] = useState<ThemeMode>("dark");
+  const [theme, setTheme] = useState<ThemeMode>("light");
 
   useEffect(() => {
     const setSystemTheme = () => {

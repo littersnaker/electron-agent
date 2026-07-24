@@ -3,6 +3,7 @@
 import type {
   ChatSession,
   ComposerMode,
+  SessionMode,
   WorkspaceProject,
 } from "../const/pageConst";
 import type { TokenInfo } from "../types/workspace";
@@ -25,26 +26,49 @@ function SessionGlyph({
   sessionMode,
   composerMode,
 }: {
-  sessionMode?: "qa" | "code";
+  sessionMode?: SessionMode;
   composerMode: ComposerMode;
 }) {
   const isCode = sessionMode === "code";
-  const isMedia = !isCode && isMediaMode(composerMode);
+  const isCommerce = sessionMode === "commerce";
+  const isMedia = sessionMode === "qa" && isMediaMode(composerMode);
+
+  const background = isCode
+    ? "rgba(10,132,255,0.13)"
+    : isCommerce
+      ? "rgba(10,132,255,0.13)"
+      : isMedia
+        ? "rgba(191,90,242,0.14)"
+        : "rgba(191,90,242,0.12)";
+  const color = isCode
+    ? "#64b5ff"
+    : isCommerce
+      ? "#64b5ff"
+      : isMedia
+        ? "#bf5af2"
+        : "#d6a5ff";
 
   return (
     <div
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border"
-      style={{
-        background: isCode
-          ? "rgba(10,132,255,0.13)"
-          : isMedia
-            ? "rgba(191,90,242,0.14)"
-            : "rgba(191,90,242,0.12)",
-        borderColor: "var(--border)",
-        color: isCode ? "#64b5ff" : isMedia ? "#bf5af2" : "#d6a5ff",
-      }}
+      style={{ background, borderColor: "var(--border)", color }}
     >
-      {isCode ? "</>" : isMedia ? "✦" : "◎"}
+      {isCode ? (
+        "</>"
+      ) : isCommerce ? (
+        <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" fill="none">
+          <path
+            d="M3.5 15.2h13M4.8 13V9.5M8.2 13V6.8M11.7 13V9.8M15.1 13V4.5"
+            stroke="currentColor"
+            strokeWidth="1.55"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : isMedia ? (
+        "✦"
+      ) : (
+        "◎"
+      )}
     </div>
   );
 }
@@ -60,6 +84,13 @@ function resolveHeaderText(
       subtitle: activeProject
         ? `${activeProject.name} · ${activeProject.indexStatus === "ready" ? "本地索引已就绪" : "代码索引处理中"}`
         : "当前未绑定本地项目",
+    };
+  }
+
+  if (activeSession?.mode === "commerce") {
+    return {
+      title: "Cross-border Market Intelligence Agent",
+      subtitle: "公开市场研究 · 多来源覆盖 · PDF 情报报告",
     };
   }
 
@@ -165,7 +196,7 @@ export default function WorkspaceHeader({
               color: "#ff6961",
             }}
           >
-            <span className="h-2.5 w-2.5 rounded-[3px] bg-current" />
+            <span className="h-2.5 w-2.5 rounded-[2px] bg-current" />
             停止
           </button>
         )}
@@ -177,11 +208,15 @@ export default function WorkspaceHeader({
           style={{
             background: "var(--glass)",
             borderColor: "var(--border)",
-            color: "var(--text-secondary)",
+            color: "var(--text-tertiary)",
           }}
-          title="API Key 设置"
+          title="服务与数据源"
+          aria-label="打开服务与数据源设置"
         >
-          ⚙
+          <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+            <circle cx="7" cy="10" r="3.1" stroke="currentColor" strokeWidth="1.45" />
+            <path d="M10 10h6.7M14.3 10v2M16.4 10v1.2" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
     </header>

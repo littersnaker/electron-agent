@@ -1,4 +1,7 @@
+"use client";
+
 /* eslint-disable react-hooks/exhaustive-deps */
+import dynamic from "next/dynamic";
 import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
@@ -20,6 +23,12 @@ const COLORS = {
 };
 
 const MemoizedAssistantMessageRow = memo(AssistantMessageRow);
+
+// Commerce 报告卡片只在该插件真正产生报告时才下载对应客户端 chunk。
+const CommerceReportCard = dynamic(
+  () => import("./commerce/CommerceReportCard"),
+  { ssr: false },
+);
 
 function AssistantBadge() {
   return (
@@ -59,6 +68,19 @@ export default function ChatList({
     null,
   );
   const copyResetTimerRef = useRef<number | null>(null);
+
+  // ChatList 会由父组件使用 activeSessionId 作为 key。切换会话时组件会重新挂载，
+  // 因此这里使用 Virtuoso 官方提供的 initialTopMostItemIndex 指定初始位置。
+  // 仅使用 alignToBottom 只能处理“消息总高度小于视口”的短会话；长会话仍会从
+  // 第一条消息开始。将最后一条消息按 end 对齐，可以在首次绘制时直接定位到最新消息，
+  // 同时不会干扰用户在当前会话中主动向上滚动查看历史记录。
+  const initialTopMostItemIndex =
+    messages.length > 0
+      ? {
+          index: messages.length - 1,
+          align: "end" as const,
+        }
+      : undefined;
 
   const fallbackCopyText = (text: string) => {
     const textarea = document.createElement("textarea");
@@ -127,6 +149,7 @@ export default function ChatList({
       <Virtuoso
         ref={virtuosoRef}
         data={messages}
+        initialTopMostItemIndex={initialTopMostItemIndex}
         alignToBottom
         followOutput="smooth"
         increaseViewportBy={{ top: 360, bottom: 360 }}
@@ -141,6 +164,7 @@ export default function ChatList({
             !isUser &&
             (Boolean(message.content) ||
               Boolean(message.attachments?.length) ||
+              Boolean(message.commerceReport) ||
               (isLastMessage &&
                 (isStreaming ||
                   toolActivities.length > 0 ||
@@ -266,7 +290,7 @@ export default function ChatList({
                   className="mb-1.5 text-[11px] font-medium tracking-wide"
                   style={{ color: COLORS.textMuted }}
                 >
-                  Agent
+                  {message.commerceReport ? "Market Intelligence Agent" : "Agent"}
                 </div>
                 <div
                   className="min-w-0 rounded-[18px] border px-4 py-3.5"
@@ -277,6 +301,9 @@ export default function ChatList({
                     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
                   }}
                 >
+                  {message.commerceReport && (
+                    <CommerceReportCard report={message.commerceReport} />
+                  )}
                   <MemoizedAssistantMessageRow
                     content={message.content}
                     toolActivities={isLastMessage ? toolActivities : []}

@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/immutability */
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import AgentPanel from "./component/AgentPanel";
@@ -9,8 +10,6 @@ import ChatComposer from "./component/ChatComposer";
 import ChatList from "./component/ChatList";
 import ChatSidebar from "./component/ChatSidebar";
 import CustomTitleBar from "./component/CustomTitleBar";
-import InteractiveRequestPanel from "./component/InteractiveRequestPanel";
-import TaskPlanningPanel from "./component/TaskPlanningPanel";
 import WorkspaceHeader from "./component/WorkspaceHeader";
 import {
   AVAILABLE_CHAT_MODELS,
@@ -20,6 +19,7 @@ import type {
   ComposerMode,
   ImageEditFidelity,
   MediaMode,
+  SessionMode,
   TypographyPolicy,
 } from "./const/pageConst";
 import { getThemeVariables } from "./const/theme";
@@ -27,17 +27,34 @@ import { useAgentCoordinator } from "./hooks/useAgentCoordinator";
 import { useApiKey } from "./hooks/useApiKey";
 import { useChatStream } from "./hooks/useChatStream";
 import { useComposer } from "./hooks/useComposer";
+import { useCommerceResearch } from "./hooks/useCommerceResearch";
 import { useMediaGeneration } from "./hooks/useMediaGeneration";
+import { usePluginManager } from "./hooks/usePluginManager";
 import { useThemeMode } from "./hooks/useThemeMode";
 import { useWorkspaceController } from "./hooks/useWorkspaceController";
 import { AUTO_MODEL_ID } from "./lib/llm/model-catalog";
 import { DEFAULT_MEDIA_MODEL_ID } from "./lib/media/catalog";
+import type { CommerceMarketplaceCode } from "./lib/commerce/types";
+import type { BuiltinPluginId } from "./lib/plugins/types";
+
+// 插件专属 UI 使用动态分包；核心 QA 首屏不会同步加载这些面板。
+const TaskPlanningPanel = dynamic(() => import("./component/TaskPlanningPanel"), {
+  ssr: false,
+});
+const InteractiveRequestPanel = dynamic(
+  () => import("./component/InteractiveRequestPanel"),
+  { ssr: false },
+);
+const PluginCenter = dynamic(() => import("./component/plugins/PluginCenter"), {
+  ssr: false,
+});
 
 /**
  * 白雪条工作台页面入口。
  *
- * 普通聊天仍走原有 LLM Gateway；图片/视频生成走独立 Media Route。
- * 这样不会把异步媒体协议塞进 Code Agent 的文本 SSE 工作流。
+ * 普通聊天仍走原有 LLM Gateway；图片/视频生成走独立 Media Route；
+ * Cross-border Market Intelligence 走独立 Commerce Research Route。三类工作流彼此隔离，避免
+ * 媒体协议、Code Agent 状态机与市场研究 SSE 互相污染。
  */
 export default function Home() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
@@ -50,14 +67,26 @@ export default function Home() {
   const [imageEditFidelity, setImageEditFidelity] =
     useState<ImageEditFidelity>("precise");
   const [enableQualityGuard, setEnableQualityGuard] = useState(true);
+  const [commerceMarketplace, setCommerceMarketplace] =
+    useState<CommerceMarketplaceCode>("US");
+  const [showPluginCenter, setShowPluginCenter] = useState(false);
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
-  const workspace = useWorkspaceController();
+  const plugins = usePluginManager();
+  const codePluginEnabled = plugins.isEnabled("code-agent");
+  const commercePluginEnabled = plugins.isEnabled("commerce-research");
+  const workspace = useWorkspaceController({
+    includeCode: codePluginEnabled,
+    includeCommerce: commercePluginEnabled,
+  });
   const agentCoordinator = useAgentCoordinator();
 
   const effectiveComposerMode: ComposerMode =
-    workspace.activeSession?.mode === "code" ? "chat" : composerMode;
+    workspace.activeSession?.mode === "code" ||
+    workspace.activeSession?.mode === "commerce"
+      ? "chat"
+      : composerMode;
 
   const availableModels = useMemo(() => {
     if (effectiveComposerMode === "chat") return AVAILABLE_CHAT_MODELS;
@@ -105,26 +134,62 @@ export default function Home() {
     agents: agentCoordinator,
   });
 
-  const isBusy = chat.isStreaming || media.isGenerating;
-  const activeStatus = media.status || chat.agentStatus;
+  const commerce = useCommerceResearch({
+    activeSession: workspace.activeSession,
+    messages: workspace.messages,
+    setMessages: workspace.setMessages,
+    setSessions: workspace.setSessions,
+    persistSession: workspace.persistSession,
+    apiKeys: apiKey.apiKeys,
+    serviceKeys: apiKey.serviceKeys,
+    selectedModel: selectedChatModel,
+    marketplace: commerceMarketplace,
+    clearAfterSubmit: composer.clearAfterSubmit,
+    agents: agentCoordinator,
+  });
+
+  const isBusy =
+    chat.isStreaming || media.isGenerating || commerce.isResearching;
+  const activeStatus =
+    workspace.activeSession?.mode === "commerce"
+      ? commerce.agentStatus
+      : media.status || chat.agentStatus;
   const activeUsage =
-    effectiveComposerMode === "chat" ? chat.tokenInfo : media.usageInfo;
+    workspace.activeSession?.mode === "commerce"
+      ? commerce.tokenInfo
+      : effectiveComposerMode === "chat"
+        ? chat.tokenInfo
+        : media.usageInfo;
+  const activeToolActivities =
+    workspace.activeSession?.mode === "commerce"
+      ? commerce.toolActivities
+      : chat.toolActivities;
 
   const resetConversationUi = () => {
     composer.resetComposer();
     chat.resetTransient();
     media.reset();
+    commerce.reset();
     agentCoordinator.resetAgents();
   };
 
   const handleCreateSession = async (
-    mode: "qa" | "code",
+    mode: SessionMode,
     projectId: string | null = null,
   ) => {
     if (isBusy) return;
+    if (mode === "code" && !codePluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
+    if (mode === "commerce" && !commercePluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
+
     const session = await workspace.createSession(mode, projectId);
     if (session) resetConversationUi();
-    if (mode === "code") setComposerMode("chat");
+    if (mode === "code" || mode === "commerce") setComposerMode("chat");
   };
 
   const handleSwitchSession = (id: string) => {
@@ -143,10 +208,33 @@ export default function Home() {
 
   const handleAddProject = async () => {
     if (isBusy) return;
+    if (!codePluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
     const project = await workspace.addProject();
     if (project) {
       setComposerMode("chat");
       resetConversationUi();
+    }
+  };
+
+  const handlePluginChange = (
+    pluginId: BuiltinPluginId,
+    enabled: boolean,
+  ) => {
+    plugins.setPluginEnabled(pluginId, enabled);
+
+    // 如果用户关闭了当前正在查看的插件，立即回到核心 QA，避免页面停留在失效入口。
+    const disabledMode =
+      pluginId === "code-agent" ? "code" : "commerce";
+    if (!enabled && workspace.activeSession?.mode === disabledMode) {
+      const qaSession = workspace.sessions.find((session) => session.mode === "qa");
+      if (qaSession) {
+        handleSwitchSession(qaSession.id);
+      } else {
+        void handleCreateSession("qa");
+      }
     }
   };
 
@@ -173,6 +261,10 @@ export default function Home() {
   };
 
   const handleSubmit = () => {
+    if (workspace.activeSession?.mode === "commerce") {
+      void commerce.submitPrompt(composer.input);
+      return;
+    }
     if (effectiveComposerMode === "chat") {
       void chat.submitPrompt(composer.input);
       return;
@@ -196,10 +288,21 @@ export default function Home() {
       {apiKey.showKeyModal && (
         <ApiKeyModal
           initialKeys={apiKey.apiKeys}
+          initialServiceKeys={apiKey.serviceKeys}
           onSave={apiKey.handleSaveKeys}
           onClose={apiKey.closeKeyModal}
         />
       )}
+      {showPluginCenter && (
+        <PluginCenter
+          open
+          plugins={plugins.manifests}
+          enabled={plugins.enabled}
+          onChange={handlePluginChange}
+          onClose={() => setShowPluginCenter(false)}
+        />
+      )}
+
       <CustomTitleBar
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -216,10 +319,14 @@ export default function Home() {
           activeSessionId={workspace.activeSessionId}
           isStreaming={isBusy}
           createQaSession={() => void handleCreateSession("qa")}
+          createCommerceSession={() => void handleCreateSession("commerce")}
           createCodeSession={(projectId: string) =>
             void handleCreateSession("code", projectId)
           }
           addProject={() => void handleAddProject()}
+          codePluginEnabled={codePluginEnabled}
+          commercePluginEnabled={commercePluginEnabled}
+          onOpenPluginCenter={() => setShowPluginCenter(true)}
           reindexProject={(projectId: string) =>
             void workspace.reindexProject(projectId)
           }
@@ -245,7 +352,13 @@ export default function Home() {
               composerMode={effectiveComposerMode}
               tokenInfo={activeUsage}
               isStreaming={isBusy}
-              onStop={media.isGenerating ? media.stop : chat.stop}
+              onStop={
+                commerce.isResearching
+                  ? commerce.stop
+                  : media.isGenerating
+                    ? media.stop
+                    : chat.stop
+              }
               onOpenApiKey={apiKey.openKeyModal}
             />
 
@@ -255,12 +368,15 @@ export default function Home() {
                   key={workspace.activeSessionId}
                   messages={workspace.messages}
                   isStreaming={isBusy}
-                  toolActivities={chat.toolActivities}
+                  toolActivities={activeToolActivities}
                   agentStatus={activeStatus}
                 />
 
                 <div className="shrink-0 pt-2">
-                  {chat.interactiveRequest && !isBusy && (
+                  {codePluginEnabled &&
+                    workspace.activeSession?.mode === "code" &&
+                    chat.interactiveRequest &&
+                    !isBusy && (
                     <InteractiveRequestPanel
                       request={chat.interactiveRequest}
                       answer={chat.interactiveAnswer}
@@ -276,6 +392,10 @@ export default function Home() {
 
                   <ChatComposer
                     mode={workspace.activeSession?.mode}
+                    commerceMarketplace={commerceMarketplace}
+                    onCommerceMarketplaceChange={setCommerceMarketplace}
+                    commerceDataSourceState={apiKey.commerceDataSourceState}
+                    onOpenServiceSettings={apiKey.openKeyModal}
                     composerMode={effectiveComposerMode}
                     onComposerModeChange={handleComposerModeChange}
                     typographyPolicy={typographyPolicy}
@@ -303,10 +423,19 @@ export default function Home() {
               <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-4 xl:flex">
                 <TaskPlanningPanel
                   agents={agentCoordinator.agents}
-                  toolActivities={chat.toolActivities}
+                  toolActivities={activeToolActivities}
+                  lifecycleEvents={
+                    workspace.activeSession?.mode === "commerce"
+                      ? []
+                      : chat.agentLifecycleEvents
+                  }
                   agentStatus={activeStatus}
                   isStreaming={isBusy}
-                  workflowMode={effectiveComposerMode}
+                  workflowMode={
+                    workspace.activeSession?.mode === "commerce"
+                      ? "commerce"
+                      : effectiveComposerMode
+                  }
                 />
                 <AgentPanel
                   agents={agentCoordinator.agents}

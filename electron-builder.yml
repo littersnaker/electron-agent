@@ -31,8 +31,9 @@ extraResources:
     to: standalone
     filter:
       - "**/*"
-      # `**/*` 在不同打包链路里对点文件并不稳定，
-      # 这里显式把 `.env.local` 白名单进来，避免它被过滤掉。
+      # `**/*` 在不同打包链路里对点文件并不稳定。显式白名单 `.env.local`，
+      # 确保 DASHSCOPE_API_KEY 与 SERPAPI_API_KEY / TALORDATA_API_TOKEN 都能随
+      # standalone 服务进入 Electron resources，再由主进程注入 Next 子进程。
       - ".env.local"
       - "**/.env.local"
       - "!**/.pnpm/**"

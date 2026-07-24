@@ -17,7 +17,9 @@ export type LlmTaskType =
   | "worker"
   | "reviewer"
   | "final_report"
-  | "final_answer";
+  | "final_answer"
+  | "commerce_intent"
+  | "commerce_analysis";
 
 /**
  * 模型能力标签。

@@ -176,6 +176,7 @@ function buildInteractiveRequest(
 ): InteractiveRequest {
   return {
     id: session.id,
+    source: "terminal",
     command: session.command,
     prompt: session.prompt,
     mode: session.mode,

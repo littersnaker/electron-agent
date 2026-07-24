@@ -9,7 +9,8 @@ export type AgentKind =
   | "coder"
   | "reviewer"
   | "terminal"
-  | "media";
+  | "media"
+  | "commerce";
 
 export type AgentStatus =
   | "idle"
@@ -37,6 +38,7 @@ export const AGENT_BLUEPRINTS: Array<
   { id: "researcher", name: "Researcher", type: "researcher", currentTask: "等待检索上下文" },
   { id: "coder", name: "Coding Agent", type: "coder", currentTask: "等待代码任务" },
   { id: "media", name: "Media Agent", type: "media", currentTask: "等待图片或视频任务" },
+  { id: "commerce", name: "Market Intelligence Analyst", type: "commerce", currentTask: "等待跨境市场研究任务" },
   { id: "reviewer", name: "Reviewer", type: "reviewer", currentTask: "等待质量审查" },
   { id: "terminal", name: "Terminal Agent", type: "terminal", currentTask: "等待终端任务" },
 ];
@@ -83,6 +85,12 @@ const AGENT_META: Record<
     soft: "rgba(191,90,242,0.14)",
     description: "负责生图、改图、视频生成和结果下载",
     path: "M4.5 14.5 8 11l2.5 2.4 5-5M5 5h10v10H5zM12.6 7.4h.01",
+  },
+  commerce: {
+    accent: "#0a84ff",
+    soft: "rgba(10,132,255,0.14)",
+    description: "解析类目、采集公开 SERP/Shopping 市场信号并生成跨境市场情报",
+    path: "M3.8 14.8V9.7M8 14.8V6.5M12.2 14.8V10.6M16.2 14.8V4.1M3 16.2h14",
   },
   reviewer: {
     accent: "#ffd60a",

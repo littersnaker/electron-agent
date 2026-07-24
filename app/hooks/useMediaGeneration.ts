@@ -241,7 +241,7 @@ export function useMediaGeneration({
     async (promptText: string, mode: MediaMode) => {
       if (
         !activeSession ||
-        activeSession.mode === "code" ||
+        activeSession.mode !== "qa" ||
         isGenerating ||
         isParsingFile
       ) {

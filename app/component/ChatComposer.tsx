@@ -13,13 +13,20 @@ import type {
   ComposerMode,
   ImageEditFidelity,
   MediaMode,
+  SessionMode,
   TypographyPolicy,
 } from "../const/pageConst";
 import type { ModelOption } from "../const/modelList";
+import { COMMERCE_MARKETPLACES } from "../lib/commerce/marketplaces";
+import type { CommerceMarketplaceCode } from "../lib/commerce/types";
 import ModelSelector from "./ModelSelector";
 
 interface ChatComposerProps {
-  mode?: "qa" | "code";
+  mode?: SessionMode;
+  commerceMarketplace?: CommerceMarketplaceCode;
+  onCommerceMarketplaceChange?: (marketplace: CommerceMarketplaceCode) => void;
+  commerceDataSourceState?: "environment" | "local" | "none";
+  onOpenServiceSettings?: () => void;
   composerMode: ComposerMode;
   onComposerModeChange: (mode: ComposerMode) => void;
   typographyPolicy: TypographyPolicy;
@@ -132,11 +139,14 @@ function resolveAccept(composerMode: ComposerMode): string {
 }
 
 function resolvePlaceholder(
-  sessionMode: "qa" | "code" | undefined,
+  sessionMode: SessionMode | undefined,
   composerMode: ComposerMode,
 ): string {
   if (sessionMode === "code") {
     return "描述要分析、创建或修改的项目任务…";
+  }
+  if (sessionMode === "commerce") {
+    return "描述一个市场方向，例如：美国宠物饮水机市场有哪些品牌、价格带和机会信号？";
   }
 
   switch (composerMode) {
@@ -157,12 +167,20 @@ function resolvePlaceholder(
   }
 }
 
-function resolveSubmitLabel(composerMode: ComposerMode): string {
+function resolveSubmitLabel(
+  sessionMode: SessionMode | undefined,
+  composerMode: ComposerMode,
+): string {
+  if (sessionMode === "commerce") return "开始研究";
   return composerMode === "chat" ? "发送" : "开始生成";
 }
 
 export default function ChatComposer({
   mode,
+  commerceMarketplace = "US",
+  onCommerceMarketplaceChange,
+  commerceDataSourceState = "none",
+  onOpenServiceSettings,
   composerMode,
   onComposerModeChange,
   typographyPolicy,
@@ -193,8 +211,9 @@ export default function ChatComposer({
       : "";
   const submitDisabled =
     disabled ||
-    (!input.trim() && !attachedFile) ||
-    (composerMode !== "chat" &&
+    (mode === "commerce" ? !input.trim() : !input.trim() && !attachedFile) ||
+    (mode === "qa" &&
+      composerMode !== "chat" &&
       requiresAttachment(composerMode) &&
       !attachedFile);
 
@@ -205,7 +224,7 @@ export default function ChatComposer({
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
-    if (file && mode !== "code") {
+    if (file && mode === "qa") {
       if (composerMode === "text-to-image" && file.type.startsWith("image/")) {
         onComposerModeChange("image-edit");
       } else if (composerMode === "text-to-video") {
@@ -222,7 +241,7 @@ export default function ChatComposer({
 
   return (
     <>
-      {mode !== "code" && (
+      {mode === "qa" && (
         <div
           className="mb-3 overflow-x-auto rounded-[16px] border p-1.5"
           style={{
@@ -263,7 +282,7 @@ export default function ChatComposer({
         </div>
       )}
 
-      {attachedFile && (
+      {mode !== "commerce" && attachedFile && (
         <div
           className="mb-2 flex items-start gap-3 rounded-[16px] border p-2.5"
           style={{
@@ -335,15 +354,18 @@ export default function ChatComposer({
         </div>
       )}
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        accept={resolveAccept(composerMode)}
-        onChange={handleFileChange}
-      />
+      {mode !== "commerce" && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept={resolveAccept(composerMode)}
+          onChange={handleFileChange}
+        />
+      )}
 
-      {(composerMode === "text-to-image" || composerMode === "image-edit") && (
+      {mode === "qa" &&
+        (composerMode === "text-to-image" || composerMode === "image-edit") && (
         <div
           className="mb-2 flex flex-wrap items-center gap-2 rounded-[14px] border px-3 py-2"
           style={{
@@ -379,7 +401,7 @@ export default function ChatComposer({
         </div>
       )}
 
-      {composerMode === "image-edit" && (
+      {mode === "qa" && composerMode === "image-edit" && (
         <div
           className="mb-2 rounded-[14px] border px-3 py-2.5"
           style={{
@@ -442,6 +464,81 @@ export default function ChatComposer({
         </div>
       )}
 
+      {mode === "commerce" && (
+        <div
+          className="mb-2 flex flex-wrap items-center gap-2 rounded-[15px] border px-3 py-2.5"
+          style={{
+            background: "linear-gradient(145deg, rgba(10,132,255,0.08), var(--glass-soft))",
+            borderColor: "rgba(10,132,255,0.16)",
+          }}
+        >
+          <div className="mr-1 min-w-[92px]">
+            <div className="text-[10px] font-semibold text-[var(--text-secondary)]">
+              目标市场
+            </div>
+            <div className="mt-0.5 text-[8px] text-[var(--text-quaternary)]">
+              决定本地化搜索与货币
+            </div>
+          </div>
+          <div className="flex flex-1 flex-wrap gap-1.5">
+            {COMMERCE_MARKETPLACES.map((marketplace) => {
+              const selected = commerceMarketplace === marketplace.code;
+              return (
+                <button
+                  key={marketplace.code}
+                  type="button"
+                  onClick={() =>
+                    onCommerceMarketplaceChange?.(marketplace.code)
+                  }
+                  disabled={disabled}
+                  className="rounded-full border px-2.5 py-1.5 text-[9px] font-medium transition-all disabled:opacity-40"
+                  style={{
+                    background: selected
+                      ? "rgba(10,132,255,0.14)"
+                      : "transparent",
+                    borderColor: selected
+                      ? "rgba(10,132,255,0.30)"
+                      : "var(--border)",
+                    color: selected
+                      ? "#64b5ff"
+                      : "var(--text-tertiary)",
+                  }}
+                  title={`${marketplace.label} · ${marketplace.currency}`}
+                >
+                  {marketplace.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 text-[8px] leading-4 text-[var(--text-quaternary)]">
+            <span>
+              核心流程只依赖公开 SERP / Shopping；Amazon、Keepa 等付费数据均为可选增强。
+            </span>
+            <button
+              type="button"
+              onClick={onOpenServiceSettings}
+              className="rounded-full border px-2.5 py-1 text-[8px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
+              style={{
+                color: commerceDataSourceState !== "none" ? "#0a84ff" : "var(--text-secondary)",
+                borderColor: commerceDataSourceState !== "none"
+                  ? "rgba(10,132,255,0.25)"
+                  : "var(--border)",
+                background: commerceDataSourceState !== "none"
+                  ? "rgba(10,132,255,0.10)"
+                  : "var(--glass)",
+              }}
+              title="TalorData 是核心公开市场搜索源；留空时优先读取应用打包的默认环境 Token"
+            >
+              {commerceDataSourceState === "environment"
+                ? "TalorData 默认源已就绪"
+                : commerceDataSourceState === "local"
+                  ? "TalorData Token 已设置"
+                  : "数据源设置"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         className="rounded-[22px] border p-2.5 transition-all focus-within:border-[rgba(10,132,255,0.36)]"
         style={{
@@ -470,7 +567,7 @@ export default function ChatComposer({
           style={{ color: "var(--text-primary)" }}
         />
 
-        {composerMode !== "chat" && (
+        {mode === "qa" && composerMode !== "chat" && (
           <div
             className="px-2.5 pb-2 text-[10px]"
             style={{ color: "var(--text-tertiary)" }}
@@ -481,31 +578,33 @@ export default function ChatComposer({
 
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled}
-              className="flex h-9 w-9 items-center justify-center rounded-[11px] border transition-colors hover:bg-[var(--glass-hover)] disabled:opacity-40"
-              style={{
-                background: "var(--glass)",
-                borderColor: "var(--border)",
-                color: "var(--text-secondary)",
-              }}
-              title={composerMode === "chat" ? "添加文件" : "上传生成素材"}
-            >
-              {isParsingFile ? (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/15 border-t-current/60" />
-              ) : (
-                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
-                  <path
-                    d="m7 10.5 4.7-4.7a2.2 2.2 0 0 1 3.1 3.1L9 14.7a3.2 3.2 0 0 1-4.5-4.5l5.1-5.1"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-            </button>
+            {mode !== "commerce" && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled}
+                className="flex h-9 w-9 items-center justify-center rounded-[11px] border transition-colors hover:bg-[var(--glass-hover)] disabled:opacity-40"
+                style={{
+                  background: "var(--glass)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-secondary)",
+                }}
+                title={composerMode === "chat" ? "添加文件" : "上传生成素材"}
+              >
+                {isParsingFile ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/15 border-t-current/60" />
+                ) : (
+                  <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+                    <path
+                      d="m7 10.5 4.7-4.7a2.2 2.2 0 0 1 3.1 3.1L9 14.7a3.2 3.2 0 0 1-4.5-4.5l5.1-5.1"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            )}
             <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
               Enter 发送 · Shift+Enter 换行
             </span>
@@ -524,17 +623,17 @@ export default function ChatComposer({
               className="flex h-9 min-w-9 items-center justify-center rounded-[11px] px-3 text-[11px] font-semibold text-white transition-all active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-30"
               style={{
                 background:
-                  composerMode === "chat"
+                  mode === "commerce" || composerMode === "chat"
                     ? "linear-gradient(180deg, var(--message-user-start), var(--message-user-end))"
                     : "linear-gradient(180deg, #a86df5, #7d4ce5)",
                 boxShadow:
-                  composerMode === "chat"
+                  mode === "commerce" || composerMode === "chat"
                     ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
-              title={resolveSubmitLabel(composerMode)}
+              title={resolveSubmitLabel(mode, composerMode)}
             >
-              {resolveSubmitLabel(composerMode)}
+              {resolveSubmitLabel(mode, composerMode)}
             </button>
           </div>
         </div>

@@ -5,7 +5,7 @@
   "main": ".electron/main.js",
   "author": "white",
   "description": "AI Chat Application",
-   "build": {
+  "build": {
     "productName": "Agent Workspace",
     "appId": "com.agent.workspace"
   },
@@ -17,8 +17,8 @@
     "electron:dev": "pnpm electron:compile && electron .",
     "electron:prepare-icons": "tsx scripts/prepare-electron-icons.ts",
     "electron:build": "tsx scripts/build-electron.ts",
-    "electron:package": "pnpm electron:prepare-icons && electron-builder --dir",
-    "electron:make": "pnpm electron:prepare-icons && electron-builder",
+    "electron:package": "pnpm electron:build",
+    "electron:make": "pnpm electron:build && pnpm electron:prepare-icons && electron-builder",
     "electron:compile": "tsx scripts/compile-electron.ts"
   },
   "dependencies": {

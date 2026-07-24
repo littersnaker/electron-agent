@@ -30,6 +30,8 @@ const TASK_ENV_KEYS: Record<LlmTaskType, string> = {
   reviewer: "LLM_ROUTE_REVIEWER",
   final_report: "LLM_ROUTE_FINAL_REPORT",
   final_answer: "LLM_ROUTE_FINAL_ANSWER",
+  commerce_intent: "LLM_ROUTE_COMMERCE_INTENT",
+  commerce_analysis: "LLM_ROUTE_COMMERCE_ANALYSIS",
 };
 
 function getCredential(

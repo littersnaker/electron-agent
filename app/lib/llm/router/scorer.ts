@@ -17,6 +17,8 @@ const TASK_WEIGHTS: Record<
   reviewer: { quality: 0.7, speed: 0.1, cost: 0.2 },
   final_report: { quality: 0.6, speed: 0.15, cost: 0.25 },
   final_answer: { quality: 0.4, speed: 0.4, cost: 0.2 },
+  commerce_intent: { quality: 0.45, speed: 0.4, cost: 0.15 },
+  commerce_analysis: { quality: 0.7, speed: 0.15, cost: 0.15 },
 };
 
 const CAPABILITY_BONUS: Partial<Record<LlmCapability, number>> = {

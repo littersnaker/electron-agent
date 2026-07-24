@@ -5,13 +5,14 @@ import type { MouseEvent } from "react";
 import type {
   ChatSession,
   Message,
+  SessionMode,
   WorkspaceProject,
 } from "../const/pageConst";
 import type { WorkspaceResponse } from "../types/workspace";
 import { buildWelcomeMessages } from "../utils/agentRuntime";
 
 async function requestCreateSession(
-  mode: "qa" | "code",
+  mode: SessionMode,
   projectId: string | null,
   project?: WorkspaceProject,
 ): Promise<ChatSession> {
@@ -36,7 +37,14 @@ async function requestCreateSession(
   return session;
 }
 
-export function useWorkspaceController() {
+interface WorkspaceControllerOptions {
+  includeCode?: boolean;
+  includeCommerce?: boolean;
+}
+
+export function useWorkspaceController(
+  options: WorkspaceControllerOptions = {},
+) {
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
@@ -53,18 +61,24 @@ export function useWorkspaceController() {
   );
 
   const refreshWorkspace = useCallback(async (): Promise<WorkspaceResponse> => {
-    const response = await fetch("/api/workspace", { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (options.includeCode) params.set("code", "1");
+    if (options.includeCommerce) params.set("commerce", "1");
+    const query = params.toString();
+    const response = await fetch(`/api/workspace${query ? `?${query}` : ""}`, {
+      cache: "no-store",
+    });
     if (!response.ok) throw new Error("无法读取本地工作区数据");
 
     const workspace = (await response.json()) as WorkspaceResponse;
     setProjects(workspace.projects);
     setSessions(workspace.sessions);
     return workspace;
-  }, []);
+  }, [options.includeCode, options.includeCommerce]);
 
   const createSession = useCallback(
     async (
-      mode: "qa" | "code",
+      mode: SessionMode,
       projectId: string | null = null,
       projectOverride?: WorkspaceProject,
     ) => {
@@ -90,9 +104,12 @@ export function useWorkspaceController() {
         const workspace = await refreshWorkspace();
         if (cancelled) return;
 
-        if (workspace.sessions.length) {
-          setActiveSessionId(workspace.sessions[0].id);
-          setMessages(workspace.sessions[0].messages);
+        // 插件化后，应用启动始终优先恢复核心 QA，而不是最近一次 Code / Commerce 会话。
+        // 这样首屏不会因为上次停留在重型 Agent 而立即进入插件工作流。
+        const qaSession = workspace.sessions.find((session) => session.mode === "qa");
+        if (qaSession) {
+          setActiveSessionId(qaSession.id);
+          setMessages(qaSession.messages);
           return;
         }
 

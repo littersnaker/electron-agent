@@ -16,6 +16,7 @@ import {
 } from "../lib/llm/client-request";
 import type { LlmCredentials } from "../lib/llm/types";
 import type {
+  AgentLifecycleEventPayload,
   InteractiveRequest,
   StreamPacket,
   TokenInfo,
@@ -29,6 +30,13 @@ type PersistSession = (
   nextMessages: Message[],
   title?: string,
 ) => Promise<void>;
+
+interface SubmitPromptOptions {
+  /**
+   * 交互卡片回复属于内部控制消息，不应把 [INTERACTIVE_REPLY] 技术文本显示到聊天记录。
+   */
+  suppressVisibleUserMessage?: boolean;
+}
 
 interface UseChatStreamOptions {
   activeSession?: ChatSession;
@@ -93,6 +101,24 @@ async function readResponseError(response: Response): Promise<string> {
   return `模型请求失败（HTTP ${response.status}）`;
 }
 
+function isAgentLifecyclePayload(
+  payload: StreamPacket["payload"],
+): payload is AgentLifecycleEventPayload {
+  return Boolean(
+    payload &&
+      "role" in payload &&
+      "status" in payload &&
+      "iteration" in payload &&
+      "detail" in payload,
+  );
+}
+
+function isInteractiveRequestPayload(
+  payload: StreamPacket["payload"],
+): payload is InteractiveRequest {
+  return Boolean(payload && "command" in payload && "prompt" in payload);
+}
+
 export function useChatStream({
   activeSession,
   activeProject,
@@ -111,11 +137,16 @@ export function useChatStream({
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [agentStatus, setAgentStatus] = useState("");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
+  const [agentLifecycleEvents, setAgentLifecycleEvents] = useState<
+    AgentLifecycleEventPayload[]
+  >([]);
   const [interactiveRequest, setInteractiveRequest] =
     useState<InteractiveRequest | null>(null);
   const [interactiveAnswer, setInteractiveAnswer] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const finalTextRef = useRef("");
+  /** 一旦收到真实 lifecycle，就不再用 STATUS/TOOL_STATUS 文案反推 Agent。 */
+  const hasLifecycleRef = useRef(false);
 
   // Effect 只负责组件卸载清理，不在 Effect 中同步 setState。
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -128,39 +159,58 @@ export function useChatStream({
     setToolActivities([]);
     setAgentStatus("");
     setTokenInfo(null);
+    setAgentLifecycleEvents([]);
     setInteractiveRequest(null);
     setInteractiveAnswer("");
+    hasLifecycleRef.current = false;
   }, []);
 
   const submitPrompt = useCallback(
     async (
       promptText: string,
       fileOverride: AttachedFile | null = attachedFile,
+      options: SubmitPromptOptions = {},
     ) => {
       if (!activeSession || isStreaming || isParsingFile) return;
+      // Commerce 会话必须走独立 /api/commerce/research，禁止意外落入 QA Route。
+      if (activeSession.mode === "commerce") return;
 
       const prompt = promptText.trim();
       if (!prompt && !fileOverride) return;
 
       const visibleUserContent = buildVisibleUserContent(prompt, fileOverride);
       const visibleAttachments = toMessageAttachment(fileOverride);
+      const suppressVisibleUserMessage =
+        options.suppressVisibleUserMessage === true;
+      const visibleBaseMessages =
+        suppressVisibleUserMessage &&
+        interactiveRequest?.source === "file_create_confirmation" &&
+        messages[messages.length - 1]?.role === "assistant"
+          ? messages.slice(0, -1)
+          : messages;
       const workspaceError = validateCodeWorkspace(
         activeSession,
         activeProject,
       );
 
       if (workspaceError) {
+        const visibleErrorUserMessage: Message[] = suppressVisibleUserMessage
+          ? []
+          : [
+              {
+                role: "user",
+                content: visibleUserContent,
+                attachments: visibleAttachments,
+              },
+            ];
         const errorHistory: Message[] = [
-          ...messages,
-          {
-            role: "user",
-            content: visibleUserContent,
-            attachments: visibleAttachments,
-          },
+          ...visibleBaseMessages,
+          ...visibleErrorUserMessage,
           { role: "assistant", content: `⚠️ ${workspaceError}` },
         ];
-        const title =
-          activeSession.title === "新对话"
+        const title = suppressVisibleUserMessage
+          ? activeSession.title
+          : activeSession.title === "新对话"
             ? prompt.slice(0, 18) || fileOverride?.name || "新对话"
             : activeSession.title;
         const failedSession = {
@@ -189,21 +239,27 @@ export function useChatStream({
         prompt,
         retrievedFile,
       );
+      const visibleUserMessages: Message[] = suppressVisibleUserMessage
+        ? []
+        : [
+            {
+              role: "user",
+              content: visibleUserContent,
+              attachments: visibleAttachments,
+            },
+          ];
       const visibleHistory: Message[] = [
-        ...messages,
-        {
-          role: "user",
-          content: visibleUserContent,
-          attachments: visibleAttachments,
-        },
+        ...visibleBaseMessages,
+        ...visibleUserMessages,
         { role: "assistant", content: "" },
       ];
       const requestMessages = [
         ...messages.map(({ role, content }) => ({ role, content })),
         { role: "user" as const, content: requestUserContent },
       ];
-      const title =
-        activeSession.title === "新对话"
+      const title = suppressVisibleUserMessage
+        ? activeSession.title
+        : activeSession.title === "新对话"
           ? prompt.slice(0, 18) || fileOverride?.name || "新对话"
           : activeSession.title;
       const optimisticSession = {
@@ -230,6 +286,8 @@ export function useChatStream({
           : "正在准备回答…",
       );
       setTokenInfo(null);
+      setAgentLifecycleEvents([]);
+      hasLifecycleRef.current = false;
       setInteractiveAnswer("");
 
       let nextInteractiveRequest: InteractiveRequest | null = null;
@@ -294,7 +352,9 @@ export function useChatStream({
               ) {
                 const label = streamContent.trim();
                 const now = Date.now();
-                agents.activateAgent(inferAgentKind(label), label);
+                if (!hasLifecycleRef.current) {
+                  agents.activateAgent(inferAgentKind(label), label);
+                }
                 setAgentStatus("Agent 正在执行工具调用…");
                 setToolActivities((current) => {
                   const last = current[current.length - 1];
@@ -329,9 +389,31 @@ export function useChatStream({
                 !finalTextRef.current
               ) {
                 setAgentStatus(streamContent);
-                agents.activateAgent(
-                  inferAgentKind(streamContent),
-                  streamContent,
+                if (!hasLifecycleRef.current) {
+                  agents.activateAgent(
+                    inferAgentKind(streamContent),
+                    streamContent,
+                  );
+                }
+                continue;
+              }
+
+              if (
+                packet.type === "AGENT_LIFECYCLE" &&
+                isAgentLifecyclePayload(packet.payload)
+              ) {
+                const lifecycleEvent = packet.payload;
+                hasLifecycleRef.current = true;
+                setAgentLifecycleEvents((current: AgentLifecycleEventPayload[]) => {
+                  const next = [...current, lifecycleEvent];
+                  // 生命周期只用于当前轮 UI，限制长度避免长任务无限增长前端状态。
+                  return next.slice(-240);
+                });
+                agents.applyLifecycleEvent(lifecycleEvent);
+                setAgentStatus(
+                  lifecycleEvent.iteration > 0
+                    ? `第 ${lifecycleEvent.iteration + 1} 轮返工 · ${lifecycleEvent.detail}`
+                    : lifecycleEvent.detail,
                 );
                 continue;
               }
@@ -362,16 +444,24 @@ export function useChatStream({
 
               if (
                 packet.type === "INTERACTIVE_REQUEST" &&
-                packet.payload
+                isInteractiveRequestPayload(packet.payload)
               ) {
                 nextInteractiveRequest = packet.payload;
                 setInteractiveRequest(packet.payload);
                 setInteractiveAnswer("");
-                agents.updateAgent("terminal", {
-                  status: "running",
-                  progress: 72,
-                  currentTask: "等待用户提供终端交互输入",
-                });
+                if (packet.payload.source === "file_create_confirmation") {
+                  agents.updateAgent("orchestrator", {
+                    status: "running",
+                    progress: 38,
+                    currentTask: "等待确认是否新建缺失文件",
+                  });
+                } else {
+                  agents.updateAgent("terminal", {
+                    status: "running",
+                    progress: 72,
+                    currentTask: "等待用户提供终端交互输入",
+                  });
+                }
               }
             } catch {
               // 忽略不完整的 SSE 帧，等待下一段数据补齐。
@@ -410,9 +500,13 @@ export function useChatStream({
         );
         agents.finalizeAgents(nextInteractiveRequest);
 
+        const waitingMessage =
+          nextInteractiveRequest?.source === "file_create_confirmation"
+            ? "需要你确认是否新建缺失文件后才能继续。"
+            : "终端正在等待你的选择。";
         const answer =
           finalTextRef.current ||
-          (nextInteractiveRequest ? "终端正在等待你的选择。" : "已停止生成。");
+          (nextInteractiveRequest ? waitingMessage : "已停止生成。");
         const finalHistory: Message[] = [
           ...visibleHistory.slice(0, -1),
           { role: "assistant", content: answer },
@@ -446,6 +540,7 @@ export function useChatStream({
       clearAfterSubmit,
       isParsingFile,
       isStreaming,
+      interactiveRequest,
       messages,
       persistSession,
       selectedModel,
@@ -474,7 +569,7 @@ export function useChatStream({
         .join(" ");
 
       setInteractiveAnswer("");
-      await submitPrompt(prompt, null);
+      await submitPrompt(prompt, null, { suppressVisibleUserMessage: true });
     },
     [interactiveAnswer, interactiveRequest, isStreaming, submitPrompt],
   );
@@ -484,6 +579,7 @@ export function useChatStream({
     toolActivities,
     agentStatus,
     tokenInfo,
+    agentLifecycleEvents,
     interactiveRequest,
     interactiveAnswer,
     setInteractiveAnswer,

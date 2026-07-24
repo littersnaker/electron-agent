@@ -16,11 +16,13 @@ export type TaskPriority = "high" | "medium" | "low";
  *
  * - workspace_info：只询问当前项目、目录或绑定信息；
  * - read_only：需要读取项目，但不允许修改文件；
- * - code_change：进入 Planner / Worker / Merge / Verify 完整链路。
+ * - simple_edit：明确的单文件轻量修改，跳过重型 Planner；
+ * - code_change：进入完整 Planner / Worker / Merge / Verify 链路。
  */
 export type AgentRequestMode =
   | "workspace_info"
   | "read_only"
+  | "simple_edit"
   | "code_change";
 
 /** 当前 Code 会话绑定的本地工作区信息。 */
@@ -70,6 +72,9 @@ export type PlannerValidationStatus =
 
 export type CommandExecutionMode = "normal" | "pty";
 export type InteractiveResponseMode = "auto" | "llm" | "user" | "cancel";
+export type InteractiveRequestSource =
+  | "terminal"
+  | "file_create_confirmation";
 export type InteractivePromptKind =
   | "confirm"
   | "select"
@@ -93,6 +98,11 @@ export interface InteractiveOption {
 }
 
 export interface InteractiveRequest {
+  /**
+   * terminal 为现有 CLI 交互；file_create_confirmation 用于缺失文件新建确认。
+   * 保持可选是为了兼容旧 checkpoint 中没有 source 的终端请求。
+   */
+  source?: InteractiveRequestSource;
   id: string;
   command: string;
   prompt: string;
@@ -103,6 +113,14 @@ export interface InteractiveRequest {
   allowMultiple: boolean;
   promptRound: number;
   recentOutput: string;
+  /** UI 卡片可选展示字段；终端请求无需提供。 */
+  title?: string;
+  description?: string;
+  filePath?: string;
+  /**
+   * 缺失文件确认后需要恢复用户的原始任务，避免把内部回复文本送进 Planner。
+   */
+  originalUserRequest?: string;
   workerId?: string;
   slot?: number;
 }
@@ -154,6 +172,14 @@ export interface ModifyWorkerInput {
   task: PlanTask;
   sharedMemory: SharedWorkerMemory;
   previousMemory: WorkerMemory;
+  /**
+   * 上一轮同槽位的完整结果。
+   * Reviewer 返工时用它判断“目标内容是否已经落盘”，避免 no-op 被误判为失败。
+   */
+  previousResult: ModifyTaskResult | null;
+  requestMode: AgentRequestMode;
+  /** 用户在 UI 中已明确允许创建的缺失文件。 */
+  approvedMissingFiles: string[];
   model: string;
   workingDir: string;
   projectId: string;
@@ -256,7 +282,13 @@ export interface ModifyTaskResult {
   lifecycle: AgentLifecycleSnapshot;
   lifecycleEvents: AgentLifecycleEvent[];
   interactiveRequest?: InteractiveRequest | null;
-  status: "pending" | "done" | "skipped" | "blocked" | "failed";
+  status:
+    | "pending"
+    | "done"
+    | "satisfied"
+    | "skipped"
+    | "blocked"
+    | "failed";
 }
 
 export type MergeConflictType =
@@ -317,8 +349,15 @@ export interface VerificationCheckResult {
   output: string;
 }
 
+export type VerificationProfile = "none" | "document" | "targeted" | "full";
+
 export interface VerificationResult {
   packageManager: "pnpm" | "npm" | "yarn" | "bun" | "unknown";
+  /**
+   * document 只检查文档是否已落盘，不运行项目级 build/test；
+   * targeted/full 保留代码任务的工程校验能力。
+   */
+  profile: VerificationProfile;
   lint: VerificationCheckResult;
   build: VerificationCheckResult;
   test: VerificationCheckResult;
@@ -328,6 +367,7 @@ export interface VerificationResult {
 
 export const DEFAULT_VERIFICATION_RESULT: VerificationResult = {
   packageManager: "unknown",
+  profile: "none",
   lint: { status: "skipped", command: null, output: "尚未执行 lint。" },
   build: { status: "skipped", command: null, output: "尚未执行 build。" },
   test: { status: "skipped", command: null, output: "尚未执行 test。" },

@@ -1,5 +1,5 @@
 import type { BaseMessage } from "@langchain/core/messages";
-import type { AgentRequestMode } from "../agent/types";
+import type { AgentRequestMode, InteractiveRequest } from "../agent/types";
 
 export interface FrontendMessage {
   role: "user" | "assistant" | "system";
@@ -31,7 +31,7 @@ export interface AgentStateValues extends Record<string, unknown> {
   directAnswer?: string;
   finalReportSummary?: string;
   tokenUsage?: { prompt: number; completion: number; total: number };
-  interactiveRequest?: Record<string, unknown> | null;
+  interactiveRequest?: InteractiveRequest | null;
 }
 
 export interface AgentLifecycleEventPayload {

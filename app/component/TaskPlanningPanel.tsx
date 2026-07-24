@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
   CODE_STAGE_DEFINITIONS,
+  COMMERCE_STAGE_DEFINITIONS,
   MEDIA_STAGE_DEFINITIONS,
   STATUS_META,
 } from "./task-planning/config";
@@ -58,15 +59,18 @@ function StageIcon({ status }: { status: PlanningStageStatus }) {
 export default function TaskPlanningPanel({
   agents,
   toolActivities = [],
+  lifecycleEvents = [],
   agentStatus,
   isStreaming,
   workflowMode,
   className = "",
 }: TaskPlanningPanelProps) {
   const definitions =
-    workflowMode === "chat"
-      ? CODE_STAGE_DEFINITIONS
-      : MEDIA_STAGE_DEFINITIONS;
+    workflowMode === "commerce"
+      ? COMMERCE_STAGE_DEFINITIONS
+      : workflowMode === "chat"
+        ? CODE_STAGE_DEFINITIONS
+        : MEDIA_STAGE_DEFINITIONS;
   const stages = useMemo(
     () =>
       buildPlanningStages(
@@ -75,8 +79,16 @@ export default function TaskPlanningPanel({
         toolActivities,
         isStreaming,
         agentStatus,
+        lifecycleEvents,
       ),
-    [agentStatus, agents, definitions, isStreaming, toolActivities],
+    [
+      agentStatus,
+      agents,
+      definitions,
+      isStreaming,
+      lifecycleEvents,
+      toolActivities,
+    ],
   );
   const summary = useMemo(() => buildPlanningSummary(stages), [stages]);
 

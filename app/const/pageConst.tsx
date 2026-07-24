@@ -1,3 +1,5 @@
+import type { CommerceResearchReport } from "../lib/commerce/types";
+
 export type AttachmentAssetKind = "image" | "video" | "file";
 
 export type MessageAttachment = {
@@ -16,6 +18,8 @@ export type Message = {
   content: string;
   /** 用户附件与 AI 生成结果使用同一种结构，UI 不需要写两套渲染逻辑。 */
   attachments?: MessageAttachment[];
+  /** Cross-border Market Intelligence Agent 的结构化市场报告；普通 QA / Code / Media 消息不使用。 */
+  commerceReport?: CommerceResearchReport;
 };
 
 export type AttachedFile = {
@@ -142,11 +146,13 @@ export function toMessageAttachment(
   ];
 }
 
+export type SessionMode = "qa" | "code" | "commerce";
+
 export type ChatSession = {
   id: string;
   title: string;
   messages: Message[];
-  mode: "qa" | "code";
+  mode: SessionMode;
   projectId: string | null;
   updatedAt: string;
 };

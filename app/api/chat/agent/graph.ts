@@ -3,8 +3,10 @@ import { getLangGraphCheckpointer } from "./checkpointer";
 import {
   contextFanoutNode,
   enrichContextNode,
+  missingFileGuardNode,
   readOnlyAnswerNode,
   requestRouterNode,
+  simpleEditPlanningNode,
   workspaceInfoAnswerNode,
 } from "./request-routing-nodes";
 import { AgentState } from "./state";
@@ -73,6 +75,9 @@ function buildWorkerInput(
     sharedMemory: buildSharedWorkerMemory(state),
     previousMemory:
       previousResult?.workerMemory || createDefaultWorkerMemory(),
+    previousResult: previousResult || null,
+    requestMode: state.requestMode,
+    approvedMissingFiles: state.approvedMissingFiles || [],
     model: state.model || "auto",
     // /api/chat 已经验证工作目录，图内不再静默退回 process.cwd()。
     workingDir: state.workingDir,
@@ -98,6 +103,14 @@ function dispatchInitialWorkers(state: AgentRuntimeState) {
   );
 }
 
+/** simple_edit 提取失败时安全回退到完整 Planner，而不是直接进入空 Merge。 */
+function dispatchAfterSimplePlan(state: AgentRuntimeState) {
+  if (state.requestMode !== "simple_edit") {
+    return "high_level_planning_agent";
+  }
+  return dispatchInitialWorkers(state);
+}
+
 /** Reviewer 返工时只重发指定 slot，并继承该 Worker 的压缩记忆。 */
 function dispatchRetryWorkers(state: AgentRuntimeState) {
   const retrySlots = Array.from(new Set(state.retryTaskSlots || []))
@@ -116,9 +129,33 @@ function dispatchRetryWorkers(state: AgentRuntimeState) {
   );
 }
 
-/** Router 后先把纯工作区问题短路，其余请求进入并行上下文收集。 */
-function routeAfterRouter(state: AgentRuntimeState): "workspace" | "context" {
-  return state.requestMode === "workspace_info" ? "workspace" : "context";
+/** Router 后先处理直接回答，再把修改任务送入缺失文件确认 Guard。 */
+function routeAfterRouter(
+  state: AgentRuntimeState,
+): "direct" | "workspace" | "guard" | "context" {
+  if (state.directAnswer?.trim()) return "direct";
+  if (state.requestMode === "workspace_info") return "workspace";
+  if (
+    state.requestMode === "simple_edit" ||
+    state.requestMode === "code_change"
+  ) {
+    return "guard";
+  }
+  return "context";
+}
+
+/**
+ * 缺失文件 Guard 可以暂停整张图，等待用户在 UI 中确认。
+ * 确认后同一个原始请求会重新进入这里，并依据 requestMode 继续正确链路。
+ */
+function routeAfterMissingFileGuard(
+  state: AgentRuntimeState,
+): "wait" | "simple" | "context" {
+  if (state.interactiveRequest?.source === "file_create_confirmation") {
+    return "wait";
+  }
+  if (state.requestMode === "simple_edit") return "simple";
+  return "context";
 }
 
 /** 上下文合并后，只读请求直接回答，代码修改请求才进入 Planner。 */
@@ -130,11 +167,14 @@ function routeAfterContext(state: AgentRuntimeState): "read" | "change" {
  * V5 主流程：
  * - workspace_info：本地确定性回答，不调用 Planner；
  * - read_only：Search / Memory / File -> 只读回答；
+ * - simple_edit：确定性单任务计划 -> Worker / Merge / 轻量验证 / Review；
  * - code_change：继续使用完整 Planner / Worker / Merge / Verify / Review。
  */
 const workflow = new StateGraph(AgentState)
   .addNode("router", requestRouterNode)
   .addNode("workspace_info_answer", workspaceInfoAnswerNode)
+  .addNode("missing_file_guard", missingFileGuardNode)
+  .addNode("simple_edit_planning", simpleEditPlanningNode)
   .addNode("context_fanout", contextFanoutNode)
   .addNode("search_agent", searchAgentNode)
   .addNode("memory_agent", memoryAgentNode)
@@ -159,10 +199,28 @@ const workflow = new StateGraph(AgentState)
 
 workflow.addEdge(START, "router");
 workflow.addConditionalEdges("router", routeAfterRouter, {
+  direct: END,
   workspace: "workspace_info_answer",
+  guard: "missing_file_guard",
   context: "context_fanout",
 });
 workflow.addEdge("workspace_info_answer", END);
+
+workflow.addConditionalEdges("missing_file_guard", routeAfterMissingFileGuard, {
+  wait: END,
+  simple: "simple_edit_planning",
+  context: "context_fanout",
+});
+
+/**
+ * simple_edit 直接复用 Dynamic Worker / Merge，不再调用 Search/Memory/File 和两层 Planner。
+ * 这样不复制写入逻辑，同时把单文档任务的模型调用压到最低。
+ */
+workflow.addConditionalEdges(
+  "simple_edit_planning",
+  dispatchAfterSimplePlan,
+  ["modify_worker", "merge_patch", "high_level_planning_agent"],
+);
 
 workflow.addEdge("context_fanout", "search_agent");
 workflow.addEdge("context_fanout", "memory_agent");

@@ -9,10 +9,45 @@ import type {
 } from "../component/AgentPanel";
 import type {
   AgentEventPayload,
+  AgentLifecycleEventPayload,
   InteractiveRequest,
   StreamPacketType,
 } from "../types/workspace";
+import type { CommerceProgressEvent } from "../lib/commerce/types";
 import { createRunAgents, normalizeAgentKind } from "../utils/agentRuntime";
+
+const LIFECYCLE_ROLE_TO_AGENT: Record<string, AgentKind> = {
+  router: "orchestrator",
+  search_agent: "researcher",
+  memory_agent: "researcher",
+  file_agent: "researcher",
+  context_merge: "orchestrator",
+  high_level_planner: "planner",
+  task_planner: "planner",
+  modify_worker: "coder",
+  merge_agent: "orchestrator",
+  reviewer_agent: "reviewer",
+  verification_agent: "terminal",
+  final_report_agent: "orchestrator",
+};
+
+function lifecycleToAgentStatus(
+  status: string,
+): { status: AgentStatus; progress: number } {
+  if (status === "COMPLETED") return { status: "completed", progress: 100 };
+  if (status === "FAILED") return { status: "error", progress: 100 };
+  if (status === "CREATED") return { status: "queued", progress: 0 };
+  if (status === "PLANNING" || status === "REVIEWING") {
+    return { status: "thinking", progress: 46 };
+  }
+  if (status === "READY_TO_MERGE") {
+    return { status: "running", progress: 88 };
+  }
+  if (status === "BLOCKED") {
+    return { status: "running", progress: 72 };
+  }
+  return { status: "running", progress: 58 };
+}
 
 export function useAgentCoordinator() {
   const [agents, setAgents] = useState<AgentInstance[]>(() => createIdleAgents());
@@ -189,6 +224,148 @@ export function useAgentCoordinator() {
     );
   }, []);
 
+  /** 跨境市场情报会话只激活真正参与的角色，避免 Code Agent 角色产生假进度。 */
+  const beginCommerceRun = useCallback(() => {
+    const now = Date.now();
+    setAgents(
+      createIdleAgents().map((agent) => {
+        if (agent.type === "orchestrator") {
+          return {
+            ...agent,
+            status: "running" as const,
+            progress: 8,
+            currentTask: "编排跨境公开市场研究流程",
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "commerce") {
+          return {
+            ...agent,
+            status: "thinking" as const,
+            progress: 8,
+            currentTask: "理解品类与运营目标",
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "researcher") {
+          return {
+            ...agent,
+            status: "queued" as const,
+            progress: 0,
+            currentTask: "等待检索计划后采集公开 SERP / Shopping 数据",
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "reviewer") {
+          return {
+            ...agent,
+            status: "queued" as const,
+            progress: 0,
+            currentTask: "等待市场指标完成后检查数据限制",
+            updatedAt: now,
+          };
+        }
+        return agent;
+      }),
+    );
+  }, []);
+
+  /** 根据 Commerce Route 的结构化阶段事件更新右侧 Agent 面板。 */
+  const updateCommerceProgress = useCallback((event: CommerceProgressEvent) => {
+    const now = Date.now();
+    setAgents((current) =>
+      current.map((agent) => {
+        const collecting =
+          event.stage === "collect" || event.stage === "normalize";
+        const reviewing = event.stage === "strategy";
+        const finished = event.stage === "done";
+
+        if (agent.type === "orchestrator") {
+          return {
+            ...agent,
+            status: finished ? ("completed" as const) : ("running" as const),
+            progress: finished
+              ? 100
+              : Math.max(agent.progress, event.progress - 6),
+            currentTask: finished
+              ? "跨境市场情报研究已完成"
+              : `协调：${event.detail}`,
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "commerce") {
+          return {
+            ...agent,
+            status: finished
+              ? ("completed" as const)
+              : collecting
+                ? ("queued" as const)
+                : ("running" as const),
+            progress: finished ? 100 : Math.max(agent.progress, event.progress),
+            currentTask: event.detail,
+            updatedAt: now,
+          };
+        }
+        if (agent.type === "researcher") {
+          if (collecting) {
+            return {
+              ...agent,
+              status: "running" as const,
+              progress: Math.max(agent.progress, event.progress),
+              currentTask: event.detail,
+              updatedAt: now,
+            };
+          }
+          if (["analyze", "strategy", "done"].includes(event.stage)) {
+            return {
+              ...agent,
+              status: "completed" as const,
+              progress: 100,
+              currentTask: "Amazon 商品样本已采集并标准化",
+              updatedAt: now,
+            };
+          }
+        }
+        if (agent.type === "reviewer" && (reviewing || finished)) {
+          return {
+            ...agent,
+            status: finished ? ("completed" as const) : ("running" as const),
+            progress: finished
+              ? 100
+              : Math.max(agent.progress, event.progress - 8),
+            currentTask: finished
+              ? "数据口径与风险提示已检查"
+              : "检查估算口径并整理运营建议",
+            updatedAt: now,
+          };
+        }
+        return agent;
+      }),
+    );
+  }, []);
+
+  const failCommerceRun = useCallback((message: string) => {
+    setAgents((current) =>
+      current.map((agent) => {
+        const isPrimary =
+          agent.type === "orchestrator" || agent.type === "commerce";
+        const isActiveResearcher =
+          agent.type === "researcher" &&
+          ["running", "thinking"].includes(agent.status);
+
+        if (!isPrimary && !isActiveResearcher) return agent;
+
+        return {
+          ...agent,
+          status: "error" as const,
+          progress: 100,
+          currentTask: message,
+          updatedAt: Date.now(),
+        };
+      }),
+    );
+  }, []);
+
   const activateAgent = useCallback((kind: AgentKind, task: string) => {
     setAgents((current) =>
       current.map((agent) => {
@@ -275,6 +452,68 @@ export function useAgentCoordinator() {
     [],
   );
 
+  /**
+   * 使用后端真实 lifecycle 更新角色状态。
+   *
+   * 特别处理返工：当 iteration > 0 的 Worker 重新启动时，把 Reviewer/Terminal
+   * 重置为 queued，避免旧一轮的 completed 状态继续误导任务面板。
+   */
+  const applyLifecycleEvent = useCallback(
+    (event: AgentLifecycleEventPayload) => {
+      const kind = LIFECYCLE_ROLE_TO_AGENT[event.role] || "orchestrator";
+      const mapped = lifecycleToAgentStatus(event.status);
+      const retryRound = event.iteration > 0 ? event.iteration + 1 : 0;
+      const taskPrefix = retryRound > 0 ? `第 ${retryRound} 轮返工 · ` : "";
+
+      setAgents((current: AgentInstance[]) =>
+        current.map((agent: AgentInstance) => {
+          if (
+            event.iteration > 0 &&
+            ["coder", "orchestrator"].includes(kind) &&
+            (agent.type === "terminal" || agent.type === "reviewer")
+          ) {
+            return {
+              ...agent,
+              status: "queued" as const,
+              progress: 0,
+              currentTask:
+                agent.type === "terminal"
+                  ? "等待返工合并后重新验证"
+                  : "等待返工验证完成后重新审查",
+              updatedAt: Date.now(),
+            };
+          }
+
+          if (agent.type === kind) {
+            return {
+              ...agent,
+              status: mapped.status,
+              progress:
+                mapped.status === "running" || mapped.status === "thinking"
+                  ? Math.max(agent.progress > 95 ? 0 : agent.progress, mapped.progress)
+                  : mapped.progress,
+              currentTask: `${taskPrefix}${event.detail}`,
+              updatedAt: Date.now(),
+            };
+          }
+
+          if (agent.type === "orchestrator" && kind !== "orchestrator") {
+            return {
+              ...agent,
+              status: "running" as const,
+              progress: Math.max(agent.progress, 32),
+              currentTask: `协调 ${taskPrefix}${event.detail}`,
+              updatedAt: Date.now(),
+            };
+          }
+
+          return agent;
+        }),
+      );
+    },
+    [],
+  );
+
   const markFinalResponse = useCallback(() => {
     setAgents((current) =>
       current.map((agent) => {
@@ -321,7 +560,23 @@ export function useAgentCoordinator() {
       setAgents((current) =>
         current.map((agent) => {
           if (agent.status === "error") return agent;
-          if (interactiveRequest && agent.type === "terminal") {
+          if (
+            interactiveRequest?.source === "file_create_confirmation" &&
+            agent.type === "orchestrator"
+          ) {
+            return {
+              ...agent,
+              status: "running" as const,
+              progress: Math.max(agent.progress, 38),
+              currentTask: "等待确认是否新建缺失文件",
+              updatedAt: Date.now(),
+            };
+          }
+          if (
+            interactiveRequest &&
+            interactiveRequest.source !== "file_create_confirmation" &&
+            agent.type === "terminal"
+          ) {
             return {
               ...agent,
               status: "running" as const,
@@ -363,9 +618,13 @@ export function useAgentCoordinator() {
     updateMediaProgress,
     completeMediaRun,
     failMediaRun,
+    beginCommerceRun,
+    updateCommerceProgress,
+    failCommerceRun,
     updateAgent,
     activateAgent,
     applyAgentEvent,
+    applyLifecycleEvent,
     markFinalResponse,
     failRunningAgents,
     finalizeAgents,

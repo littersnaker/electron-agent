@@ -1,6 +1,6 @@
 import { createIdleAgents } from "../component/AgentPanel";
 import type { AgentInstance, AgentKind } from "../component/AgentPanel";
-import type { Message, WorkspaceProject } from "../const/pageConst";
+import type { Message, SessionMode, WorkspaceProject } from "../const/pageConst";
 
 export const MAX_CONTEXT_MESSAGES = 24;
 
@@ -26,10 +26,14 @@ const AGENT_KIND_ALIASES: Record<string, AgentKind> = {
   image: "media",
   video: "media",
   draw: "media",
+  commerce: "commerce",
+  market: "commerce",
+  amazon: "commerce",
+  ecommerce: "commerce",
 };
 
 export function buildWelcomeMessages(
-  mode: "qa" | "code",
+  mode: SessionMode,
   project?: WorkspaceProject,
 ): Message[] {
   return [
@@ -38,7 +42,9 @@ export function buildWelcomeMessages(
       content:
         mode === "code"
           ? `已进入 ${project?.name || "项目"} 的 Code Agent。代码索引可用于快速定位文件、符号和相关实现。`
-          : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",
+          : mode === "commerce"
+            ? "已进入 Cross-border Market Intelligence Agent。告诉我一个大概品类或市场问题，我会用公开 SERP / Shopping 做核心研究，并把 Amazon、Keepa 等平台数据作为可选增强。"
+            : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",
     },
   ];
 }
@@ -50,6 +56,10 @@ export function normalizeAgentKind(value?: string): AgentKind {
 
 export function inferAgentKind(text: string): AgentKind {
   const normalized = text.toLowerCase();
+
+  if (/amazon|commerce|market|电商|跨境|选品|竞品|市场研究/.test(normalized)) {
+    return "commerce";
+  }
 
   if (/media|image|video|draw|生图|改图|视频|绘图|海报/.test(normalized)) {
     return "media";
@@ -89,16 +99,23 @@ export function inferAgentKind(text: string): AgentKind {
 export function createRunAgents(): AgentInstance[] {
   const now = Date.now();
 
-  return createIdleAgents().map((agent, index) => ({
-    ...agent,
-    status: agent.type === "orchestrator" ? "running" : "queued",
-    progress: agent.type === "orchestrator" ? 8 : 0,
-    currentTask:
-      agent.type === "orchestrator"
-        ? "分析请求并编排协作流程"
-        : index === 1
-          ? "等待 Orchestrator 分配规划任务"
-          : "等待上游 Agent 完成",
-    updatedAt: now,
-  }));
+  return createIdleAgents().map((agent, index) => {
+    // Media / Commerce 有独立工作流，普通 QA / Code 运行时保持空闲，避免误显示为等待角色。
+    if (agent.type === "media" || agent.type === "commerce") {
+      return { ...agent, updatedAt: now };
+    }
+
+    return {
+      ...agent,
+      status: agent.type === "orchestrator" ? "running" : "queued",
+      progress: agent.type === "orchestrator" ? 8 : 0,
+      currentTask:
+        agent.type === "orchestrator"
+          ? "分析请求并编排协作流程"
+          : index === 1
+            ? "等待 Orchestrator 分配规划任务"
+            : "等待上游 Agent 完成",
+      updatedAt: now,
+    };
+  });
 }

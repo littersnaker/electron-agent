@@ -14,7 +14,7 @@ try {
 
   console.log('\n=== Step 3: 自动整理 Next.js 生产环境服务文件 ===');
   const outServerDir = path.join(rootDir, 'out-server/standalone');
-  
+
   fs.rmSync(path.join(rootDir, 'out-server'), { recursive: true, force: true });
   fs.mkdirSync(outServerDir, { recursive: true });
 
@@ -38,12 +38,35 @@ try {
   /*
    * Electron 打包后不会天然带上项目根目录的 .env.local。
    * 这里显式把它复制进 standalone 资源目录，供主进程启动时读取，
-   * 再把 DASHSCOPE_API_KEY 等变量注入给 Next 子进程。
+   * 再把 DASHSCOPE_API_KEY、SERPAPI_API_KEY / TALORDATA_API_TOKEN 等变量
+   * 显式注入给 Next 子进程。Token 只随本机 Electron 资源分发，不写入前端 bundle。
    */
   const sourceEnvLocal = path.join(rootDir, '.env.local');
   if (fs.existsSync(sourceEnvLocal)) {
     fs.cpSync(sourceEnvLocal, path.join(outServerDir, '.env.local'));
     console.log('已复制 .env.local 到 standalone 运行目录。');
+
+    // 只检查变量名是否存在，不输出任何 Secret 内容，避免构建日志泄露 Token。
+    const envText = fs.readFileSync(sourceEnvLocal, 'utf8');
+    const expectedKeys = [
+      'DASHSCOPE_API_KEY',
+      'SERPAPI_API_KEY',
+      'TALORDATA_API_TOKEN',
+      'KEEPA_API_KEY',
+      'TIKTOK_CLIENT_KEY',
+      'TIKTOK_CLIENT_SECRET',
+      'TIKTOK_MERCHANT_ID',
+      'TEMU_APP_KEY',
+      'TEMU_APP_SECRET',
+      'TEMU_ACCESS_TOKEN',
+      'ALIBABA_1688_APP_KEY',
+      'ALIBABA_1688_APP_SECRET',
+      'ALIBABA_1688_ACCESS_TOKEN',
+    ];
+    for (const key of expectedKeys) {
+      const present = new RegExp(`^\\s*${key}\\s*=`, 'mu').test(envText);
+      console.log(`[env] ${key}: ${present ? '已包含' : '未配置'}`);
+    }
   } else {
     console.warn('未找到项目根目录 .env.local，打包后的应用将只能依赖系统环境变量。');
   }
@@ -63,7 +86,7 @@ try {
 
   console.log('\n=== Step 4: electron-builder 打包绿色运行版 ===');
   execSync('pnpm exec electron-builder --dir', { stdio: 'inherit', cwd: rootDir });
-  
+
   console.log('\n🎉 [成功] 绿色运行版已生成！请前往 out/MyApp-win32-x64 目录查看。');
   console.log('💡 如需生成安装包，请运行: pnpm electron:make');
 

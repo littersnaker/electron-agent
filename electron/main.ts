@@ -76,8 +76,8 @@ const STARTUP_PAGE_THEME = {
   }
 >;
 
-const WINDOW_THEME_FILE = "window-theme.json";
-let currentTheme: AppTheme = "dark";
+const WINDOW_THEME_FILE = "window-theme-light-default-v2.json";
+let currentTheme: AppTheme = "light";
 
 function isAppTheme(value: unknown): value is AppTheme {
   return value === "dark" || value === "light";
@@ -86,15 +86,15 @@ function isAppTheme(value: unknown): value is AppTheme {
 function readPersistedWindowTheme(): AppTheme {
   try {
     const themePath = path.join(app.getPath("userData"), WINDOW_THEME_FILE);
-    if (!fs.existsSync(themePath)) return "dark";
+    if (!fs.existsSync(themePath)) return "light";
 
     const parsed = JSON.parse(fs.readFileSync(themePath, "utf8")) as {
       theme?: unknown;
     };
-    return isAppTheme(parsed.theme) ? parsed.theme : "dark";
+    return isAppTheme(parsed.theme) ? parsed.theme : "light";
   } catch (error) {
-    console.warn("[Electron] 读取窗口主题失败，将使用深色模式:", error);
-    return "dark";
+    console.warn("[Electron] 读取窗口主题失败，将使用浅色模式:", error);
+    return "light";
   }
 }
 
@@ -170,6 +170,15 @@ function loadElectronEnv(): void {
       console.log(`[Electron] 已加载环境变量文件: ${envPath}`);
       console.log(
         `[Electron] DASHSCOPE_API_KEY 命中情况: ${maskSecret(process.env.DASHSCOPE_API_KEY)}`,
+      );
+      console.log(
+        `[Electron] SERPAPI_API_KEY 命中情况: ${maskSecret(process.env.SERPAPI_API_KEY)}`,
+      );
+      console.log(
+        `[Electron] TALORDATA_API_TOKEN 命中情况: ${maskSecret(process.env.TALORDATA_API_TOKEN)}`,
+      );
+      console.log(
+        `[Electron] KEEPA_API_KEY 命中情况: ${maskSecret(process.env.KEEPA_API_KEY)}`,
       );
       return;
     }
@@ -494,6 +503,18 @@ function killStaleDevServer(): void {
  */
 function startServer(): void {
   const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
+  const serpApiKey = process.env.SERPAPI_API_KEY;
+  const talorDataApiToken = process.env.TALORDATA_API_TOKEN;
+  const keepaApiKey = process.env.KEEPA_API_KEY;
+  const tiktokClientKey = process.env.TIKTOK_CLIENT_KEY;
+  const tiktokClientSecret = process.env.TIKTOK_CLIENT_SECRET;
+  const tiktokMerchantId = process.env.TIKTOK_MERCHANT_ID;
+  const temuAppKey = process.env.TEMU_APP_KEY;
+  const temuAppSecret = process.env.TEMU_APP_SECRET;
+  const temuAccessToken = process.env.TEMU_ACCESS_TOKEN;
+  const alibaba1688AppKey = process.env.ALIBABA_1688_APP_KEY;
+  const alibaba1688AppSecret = process.env.ALIBABA_1688_APP_SECRET;
+  const alibaba1688AccessToken = process.env.ALIBABA_1688_ACCESS_TOKEN;
   const env = {
     ...process.env, // 继承主进程的环境变量
     NEXT_PUBLIC_IS_ELECTRON: "1",
@@ -503,13 +524,27 @@ function startServer(): void {
     // 💡 关键：在这里显式注入！
     // 这样子进程启动时，就能拿到从 .env.local 读取到的这个值
     DASHSCOPE_API_KEY: dashscopeApiKey,
+    // 与 DASHSCOPE_API_KEY 一样显式注入市场数据 Token。即使用户没有在 UI 再填一次，
+    // Next.js Commerce Route 也能直接使用打包进 `.env.local` 的默认值。
+    SERPAPI_API_KEY: serpApiKey,
+    TALORDATA_API_TOKEN: talorDataApiToken,
+    KEEPA_API_KEY: keepaApiKey,
+    TIKTOK_CLIENT_KEY: tiktokClientKey,
+    TIKTOK_CLIENT_SECRET: tiktokClientSecret,
+    TIKTOK_MERCHANT_ID: tiktokMerchantId,
+    TEMU_APP_KEY: temuAppKey,
+    TEMU_APP_SECRET: temuAppSecret,
+    TEMU_ACCESS_TOKEN: temuAccessToken,
+    ALIBABA_1688_APP_KEY: alibaba1688AppKey,
+    ALIBABA_1688_APP_SECRET: alibaba1688AppSecret,
+    ALIBABA_1688_ACCESS_TOKEN: alibaba1688AccessToken,
     // Keep local workspace data out of the application bundle. The Next.js
     // server receives this path and owns the SQLite connection.
     AGENT_DATA_DIR: path.join(app.getPath("userData"), "workspace-data"),
   };
 
   console.log(
-    `[Electron] 准备启动 Next 子进程，DASHSCOPE_API_KEY=${maskSecret(dashscopeApiKey)}`,
+    `[Electron] 准备启动 Next 子进程，DASHSCOPE_API_KEY=${maskSecret(dashscopeApiKey)}, TALORDATA_API_TOKEN=${maskSecret(talorDataApiToken || serpApiKey)}, KEEPA_API_KEY=${maskSecret(keepaApiKey)}, TIKTOK_CLIENT_KEY=${maskSecret(tiktokClientKey)}, TEMU_APP_KEY=${maskSecret(temuAppKey)}, ALIBABA_1688_APP_KEY=${maskSecret(alibaba1688AppKey)}`,
   );
 
   // 清理残留的 dev server 进程和锁文件
@@ -872,6 +907,85 @@ function setupAutoUpdater(): void {
     console.log("Auto-updater not available");
   }
 }
+
+interface CommercePdfExportPayload {
+  html: string;
+  suggestedFileName: string;
+}
+
+function sanitizePdfFileName(value: string): string {
+  const base = value
+    .replace(/[\\/:*?"<>|]/gu, "-")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 90) || "Amazon市场研究.pdf";
+  return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
+}
+
+function isCommercePdfPayload(value: unknown): value is CommercePdfExportPayload {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.html === "string" &&
+    record.html.length > 0 &&
+    record.html.length <= 2_000_000 &&
+    typeof record.suggestedFileName === "string" &&
+    record.suggestedFileName.length <= 180
+  );
+}
+
+/**
+ * 使用 Electron 自带 Chromium 渲染引擎生成 PDF，不引入额外 PDF npm 依赖。
+ * 隐藏窗口关闭 JavaScript/Node 能力，只负责排版和 printToPDF，降低任意 HTML 的风险。
+ */
+async function exportCommerceReportPdf(
+  payload: CommercePdfExportPayload,
+): Promise<{ canceled: boolean; filePath?: string }> {
+  const suggestedFileName = sanitizePdfFileName(payload.suggestedFileName);
+  const dialogOptions = {
+    title: "保存 Amazon 市场研究报告",
+    defaultPath: path.join(app.getPath("downloads"), suggestedFileName),
+    filters: [{ name: "PDF 文档", extensions: ["pdf"] }],
+  };
+  const saveResult = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, dialogOptions)
+    : await dialog.showSaveDialog(dialogOptions);
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { canceled: true };
+  }
+
+  const printWindow = new BrowserWindow({
+    show: false,
+    backgroundColor: "#ffffff",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      javascript: false,
+    },
+  });
+
+  try {
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(payload.html)}`;
+    await printWindow.loadURL(dataUrl);
+    const pdfBuffer = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: "A4",
+      margins: {
+        top: 0.4,
+        bottom: 0.45,
+        left: 0.35,
+        right: 0.35,
+      },
+    });
+    fs.writeFileSync(saveResult.filePath, pdfBuffer);
+    return { canceled: false, filePath: saveResult.filePath };
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.destroy();
+  }
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit(); // 如果已经有一个实例在运行，直接退出当前实例
@@ -904,6 +1018,13 @@ if (!gotTheLock) {
         return null;
       }
       return filePaths[0]; // 返回选中的文件夹绝对路径
+    });
+
+    ipcMain.handle("commerce:exportPdf", async (_event, payload: unknown) => {
+      if (!isCommercePdfPayload(payload)) {
+        throw new Error("PDF 导出参数无效");
+      }
+      return exportCommerceReportPdf(payload);
     });
 
     startServer();

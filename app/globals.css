@@ -2,23 +2,22 @@
 @plugin "@tailwindcss/typography"; /* 🔥 v4 插件引入专属新写法 */
 
 :root {
-  /* 暗黑紫蓝渐变主题色板 */
-  --background: #0a0a0f;
-  --background-soft: #12121a;
-  --surface: #16161f;
-  --surface-hover: #1d1d2a;
-  --border: #26263a;
-  --border-soft: #1f1f2e;
-  --foreground: #ededf2;
-  --foreground-muted: #9a9ab0;
-  --foreground-subtle: #6b6b85;
-  /* 紫蓝渐变强调色 */
-  --accent-from: #a855f7;
-  --accent-via: #8b5cf6;
-  --accent-to: #6366f1;
-  --accent: #8b5cf6;
-  --accent-glow: rgba(139, 92, 246, 0.35);
-  color-scheme: dark;
+  /* 首屏默认使用浅色，避免 Electron 原生标题栏与 React 首次 hydration 出现双色闪烁。 */
+  --background: #eef1f6;
+  --background-soft: #f8f9fb;
+  --surface: #ffffff;
+  --surface-hover: #f4f6fa;
+  --border: rgba(15, 23, 42, 0.12);
+  --border-soft: rgba(15, 23, 42, 0.08);
+  --foreground: #151519;
+  --foreground-muted: rgba(30, 30, 35, 0.68);
+  --foreground-subtle: rgba(30, 30, 35, 0.43);
+  --accent-from: #168dff;
+  --accent-via: #0a84ff;
+  --accent-to: #0071e3;
+  --accent: #0a84ff;
+  --accent-glow: rgba(10, 132, 255, 0.22);
+  color-scheme: light;
 }
 .custom-title-bar{
   /* 可拖拽 */
@@ -42,7 +41,7 @@ body {
   contain-intrinsic-size: 0 96px;
 }
 
-/* ===== 自定义滚动条（暗黑紫色调） ===== */
+/* ===== 自定义滚动条 ===== */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

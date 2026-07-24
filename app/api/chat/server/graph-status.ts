@@ -42,6 +42,8 @@ export function emitGraphUpdateStatus(
   const statusMessages: Array<[string, string]> = [
     ["router", "🎯 Router 已完成请求分类"],
     ["workspace_info_answer", "📁 已读取当前工作区信息"],
+    ["missing_file_guard", "📄 已检查目标文件是否存在"],
+    ["simple_edit_planning", "⚡ 已生成轻量单文件修改计划"],
     ["context_fanout", "🧭 正在并行收集项目上下文"],
     ["search_agent", "🔎 SearchAgent 已完成代码检索"],
     ["memory_agent", "🧠 MemoryAgent 已整理历史记忆"],
@@ -53,7 +55,7 @@ export function emitGraphUpdateStatus(
     ["planning_agent", "📝 Task Planner 已生成并行任务"],
     ["structured_task_list", "📋 Structured Task List 已生成"],
     ["merge_patch", "🧷 Merge 已完成冲突检查与统一落盘"],
-    ["lint_build_test", "🧪 Lint / Build / Test 已完成"],
+    ["lint_build_test", "🧪 工程验证已完成"],
     ["reviewer_agent", "🕵️ Reviewer 已完成统一审查"],
     ["final_report", "✅ Final Report 已生成"],
   ];
@@ -85,7 +87,11 @@ export function emitGraphUpdateStatus(
     sendSse(controller, encoder, {
       type: "STATUS",
       content: `⚙️ ${workerLabel} ${
-        result?.status === "failed" ? "执行失败" : "执行完成"
+        result?.status === "failed"
+          ? "执行失败"
+          : result?.status === "satisfied"
+            ? "确认目标已满足"
+            : "执行完成"
       } (耗时: ${elapsedSeconds}s)`,
     });
 

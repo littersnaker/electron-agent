@@ -7,8 +7,12 @@ interface ChatSidebarProps {
   activeSessionId: string;
   isStreaming: boolean;
   createQaSession: () => void;
+  createCommerceSession: () => void;
   createCodeSession: (projectId: string) => void;
   addProject: () => void;
+  codePluginEnabled: boolean;
+  commercePluginEnabled: boolean;
+  onOpenPluginCenter: () => void;
   reindexProject: (projectId: string) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string, event: MouseEvent) => void;
@@ -67,6 +71,41 @@ function FolderIcon() {
   );
 }
 
+function PluginIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+      <path
+        d="M7.3 3.2h5.4v2.1a2.1 2.1 0 1 0 0 4.2v2.1h2.1a2.1 2.1 0 1 1 0 4.2H9.5v-2.1a2.1 2.1 0 1 0-4.2 0v2.1H3.2V9.5h2.1a2.1 2.1 0 1 0 0-4.2h2V3.2Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CommerceIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <path
+        d="M3.4 15.4h13.2M4.7 13.4V9.7M8.2 13.4V6.9M11.8 13.4V10M15.3 13.4V4.6"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinecap="round"
+      />
+      <path
+        d="m4.6 7.1 3.2-2.2 3.2 2 4.4-3.2"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity=".9"
+      />
+    </svg>
+  );
+}
+
 function SessionItem({
   session,
   activeSessionId,
@@ -81,6 +120,7 @@ function SessionItem({
   | "deleteSession"
 > & { session: ChatSession }) {
   const active = session.id === activeSessionId;
+  const activeColor = COLORS.blue;
 
   return (
     <button
@@ -103,7 +143,9 @@ function SessionItem({
     >
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full transition-colors"
-        style={{ background: active ? COLORS.blue : "rgba(255,255,255,0.18)" }}
+        style={{
+          background: active ? activeColor : "rgba(255,255,255,0.18)",
+        }}
       />
       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
         {session.title}
@@ -118,10 +160,7 @@ function SessionItem({
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.stopPropagation();
-            deleteSession(
-              session.id,
-              event as unknown as MouseEvent,
-            );
+            deleteSession(session.id, event as unknown as MouseEvent);
           }
         }}
         aria-disabled={isStreaming}
@@ -160,8 +199,15 @@ function ProjectStatus({ project }: { project: WorkspaceProject }) {
   );
 }
 
+/**
+ * 核心 QA 始终保留在侧边栏；Code 与 Commerce 仅在对应内置插件启用后展示。
+ * 插件关闭时不渲染入口，避免把低频能力继续堆进 QA / 媒体模式列表。
+ */
 export default function ChatSidebar(props: ChatSidebarProps) {
   const qaSessions = props.sessions.filter((session) => session.mode === "qa");
+  const commerceSessions = props.sessions.filter(
+    (session) => session.mode === "commerce",
+  );
 
   return (
     <aside
@@ -174,36 +220,15 @@ export default function ChatSidebar(props: ChatSidebarProps) {
       }}
     >
       <div className="px-4 pb-3 pt-4">
-        <div className="flex items-center gap-3">
-          {/* <div
-            className="flex h-9 w-9 items-center justify-center rounded-[11px] border"
-            style={{
-              background:
-                "linear-gradient(145deg, rgba(100,181,255,0.2), rgba(191,90,242,0.16))",
-              borderColor: "rgba(255,255,255,0.1)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.1)",
-            }}
+        <div className="min-w-0">
+          <div
+            className="text-[14px] font-semibold tracking-[-0.01em]"
+            style={{ color: COLORS.text }}
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
-              <path
-                d="M12 3c.62 4.36 3.02 6.76 7.38 7.38C15.02 11 12.62 13.4 12 17.76 11.38 13.4 8.98 11 4.62 10.38 8.98 9.76 11.38 7.36 12 3Z"
-                fill="url(#sidebar-star)"
-              />
-              <defs>
-                <linearGradient id="sidebar-star" x1="5" y1="4" x2="19" y2="18">
-                  <stop stopColor="#64b5ff" />
-                  <stop offset="1" stopColor="#bf5af2" />
-                </linearGradient>
-              </defs>
-            </svg>
-          </div> */}
-          <div className="min-w-0">
-            <div className="text-[14px] font-semibold tracking-[-0.01em]" style={{ color: COLORS.text }}>
-              Agent Workspace
-            </div>
-            <div className="mt-0.5 text-[10px]" style={{ color: COLORS.textSubtle }}>
-              问答与本地代码协作
-            </div>
+            Agent Workspace
+          </div>
+          <div className="mt-0.5 text-[10px]" style={{ color: COLORS.textSubtle }}>
+            核心问答 · Agent 按需加载
           </div>
         </div>
       </div>
@@ -215,7 +240,8 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           disabled={props.isStreaming}
           className="flex h-9 w-full items-center justify-center gap-2 rounded-[11px] text-[12px] font-semibold text-white transition-all active:scale-[0.985] disabled:opacity-40"
           style={{
-            background: "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
+            background:
+              "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
             boxShadow:
               "0 8px 20px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.2)",
           }}
@@ -223,23 +249,117 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           <PlusIcon />
           新建问答
         </button>
-        <button
-          type="button"
-          onClick={props.addProject}
-          disabled={props.isStreaming}
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-[11px] border text-[12px] font-medium transition-all active:scale-[0.985] disabled:opacity-40"
-          style={{
-            background: COLORS.material,
-            borderColor: COLORS.border,
-            color: COLORS.textMuted,
-          }}
-        >
-          <FolderIcon />
-          添加本地项目
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={props.onOpenPluginCenter}
+            disabled={props.isStreaming}
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-40"
+            style={{
+              background: COLORS.material,
+              borderColor: COLORS.border,
+              color: COLORS.textMuted,
+            }}
+          >
+            <PluginIcon />
+            功能插件
+          </button>
+          <button
+            type="button"
+            onClick={props.addProject}
+            disabled={props.isStreaming || !props.codePluginEnabled}
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-35"
+            style={{
+              background: COLORS.material,
+              borderColor: COLORS.border,
+              color: COLORS.textMuted,
+            }}
+            title={props.codePluginEnabled ? "添加本地项目" : "请先在功能插件中启用 Code Agent"}
+          >
+            <FolderIcon />
+            本地项目
+          </button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-5">
+        {props.commercePluginEnabled && (
+          <>
+        <section className="mb-5">
+          <div
+            className="mb-2 flex items-center justify-between px-2"
+            style={{ color: COLORS.textSubtle }}
+          >
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+              <CommerceIcon />
+              Market Intelligence
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={props.createCommerceSession}
+            disabled={props.isStreaming}
+            className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
+            style={{
+              background:
+                "linear-gradient(145deg, rgba(10,132,255,0.13), rgba(10,132,255,0.045))",
+              borderColor: "rgba(10,132,255,0.20)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
+            }}
+            title="新建跨境市场情报研究"
+          >
+            <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
+              style={{
+                background: "rgba(10,132,255,0.13)",
+                borderColor: "rgba(10,132,255,0.22)",
+                color: "#64b5ff",
+              }}
+            >
+              <CommerceIcon className="h-[18px] w-[18px]" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className="block text-[12px] font-semibold tracking-[-0.01em]"
+                style={{ color: COLORS.text }}
+              >
+                跨境市场情报
+              </span>
+              <span
+                className="mt-0.5 block truncate text-[9px]"
+                style={{ color: COLORS.textSubtle }}
+              >
+                公开市场研究 · 竞品可见度 · 机会信号
+              </span>
+            </span>
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
+              style={{ background: "rgba(10,132,255,0.12)", color: "#64b5ff" }}
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+            </span>
+          </button>
+
+          {commerceSessions.length > 0 && (
+            <div className="space-y-0.5">
+              {commerceSessions.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  activeSessionId={props.activeSessionId}
+                  isStreaming={props.isStreaming}
+                  switchSession={props.switchSession}
+                  deleteSession={props.deleteSession}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+          </>
+        )}
+
         <section className="mb-5">
           <div
             className="mb-1 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
@@ -250,11 +370,20 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           </div>
           <div className="space-y-0.5">
             {qaSessions.map((session) => (
-              <SessionItem key={session.id} session={session} {...props} />
+              <SessionItem
+                key={session.id}
+                session={session}
+                activeSessionId={props.activeSessionId}
+                isStreaming={props.isStreaming}
+                switchSession={props.switchSession}
+                deleteSession={props.deleteSession}
+              />
             ))}
           </div>
         </section>
 
+        {props.codePluginEnabled && (
+          <>
         <section>
           <div
             className="mb-2 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
@@ -295,7 +424,10 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                   <div className="flex items-center gap-1 px-1 py-0.5">
                     <span
                       className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-                      style={{ background: COLORS.materialStrong, color: COLORS.textMuted }}
+                      style={{
+                        background: COLORS.materialStrong,
+                        color: COLORS.textMuted,
+                      }}
                     >
                       <FolderIcon />
                     </span>
@@ -336,9 +468,19 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                   </div>
 
                   {projectSessions.length > 0 && (
-                    <div className="mt-1 space-y-0.5 border-t pt-1.5" style={{ borderColor: COLORS.border }}>
+                    <div
+                      className="mt-1 space-y-0.5 border-t pt-1.5"
+                      style={{ borderColor: COLORS.border }}
+                    >
                       {projectSessions.map((session) => (
-                        <SessionItem key={session.id} session={session} {...props} />
+                        <SessionItem
+                          key={session.id}
+                          session={session}
+                          activeSessionId={props.activeSessionId}
+                          isStreaming={props.isStreaming}
+                          switchSession={props.switchSession}
+                          deleteSession={props.deleteSession}
+                        />
                       ))}
                     </div>
                   )}
@@ -346,7 +488,9 @@ export default function ChatSidebar(props: ChatSidebarProps) {
               );
             })}
           </div>
-        </section>
+        </section>          </>
+        )}
+
       </div>
     </aside>
   );

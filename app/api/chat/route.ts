@@ -176,7 +176,11 @@ export async function POST(request: Request): Promise<Response> {
             });
             sendSse(controller, encoder, {
               type: "STATUS",
-              content: "⏸ 终端正在等待用户输入，已保留当前进程现场。",
+              content:
+                finalState.interactiveRequest.source ===
+                "file_create_confirmation"
+                  ? "⏸ 目标文件不存在，等待你确认是否新建。"
+                  : "⏸ 终端正在等待用户输入，已保留当前进程现场。",
             });
             sendUsage(
               controller,
