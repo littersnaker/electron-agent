@@ -99,11 +99,11 @@ Commerce 工作流负责类目理解、多源采集、口径归一化、确定�
 
 ```mermaid
 flowchart LR
-    UI[Electron / Next.js 前端]
-    QA[/api/qa]
-    CODE[/api/chat]
-    MEDIA[/api/media/generate]
-    COMMERCE[/api/commerce/research]
+    UI["Electron / Next.js 前端"]
+    QA["/api/qa"]
+    CODE["/api/chat"]
+    MEDIA["/api/media/generate"]
+    COMMERCE["/api/commerce/research"]
     LLM[统一 LLM Gateway]
     GRAPH[LangGraph Code 工作流]
     MEDIA_API[DashScope 媒体 API]
@@ -567,6 +567,7 @@ Worker 获取基线之后，正式文件被其他进程或人工修改。系统�
 ![alt text](image-2.png)
 ![alt text](image-3.png)
 ![alt text](2bac2384a38b37918fe447c747259b6a.png)
+
 
 ## 安全说明
 
