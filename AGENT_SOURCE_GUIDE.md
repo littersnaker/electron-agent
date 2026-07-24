@@ -1,1095 +1,1238 @@
-# 多 Agent 源码导读
+# Multi-agent 多 Agent 源码导读
 
-这份文档是给“以后回头看源码的自己”准备的。
+本文档是一份基于当前源码整理的中文实现指南，重点解释：
 
-目标不是介绍产品功能，而是帮你快速回答下面这些问题：
+1. 项目里到底有哪些 Agent；
+2. 一次请求会经过哪些节点；
+3. Agent 之间通过什么状态交接；
+4. 并行 Worker 如何避免互相污染；
+5. 文件为什么不会被 Worker 直接覆盖；
+6. Merge、Verification、Reviewer 如何形成质量闭环；
+7. QA、Media、Commerce 与 Code Agent 为什么要分开。
 
-- 这套多 Agent 工作流现在到底怎么跑？
-- 为什么要拆成 `Router / Search / Memory / File / Planner / Modify / Reviewer / Lint-Build-Test / Final Report`？
-- 为什么中间还要插入 `Schema 校验`、`文件唯一性检查`、`Retry Planner`、`规则修复`、`单 Agent 降级`？
-- 为什么 Reviewer 不直接让三路 Modify 全部重跑，而是只重跑指定槽位？
-- 如果我要继续改这套架构，应该先看哪些文件？
+建议先阅读本文，再结合 [AGENTS.md](./AGENTS.md) 修改代码。
 
 ---
 
-## 1. 先看哪些文件
+## 1. 先建立全局认知
 
-如果你是第一次回来看这套流程，推荐按下面顺序读：
+Multi-agent 不是“一张大图处理全部能力”，而是四条相互隔离的主工作流：
 
-1. `app/api/chat/agent/types.ts`
-2. `app/api/chat/agent/state.ts`
+```text
+QA            → /api/qa                 → LLM Gateway
+Code Agent    → /api/chat               → LangGraph
+Media Agent   → /api/media/generate     → DashScope Media
+Commerce      → /api/commerce/research  → Data-source Orchestrator + LLM
+```
+
+这种拆分解决了三个问题：
+
+- 文本流式协议、视频异步轮询和多 Agent checkpoint 不互相污染；
+- 普通 QA 首屏不需要同步加载 Code/Commerce 的重型逻辑；
+- 每个工作流可以使用不同的模型能力、错误处理和持久化结构。
+
+---
+
+## 2. 推荐阅读顺序
+
+### 第一组：Code Agent 主干
+
+1. `app/api/chat/route.ts`
+2. `app/api/chat/server/run-agent-graph.ts`
 3. `app/api/chat/agent/graph.ts`
-4. `app/api/chat/agent/workflow-nodes.ts`
-5. `app/api/chat/route.ts`
-6. `app/api/chat/agent/checkpointer.ts`
+4. `app/api/chat/agent/types.ts`
+5. `app/api/chat/agent/state.ts`
+6. `app/api/chat/agent/request-classifier.ts`
+7. `app/api/chat/agent/request-routing-nodes.ts`
+8. `app/api/chat/agent/workflow-nodes.ts`
+9. `app/api/chat/tools.ts`
+10. `app/api/chat/agent/checkpointer.ts`
 
-这几个文件分别负责的事情如下。
+### 第二组：前端状态与交互
 
-### `types.ts`
+1. `app/hooks/useChatStream.ts`
+2. `app/hooks/useAgentCoordinator.ts`
+3. `app/component/TaskPlanningPanel.tsx`
+4. `app/component/AgentPanel.tsx`
+5. `app/component/InteractiveRequestPanel.tsx`
+6. `app/api/chat/server/graph-status.ts`
 
-这是“数据词典”。
+### 第三组：模型层
 
-你可以在这里先看清楚 3 组最重要的数据结构：
+1. `app/lib/llm/gateway.ts`
+2. `app/lib/llm/router/model-router.ts`
+3. `app/lib/llm/registry/providers.ts`
+4. `app/lib/llm/registry/models.ts`
+5. `app/lib/llm/normalizers.ts`
+6. `app/lib/llm/prompts/registry.ts`
 
-- `PlanTask`
-  - 表示 Planner 拆出来的单个任务
-  - 结构是 `{ task, files }`
-  - 一个任务对应一组最需要改的文件
+### 第四组：其他工作流
 
-- `ModifyTaskResult`
-  - 表示某一个 Modify 槽位的执行结果
-  - 它会记录：
-    - 自己是第几个槽位
-    - 负责了什么任务
-    - 涉及哪些文件
-    - 修改总结
-    - 实际 touched 了哪些文件
-    - 最终状态是 `done` 还是 `skipped`
-
-- `ReviewPayload`
-  - 表示 Reviewer 的结构化输出
-  - 最重要的是：
-    - `decision`
-    - `feedback`
-    - `risks`
-    - `retryTasks`
-
-也就是说，你可以把整个中后段工作流理解成：
-
-- Planner 产出 `PlannerPayload`
-- Modify 产出 `ModifyTaskResult[]`
-- Reviewer 产出 `ReviewPayload`
+- QA：`app/api/qa/route.ts`
+- Media：`app/api/media/generate/route.ts`、`app/lib/media/`
+- Commerce：`app/api/commerce/research/route.ts`、`app/lib/commerce/`
+- Workspace：`app/lib/server/workspace-store.ts`
+- Electron：`electron/main.ts`、`electron/preload.ts`
 
 ---
 
-### `state.ts`
+## 3. Code Agent 的 API 入口
 
-这是整张图共享的“全局白板”。
+### `app/api/chat/route.ts`
 
-所有节点都会从这里读状态，再把自己的结果写回这里。
+这个文件负责 HTTP 边界，不负责实现具体 Agent 节点。
 
-为什么一定要有这层？
+主要步骤：
 
-因为这套系统不是一个普通的“单函数串行调用”流程，而是：
+1. 从请求头解析 LLM 凭证与首选模型；
+2. 解析前端消息和图片附件；
+3. 将消息转换为 LangChain `HumanMessage`、`AIMessage`、`SystemMessage`；
+4. 通过 `resolveChatWorkspace()` 校验项目 ID 和工作目录；
+5. 创建 SSE Stream；
+6. 调用 `runAgentGraph()`；
+7. 根据最终状态处理三种结果：
+   - 存在 `interactiveRequest`：暂停并发回交前端；
+   - 存在 `directAnswer`：直接输出；
+   - 完整图结束：调用 `streamFinalAnswer()` 整理最终回答。
 
-- 前面 3 个上下文 Agent 并发跑
-- 中间 Planner 有多级校验和分支
-- 后面 3 个 Modify 并发跑
-- Reviewer 可能打回指定任务
-- 最后再做真实工程校验和总结
+Route 的重要边界：
 
-如果没有一份统一状态：
-
-- 你就不知道每一步产出了什么
-- 也不知道后一步为什么会走这个分支
-- 更不可能做持久化恢复
-
-所以 `state.ts` 本质上是在解决两件事：
-
-1. 节点之间如何共享信息
-2. 图在任意时刻如何知道“自己现在进行到哪一步了”
-
-你最值得重点关注的字段有：
-
-- `searchContext`
-- `memoryContext`
-- `fileContext`
-- `mergedContext`
-- `plannerRawOutput`
-- `plannerOutput`
-- `plannerValidationStatus`
-- `plannerRetryCount`
-- `modifyResults`
-- `mergedPatchSummary`
-- `reviewPayload`
-- `retryTaskSlots`
-- `lintSummary`
-- `finalReportSummary`
+- 不在这里写 Planner 逻辑；
+- 不在这里直接改文件；
+- 不把凭证放进 Graph State；
+- 不允许工作区无效时静默降级到任意目录。
 
 ---
 
-### `graph.ts`
+## 4. Graph 是如何被运行的
 
-这是“总布线图”。
+### `app/api/chat/server/run-agent-graph.ts`
 
-这里不写具体业务细节，只负责定义：
+这个文件负责把 LangGraph 与 SSE 连接起来。
 
-- 有哪些节点
-- 节点之间怎么连
-- 哪些地方是条件分支
-- 哪些地方要回环重试
+关键行为：
 
-如果你只想知道“整体流程长什么样”，最适合先看这个文件。
+- 使用 `sessionId` 作为 LangGraph `thread_id`；
+- 先读取旧 checkpoint；
+- 旧线程只补最近两条输入消息，避免每轮重复写入完整历史；
+- `streamMode` 同时开启：
+  - `updates`：节点状态更新；
+  - `custom`：自定义 Agent 生命周期事件；
+- `recursionLimit` 为 80，用于允许 Planner 重试和 Reviewer 返工回环；
+- 完成后再次读取最终 checkpoint，作为 Route 的最终状态。
 
-当前图结构可以概括成下面这条链路：
+凭证通过 `runWithLlmCredentials()` 放入 AsyncLocalStorage。这样：
 
 ```text
-Router
-  -> SearchAgent / MemoryAgent / FileAgent
-  -> Merge Context
-  -> Planner Agent
-  -> JSON Schema 校验
-  -> 文件唯一性检查
-  -> Retry Planner / 规则修复 / 单 Agent 降级
-  -> Structured Task List
-  -> Modify A / Modify B / Modify C
-  -> Merge Patch
-  -> Reviewer Agent
-  -> Retry Dispatcher（只返工指定槽位）
-  -> Lint / Build / Test
-  -> Final Report
+请求凭证
+  └─ 当前异步请求上下文
+      ├─ Planner 调用
+      ├─ Worker 调用
+      ├─ Reviewer 调用
+      └─ Final Report 调用
 ```
 
-其中最关键的设计点有 4 个：
-
-1. 上下文收集和修改执行都做了并发
-2. Planner 结果不能直接信，必须先校验
-3. Reviewer 只打回失败任务，不让三路全部重跑
-4. 图状态会被 SQLite 持久化
-
----
-
-### `workflow-nodes.ts`
-
-这是“每个节点的具体行为实现”。
-
-如果说 `graph.ts` 是地图，那这里就是每个站点内部具体做什么。
-
-这个文件很长，建议不要从头机械往下扫。
-
-正确读法是按这 4 层来读：
-
-1. 基础工具函数层
-2. Planner 校验链路
-3. Modify 执行链路
-4. Reviewer / 校验 / Final Report 链路
-
-后面我会按这个顺序继续展开。
-
----
-
-### `route.ts`
-
-这是“前端请求”和“LangGraph 工作流”之间的桥。
-
-它负责的不是业务决策，而是：
-
-- 接收前端消息
-- 启动 graph
-- 把 graph 每个节点的进度变成 SSE 状态推给前端
-- graph 跑完之后，再组织最终模型回答
-
-所以你在前端看到的：
-
-- `Router 已接收任务`
-- `SearchAgent 已完成代码检索`
-- `Planner 已生成执行计划`
-- `Reviewer 已完成审查`
-- `Final Report 已生成`
-
-这些状态文案，基本都在这里维护。
-
----
-
-### `checkpointer.ts`
-
-这是图状态持久化的入口。
-
-这里的作用很简单但非常关键：
-
-- 如果没有它，图状态只能放内存里
-- 服务一重启，线程状态就丢了
-- 有了 SQLite checkpointer，同一个 `thread_id` 的状态可以继续恢复
-
-所以这层本质上是在解决：
-
-- 多轮对话如何续上
-- LangGraph 节点状态如何持久化
-
----
-
-## 2. 一次完整请求是怎么跑的
-
-下面按真实执行顺序，串一次完整请求。
-
----
-
-### 第 1 步：`route.ts` 接收前端请求
-
-入口是：
-
-- `app/api/chat/route.ts`
-
-收到请求后，它会先做几件事：
-
-1. 取 `messages`
-2. 取 `sessionId`
-3. 取 `workingDir`
-4. 取 `projectId`
-5. 把前端消息转成 LangChain 的消息对象
-
-接着它会调用：
-
-- `graph.getState(...)`
-
-这一步是为了判断：
-
-- 当前 `sessionId` 是不是一个已经存在的会话线程
-
-如果是老线程，就不会把所有历史消息整段重放，而是只补最近消息。
-
-这样做是为了控制上下文体积，避免每轮调用越来越重。
-
----
-
-### 第 2 步：`Router` 重置本轮状态
-
-入口节点：
-
-- `routerNode()`
-
-它的职责不是理解代码，而是给本轮流程“清场”。
-
-它会把下面这些中间结果重置掉：
-
-- `searchContext`
-- `memoryContext`
-- `fileContext`
-- `mergedContext`
-- `plannerOutput`
-- `modifyResults`
-- `mergedPatchSummary`
-- `reviewPayload`
-- `lintSummary`
-- `finalReportSummary`
-
-同时它还会做一个非常粗粒度的判断：
-
-- 当前请求大概率需不需要进入“代码修改链路”
-
-这个判断写在 `requiresChanges` 里。
-
-它并不完美，但足够作为流程开关的第一层粗筛。
-
----
-
-### 第 3 步：三个上下文 Agent 并发收集信息
-
-这一步是并发的。
-
-也就是说，图不是按下面顺序依次执行，而是三路同时开工：
-
-- `searchAgentNode()`
-- `memoryAgentNode()`
-- `fileAgentNode()`
-
-#### 3.1 `SearchAgent`
-
-它负责“广度摸排”。
-
-它会结合两类信息：
-
-- 项目索引检索
-- 本地代码库关键字扫描
-
-目标是先给出一个问题范围：
-
-- 这个需求可能涉及哪些模块
-- 哪些文件最可能相关
-
-它不负责精读文件，更像“侦察兵”。
-
-#### 3.2 `MemoryAgent`
-
-它负责把历史上下文整理出来。
-
-它会拼两块内容：
-
-- 长期记忆摘要 `summary`
-- 最近几轮会话摘要
-
-它存在的原因是：
-
-- 当前用户一句话经常不是完整上下文
-- 之前做过什么、返工过什么、已经改了什么，Planner 也需要知道
-
-所以它更像“记忆补丁层”。
-
-#### 3.3 `FileAgent`
-
-它负责“沿着用户点名的路径去预读文件或目录”。
-
-它会先从用户请求里提取可能像路径的字符串。
-
-如果用户明确说了某个文件或目录：
-
-- 就去读取对应文件预览
-- 或列出目录结构
-
-如果用户没有给具体路径：
-
-- 就退回到工作目录概览
-
-它存在的原因是：
-
-- SearchAgent 解决的是“广度”
-- FileAgent 解决的是“用户明确指定的局部深度”
-
----
-
-### 第 4 步：`Merge Context`
-
-入口节点：
-
-- `mergeContextNode()`
-
-它做的事情很简单：
-
-- 把 `SearchAgent`
-- `MemoryAgent`
-- `FileAgent`
-
-三份结果合成一份 `mergedContext`
-
-后面几乎所有关键节点都会吃这份上下文：
-
-- Planner
-- Modify
-- Reviewer
-- Final Report
-
-所以 `mergedContext` 可以理解成“当前任务的统一上下文底稿”。
-
----
-
-## 3. Planner 为什么不能直接往下走
-
-这是这套架构最重要的一个设计点。
-
-直觉上，你可能会觉得：
-
-- Planner 输出任务数组
-- 直接分给 Modify A/B/C 不就行了
-
-但实际不能这么做。
-
-因为 Planner 是模型产物，天然存在这几种风险：
-
-1. 不是合法 JSON
-2. 是 JSON，但结构不对
-3. 结构对，但任务是空的
-4. 任务拆分重复，多个任务改同一个文件
-5. 任务虽然合法，但不适合并发
-
-所以这里设计了 4 层保险。
-
----
-
-### 第 5 步：`Planning Agent`
-
-入口节点：
-
-- `planningAgentNode()`
-
-它只负责一件事：
-
-- 输出严格 JSON 数组
-
-例如：
-
-```json
-[
-  {
-    "task": "修改登录页",
-    "files": ["Login.tsx"]
-  },
-  {
-    "task": "修改 API",
-    "files": ["AuthService.ts"]
-  },
-  {
-    "task": "修改测试",
-    "files": ["login.test.ts"]
-  }
-]
-```
-
-这里特别强调“只输出 JSON，不要解释文本”，就是因为后面程序要做结构化校验。
-
-这个节点只负责“规划”，不直接修改文件。
-
----
-
-### 第 6 步：`JSON Schema 校验`
-
-入口节点：
-
-- `plannerSchemaValidationNode()`
-
-它会把 Planner 原始文本交给：
-
-- `extractPlannerJsonArray()`
-- `parsePlannerPayloadWithSchema()`
-
-做两层处理：
-
-1. 尝试从文本里提取 JSON 数组
-2. 用 `zod` 校验结构是否合法
-
-如果失败，`plannerValidationStatus` 会被标成：
-
-- `schema_invalid`
-
-如果成功，会标成：
-
-- `schema_valid`
-
-并把解析后的结果写进：
-
-- `plannerOutput`
-
----
-
-### 第 7 步：`文件唯一性检查`
-
-入口节点：
-
-- `fileUniquenessCheckNode()`
-
-这一步的目标非常明确：
-
-- 不允许多个任务并发修改同一个文件
-
-为什么这么严格？
-
-因为一旦出现这种情况：
-
-- Modify A 改 `Login.tsx`
-- Modify B 也改 `Login.tsx`
-- Modify C 还顺手改了 `Login.tsx`
-
-那后面的：
-
-- Merge Patch
-- Reviewer
-- 最终落盘
-
-都会变得非常复杂。
-
-所以这里会用：
-
-- `collectDuplicatePlannerFiles()`
-
-来找出跨任务重复文件。
-
-没有重复时，状态进入：
-
-- `files_unique`
-
-有重复时，状态进入：
-
-- `files_duplicated`
-
----
-
-### 第 8 步：`Retry Planner`
-
-入口节点：
-
-- `retryPlannerNode()`
-
-它本身并不重新规划，它只做两件事：
-
-1. 增加 `plannerRetryCount`
-2. 记录 `plannerRetryReason`
-
-然后图会回到：
-
-- `planningAgentNode()`
-
-让 Planner 带着“上次为什么失败”的信息重新规划。
-
-这个设计的好处是：
-
-- 重试本身变成显式节点
-- 前端可以明确显示“Planner 第几次重试”
-- 状态也更容易排查
-
----
-
-### 第 9 步：`规则修复`
-
-入口节点：
-
-- `rulesRepairNode()`
-
-这是 Planner 重试多次后还失败时的“程序级保底修复”。
-
-注意，它不是再去问一次模型，而是直接在程序层做保守处理。
-
-目前的策略是：
-
-- 同一个文件只保留给最先出现的任务
-- 后续重复任务自动剔除重复文件
-
-这一步主要依赖：
-
-- `normalizePlannerTasks()`
-
-如果修复后得到一份稳定、唯一的任务列表：
-
-- 状态写成 `rules_repaired`
-- 继续往下走
-
----
-
-### 第 10 步：`单 Agent 降级`
-
-入口节点：
-
-- `singleAgentDegradeNode()`
-
-如果前面的：
-
-- Schema 校验
-- 文件唯一性检查
-- Retry Planner
-- 规则修复
-
-全都没法得到稳定可并发的任务列表，就会走这里。
-
-这里的思路很直接：
-
-- 既然并发拆分不稳定，那就不要再硬拆
-- 改成一个大任务，交给单 Agent 串行执行
-
-对应的核心函数是：
-
-- `buildSingleAgentFallbackPlan()`
-
-这样做的意义不是“最优”，而是“至少别卡死，流程要能继续跑完”。
-
----
-
-## 4. Structured Task List 为什么还要单独有个节点
-
-入口节点：
-
-- `structuredTaskListNode()`
-
-它做的事情不是重新规划，而是把 Planner 结果整理成更适合阅读和传递的摘要。
-
-里面会同时放：
-
-- Planner 当前状态
-- Planner 的说明信息
-- Planner 重试次数
-- 结构化 JSON
-- 可读版任务列表
-
-为什么不直接把 `plannerOutput` 原样往后传？
-
-因为后面有两类消费者：
-
-1. 机器节点
-2. 人类调试和日志查看
-
-JSON 适合机器，但不够适合人。
-
-所以这里相当于做了一份“中间讲义”。
-
----
-
-## 5. Modify A / B / C 是怎么并发工作的
-
-这是执行链路的核心。
-
-入口逻辑来自：
-
-- `createModifyAgentNode(slot)`
-
-最终导出成：
-
-- `modifyAgentANode`
-- `modifyAgentBNode`
-- `modifyAgentCNode`
-
-为什么用工厂函数？
-
-因为三路 Modify 的逻辑几乎完全一样，唯一差别只是：
-
-- 自己负责哪个槽位
-
-所以用工厂函数最省事，也最不容易改漏。
-
----
-
-### 每个 Modify 节点具体做什么
-
-单个 Modify 节点内部大致是这个过程：
-
-1. 先根据 `slot` 取出自己的任务
-2. 判断本轮是否需要执行
-3. 如果是 Reviewer 返工轮，检查自己是否在返工名单里
-4. 构造提示词，把任务、上下文、Reviewer 反馈都喂给模型
-5. 允许模型调用工具
-6. 循环执行“工具调用 -> 工具结果回喂模型”
-7. 直到模型给出最终中文总结
-8. 把结果收敛成 `ModifyTaskResult`
-
-它为什么不是“一次模型调用就结束”？
-
-因为真正做代码修改通常需要闭环：
-
-1. 先读文件
-2. 再搜索
-3. 再提议修改
-4. 看 diff
-5. 再 apply
-
-所以这里必须支持工具循环，而不是一次性回答。
-
----
-
-### Modify 用到了哪些关键工具函数
-
-#### `executeToolBatch()`
-
-它负责一批工具调用的调度。
-
-最关键的设计是：
-
-- 只读工具并行
-- 写入工具串行
-
-为什么？
-
-因为读操作彼此不冲突，但写操作如果并发，很容易互相覆盖。
-
-#### `proposeFileChange()`
-
-这一步不是直接改正式文件，而是先写一个：
-
-- `xxx.pending`
-
-目的就是先把修改提案暂存起来。
-
-#### `getDiff()`
-
-它会比较：
-
-- 正式文件
-- `.pending` 文件
-
-把差异整理出来，给模型和人看。
-
-#### `applyFileChange()`
-
-只有走到这里，修改才真正落盘。
-
-也就是说，这条链路的基本思路是：
+但凭证不会进入：
 
 ```text
-先提案 -> 看差异 -> 再正式应用
+AgentState
+LangGraph checkpoint
+SSE payload
+数据库会话内容
 ```
 
-这比模型直接覆盖文件安全得多。
+---
+
+## 5. 请求分类：先决定要不要启动重型工作流
+
+### `app/api/chat/agent/request-classifier.ts`
+
+系统使用确定性规则将请求分成四类。
+
+### 5.1 `workspace_info`
+
+只询问当前项目、根目录、文件夹名称或绑定信息，并且不询问项目内容。
+
+示例：
+
+```text
+当前绑定的是哪个项目？
+项目根目录是什么？
+```
+
+结果：本地直接回答，不调用模型和 Planner。
+
+### 5.2 `read_only`
+
+需要分析项目内容，但没有修改意图。
+
+示例：
+
+```text
+解释这套 Agent 的流转方式。
+搜索项目里和 interactiveRequest 有关的实现。
+```
+
+结果：Search、Memory、File 并行收集上下文，再由只读模型回答。
+
+### 5.3 `simple_edit`
+
+请求包含修改意图，并且只点名一个文档文件：
+
+```text
+.md .mdx .txt .rst .adoc
+```
+
+示例：
+
+```text
+重写 README.md，加入架构说明。
+```
+
+结果：跳过三路上下文 Agent 和两层 Planner，直接生成一个确定性任务。
+
+### 5.4 `code_change`
+
+其他需要修改的复杂任务。
+
+示例：
+
+```text
+重构 Code Agent 的合并策略并补充测试。
+```
+
+结果：进入完整多 Agent 工作流。
 
 ---
 
-## 6. 为什么 `Merge Patch` 现在只做汇总
+## 6. Request Router 不只是分类器
 
-入口节点：
+### `requestRouterNode()`
 
-- `mergePatchNode()`
+Router 是每轮图执行的重置入口。
 
-名字看起来像“自动合并补丁”，但当前实现其实不是。
+它会清空：
 
-它现在只做：
+- 上一轮的 Planner 输出；
+- Worker 结果；
+- Merge 结果；
+- Review 状态；
+- Verification；
+- Agent 生命周期；
+- 临时文件创建授权。
 
-1. 汇总 Planner 任务数组
-2. 汇总三路 Modify 的执行结果
+它还负责恢复缺失文件确认回复。
 
-然后生成：
+前端提交确认时，会发送类似：
 
-- `mergedPatchSummary`
+```text
+[INTERACTIVE_REPLY] id=... mode=user answer=create
+```
 
-为什么故意不做真正的 patch 自动合并？
+Router 不会把这段内部协议当成新的用户开发需求，而是：
 
-因为当前架构的前提是：
+1. 找回原始用户请求；
+2. 判断用户是否允许创建文件；
+3. 将文件加入 `approvedMissingFiles`；
+4. 用原始请求重新开始本轮图。
 
-- 尽量通过 Planner 文件唯一性检查，避免多 Agent 改同一个文件
-
-既然前面已经尽量避免同文件冲突，那这里就没必要再做一个复杂、脆弱的自动 patch merge 系统。
-
-所以当前 `Merge Patch` 更准确的理解是：
-
-- “修改结果汇总器”
-
-而不是：
-
-- “通用补丁合并器”
+如果用户取消，则生成 `directAnswer` 并结束，不修改项目。
 
 ---
 
-## 7. Reviewer 为什么是这套架构的关键
+## 7. Missing-file Guard
 
-入口节点：
+### `missingFileGuardNode()`
 
-- `reviewerAgentNode()`
+Guard 只检查“用户明确认为应当存在”的修改目标文件。
 
-它是整个执行阶段的质量闸门。
+它不会把所有提到的文件都当成修改目标。例如：
 
-它的职责不是亲自改代码，而是做判断：
+```text
+参考 package.json 修改 README.md
+```
 
-1. 当前结果能不能通过
-2. 哪些地方有问题
-3. 哪个任务需要返工
+应当只检查 `README.md`，而不是要求确认创建 `package.json`。
 
-它输入的关键信息包括：
+Guard 的处理：
 
-- 用户请求
-- Planner 任务数组
-- Modify 结果
-- Merge Patch 汇总
-- 当前文件快照
-- 当前 Review 轮次
+```text
+文件存在           → 继续
+用户已批准创建     → 继续
+文件缺失且未批准   → 生成 file_create_confirmation，暂停图
+非法/越界路径      → 不在 Guard 中写入，后续工具仍会做安全校验
+```
 
-然后它要求模型输出严格 JSON：
+授权只保存当前任务，防止用户在任务 A 允许创建文件后，任务 B 自动继承授权。
 
-```json
-{
-  "decision": "PASS",
-  "feedback": "说明",
-  "risks": [],
-  "retryTasks": [0]
+---
+
+## 8. Read-only 的三路上下文 Agent
+
+复杂修改和只读分析都会经过上下文收集。`context_fanout` 本身不做业务，只作为稳定的并行分发点。
+
+### 8.1 Search Agent
+
+实现：`searchAgentNode()`
+
+职责：广度定位。
+
+同时使用：
+
+- `searchProjectIndex(projectId, query)`：查询 SQLite 内容索引；
+- `searchCodebase()`：扫描磁盘代码库中的关键字。
+
+输出写入 `searchContext`。
+
+注意：索引结果只是候选，真正修改前仍必须读取磁盘文件，因为索引可能过期。
+
+### 8.2 Memory Agent
+
+实现：`memoryAgentNode()`
+
+职责：整理：
+
+- `state.summary` 中的长期摘要；
+- 最近 8 条会话消息。
+
+输出写入 `memoryContext`。
+
+### 8.3 File Agent
+
+实现：`fileAgentNode()`
+
+职责：
+
+- 从用户请求提取最多 5 个候选路径；
+- 目录返回直接子项；
+- 文件返回前 120 行预览；
+- 没有明确路径时返回项目根目录概览。
+
+输出写入 `fileContext`。
+
+### 8.4 Context Merge
+
+实现：`mergeContextNode()`
+
+将三路结果组合为：
+
+```text
+用户请求
+SearchAgent 结果
+MemoryAgent 结果
+FileAgent 结果
+```
+
+随后 `enrichContextNode()` 再加入当前项目 ID、文件夹名、根路径和路径有效性。
+
+---
+
+## 9. Hierarchical Planner：为什么要两层
+
+复杂代码任务先做模块级规划，再做文件级任务拆分。
+
+### 9.1 High-level Planner
+
+实现：`highLevelPlanningAgentNode()`
+
+输出结构 `HighLevelPlanItem[]`：
+
+```ts
+interface HighLevelPlanItem {
+  id: string;
+  objective: string;
+  scope: string[];
+  rationale: string;
+  dependencies: string[];
+  priority: "high" | "medium" | "low";
 }
 ```
 
----
+它只回答：
 
-### 为什么 Reviewer 只返工指定槽位
+- 有哪些模块级目标；
+- 每个目标覆盖什么范围；
+- 目标之间有什么依赖；
+- 为什么这样拆。
 
-这是这套架构里非常值钱的一个优化。
+如果解析失败，会生成一个保守 fallback 工作项，保证第二层仍有输入。
 
-如果不这么做，会发生什么？
+### 9.2 Task Planner
 
-假设：
+实现：`planningAgentNode()`
 
-- Task A 有问题
-- Task B 没问题
-- Task C 也没问题
+输出结构 `PlanTask[]`：
 
-如果 Reviewer 一打回就让 A/B/C 全部重跑：
-
-- 浪费模型调用
-- 浪费工具调用
-- 浪费本地命令执行
-- 还可能把原本没问题的结果跑坏
-
-所以现在的策略是：
-
-- Reviewer 输出 `retryTasks`
-- `Retry Dispatcher` 把返工槽位写回状态
-- 各个 Modify 节点自己判断本轮要不要跑
-
-例如：
-
-```json
-{
-  "decision": "RETRY",
-  "feedback": "Task A 修改不完整，测试文件遗漏",
-  "risks": ["登录逻辑没有覆盖异常分支"],
-  "retryTasks": [0]
+```ts
+interface PlanTask {
+  id: string;
+  parentId: string;
+  task: string;
+  files: string[];
+  reason: string;
+  acceptanceCriteria: string[];
+  priority: "high" | "medium" | "low";
 }
 ```
 
-那就只会重跑：
-
-- `Modify A`
-
-而不会动：
-
-- `Modify B`
-- `Modify C`
+第二层的目标是得到可以安全并发的叶子任务。
 
 ---
 
-### Reviewer 为什么还要限制最大返工轮次
+## 10. Planner 的校验、重试、修复和降级
 
-因为如果不限制，图可能会在：
+### 10.1 Schema Validation
 
-- `Modify -> Reviewer -> Retry -> Modify -> Reviewer`
+`plannerSchemaValidationNode()` 会：
 
-之间无限循环。
+- 从模型文本中提取 JSON 数组；
+- 验证每个字段；
+- 验证任务是否引用合法 High-level Plan；
+- 生成规范化 `plannerOutput`；
+- 设置 `requiresChanges`。
 
-所以这里加了：
+失败状态为 `schema_invalid`。
 
-- `MAX_REVIEW_RETRIES`
+### 10.2 File Uniqueness Check
 
-达到上限后，就算 Reviewer 还想打回，也会强制带着风险往后走，进入最终总结。
+`fileUniquenessCheckNode()` 阻止两个并行任务声明同一个文件。
 
-这是一种工程取舍：
+原因是：并行任务如果一开始就共享目标文件，通常说明任务拆分边界不清晰。
 
-- 不追求理论上无限修复
-- 优先保证整条链路能收束
+### 10.3 Retry Planner
 
----
+如果 Schema 或文件唯一性失败，最多先让 Planner 重新生成。
 
-## 8. `Retry Dispatcher` 真正在做什么
+`retryPlannerNode()` 只更新：
 
-入口节点：
+- `plannerRetryCount`；
+- `plannerRetryReason`。
 
-- `retryDispatchNode()`
+真正重新生成仍由 `planningAgentNode()` 完成。
 
-这个节点其实非常“轻”。
+### 10.4 Rules Repair
 
-它不负责修改代码，只负责记录：
+模型多次失败后，`rulesRepairNode()` 在程序层做任务规范化和去重。
 
-- 这一次到底哪些槽位要返工
+### 10.5 Single-agent Degrade
 
-真正决定跑不跑的是每个 Modify 节点自己：
+规则修复仍不稳定时，`singleAgentDegradeNode()` 将任务合并为单 Worker 串行执行。
 
-- 如果当前槽位在 `retryTaskSlots` 里，就执行
-- 如果不在，就直接沿用上一轮结果并标记为 `skipped`
-
-这个设计很好，因为它把：
-
-- 返工目标的决定权
-- 修改执行的实际控制
-
-拆开了。
-
-这样结构更清晰，也更容易调试。
+降级的目标不是保持最大并发，而是保证安全和可继续执行。
 
 ---
 
-## 9. 为什么还要跑 `Lint / Build / Test`
+## 11. Structured Task List
 
-入口节点：
+`structuredTaskListNode()` 不创建新任务，它把结构化计划整理成一份可读摘要，包括：
 
-- `lintBuildTestNode()`
+- Planner 状态；
+- 校验说明；
+- 重试次数；
+- High-level Plan JSON；
+- 叶子任务 JSON；
+- 人类可读任务列表。
 
-前面的 Reviewer 本质上还是模型审查。
-
-它能发现很多逻辑问题，但它不能替代真实工程验证。
-
-所以最后还要补一层“硬校验”：
-
-- `eslint`
-- `build`
-- `test`
-
-这里的策略是：
-
-1. 如果 touched 到了可 lint 的代码文件，就跑 lint
-2. 如果项目配置了 `build` 脚本，就跑 build
-3. 如果项目配置了 `test` 脚本，就跑 test
-
-这样做的意义很直接：
-
-- Reviewer 说“看起来没问题”
-- 工程验证说“实际上能不能过”
-
-只有两层都看过，结果才更可信。
+这份内容会进入 Shared Worker Memory 和 Final Report。
 
 ---
 
-## 10. Final Report 为什么单独做一个节点
+## 12. Dynamic Send Worker
 
-入口节点：
+### 12.1 如何创建 Worker
 
-- `finalReportNode()`
+`graph.ts` 中的 `dispatchInitialWorkers()` 会遍历 `plannerOutput`：
 
-这一步的作用是把前面所有结构化结果收束成一个适合人阅读的最终结论。
+```ts
+state.plannerOutput.map((task, slot) =>
+  new Send("modify_worker", buildWorkerInput(state, task, slot)),
+)
+```
 
-它会综合：
+因此 Worker 数量由 Planner 任务数量动态决定，不是固定 A/B/C 三个 Worker。
 
-- 用户请求
-- Planner 任务数组
-- Structured Task List
-- Modify 结果
-- Merge Patch 汇总
-- Reviewer 结果
-- Lint / Build / Test 输出
+### 12.2 Worker 输入
 
-然后让模型生成一段简洁中文 Markdown。
+`ModifyWorkerInput` 主要字段：
 
-为什么不在 `route.ts` 里自己字符串拼接就完了？
+```text
+workerId
+slot
+task
+sharedMemory
+previousMemory
+previousResult
+requestMode
+approvedMissingFiles
+model
+workingDir
+projectId
+reviewFeedback
+reviewIteration
+interactiveRequest
+```
 
-因为最终报告既要：
+### 12.3 Shared Memory 与 Worker Memory
 
-- 保留结构化事实
-- 又要对用户足够自然可读
+`SharedWorkerMemory` 是所有 Worker 可读但不可修改的主图信息：
 
-这时候模型来负责“表达整理”会更合适。
+- 最新用户请求；
+- 长期摘要；
+- 合并上下文；
+- Structured Task List 摘要；
+- High-level Plan 摘要。
 
-另外，这一步还会顺手更新：
+`WorkerMemory` 只属于一个 Worker 槽位：
 
-- `summary`
+- `summary`；
+- `completedActions`；
+- `pendingActions`；
+- `keyFiles`；
+- `recentObservations`；
+- 压缩次数与最后压缩轮次。
 
-也就是长期记忆摘要。
+当工具轮次达到 3 的倍数，或 Worker 上下文超过约 14,000 字符时，会尝试压缩 Worker Memory。压缩后只保留续跑所需信息，不影响其他 Worker。
 
-这样下一轮对话还能记住这次做了什么。
+### 12.4 最大工具轮次
+
+- `simple_edit`：最多 5 轮；
+- 普通 Worker：最多 10 轮。
+
+达到上限仍无法稳定完成时，Worker 返回 `failed`。
 
 ---
 
-## 11. `route.ts` 和 `graph.ts` 的分工
+## 13. Worker 可以调用哪些工具
 
-这一点很容易混。
+工具定义位于 `app/api/chat/tools.ts`。
 
-你可以这样记：
+### `search_project_index`
 
-### `graph.ts`
+查询已经建立的 SQLite 项目索引。只能用于定位候选文件，不能替代真实磁盘读取。
+
+### `list_directory`
+
+列出指定目录的直接子项，最多 40 个，不递归。
+
+### `search_codebase`
+
+递归搜索指定关键字，扫描有限文本后缀，跳过 `.git`、`node_modules`、`.next`、`dist`、`build`、`out`，最多返回 20 个文件路径。
+
+### `read_file_from_disk`
+
+完整读取一个 UTF-8 文本文件。修改现有文件前必须调用。
+
+### `propose_file_change`
+
+提交一个文件的完整最终内容。
+
+并发 Worker 模式下，它写入 Worker 的内存提案 Map，而不是正式文件。
+
+### `get_diff`
+
+查看正式文件与提案之间的简化逐行差异。
+
+### `apply_file_change`
+
+并发模式下只把提案标记为 `ready`，等待 Merge。
+
+### `run_terminal_command`
+
+普通串行工具支持命令执行和持久 PTY 交互。但在并发 Modify Worker 阶段被禁用，避免多个 Worker 同时改变工程环境。统一验证在 Merge 后执行。
+
+### `get_local_time`
+
+返回按 `Asia/Shanghai` 格式化的服务端当前时间，不代表用户设备时区。
+
+---
+
+## 14. Worker 的结果状态
+
+`ModifyTaskResult.status` 可能是：
+
+| 状态 | 含义 |
+|---|---|
+| `pending` | 尚未完成 |
+| `done` | 已生成完整、ready 的文件提案 |
+| `satisfied` | 返工时确认上一轮目标已经满足，无需重复修改 |
+| `skipped` | 当前任务被跳过 |
+| `blocked` | 等待交互式终端输入 |
+| `failed` | 没有安全可合并的结果 |
+
+没有提案且不是 `satisfied` 时，Worker 不会被当作成功。
+
+---
+
+## 15. Merge Agent 的真实行为
+
+### `mergePatchNode()`
+
+Merge Agent 是唯一统一写入正式工作区的节点。
+
+处理过程：
+
+```text
+收集全部 ready 文件提案
+  ↓
+按文件路径分组
+  ↓
+处理相同文件的多个提案
+  ↓
+检查正式文件是否在 Worker 执行期间变化
+  ↓
+检测 Worker 失败与冲突
+  ↓
+统一写入
+  ↓
+写入失败则回滚
+```
+
+### 15.1 相同提案去重
+
+多个 Worker 对同一文件给出相同 `proposedContentHash` 时，只保留一份，并标记：
+
+```text
+mergeStrategy = identical_deduplicated
+```
+
+### 15.2 三方合并
+
+如果多个提案：
+
+- 基于相同 `baseContentHash`；
+- 修改的是不重叠的连续行区间；
+
+系统会尝试生成一个合并后的完整内容，并标记：
+
+```text
+mergeStrategy = three_way_disjoint
+```
+
+### 15.3 Workspace Changed
+
+Merge 会重新读取正式文件并计算 Hash。
+
+```text
+当前 Hash == 提案目标 Hash  → alreadyApplied
+当前 Hash == Worker 基线 Hash → 可以写入
+其他情况                     → workspace_changed 冲突
+```
+
+这样可以避免覆盖 Worker 执行期间由用户或其他进程产生的新修改。
+
+### 15.4 写入回滚
+
+写入前会记录：
+
+- 文件是否原本存在；
+- 原始内容；
+- 安全绝对路径。
+
+如果中途写入失败，会反向恢复已写文件；新建文件则尝试删除。
+
+### 15.5 Merge 状态
+
+```text
+pending
+success
+conflict
+blocked
+failed
+```
+
+`conflict` 或 `failed` 时 Verification 不会在不确定工作区上继续运行。
+
+---
+
+## 16. Verification Agent
+
+### `lintBuildTestNode()`
+
+Verification 是真实命令校验，不是模型主观判断。
+
+### 16.1 Document Profile
+
+如果 touched files 全是：
+
+```text
+.md .mdx .txt .rst .adoc
+```
+
+只检查文件是否存在，不运行 lint/build/test。
+
+这避免项目原有构建错误让 README 修改被误判失败。
+
+### 16.2 Targeted Profile
+
+如果 touched files 全是：
+
+```text
+.ts .tsx .js .jsx
+```
+
+会对变更文件运行 ESLint，并运行 `package.json` 中存在的 build/test 脚本。
+
+### 16.3 Full Profile
+
+混合文件或其他类型使用 full profile，运行可用工程脚本。
+
+### 16.4 包管理器识别
+
+优先级：
+
+```text
+pnpm-lock.yaml → pnpm
+bun.lock/bun.lockb → bun
+yarn.lock → yarn
+其他 → npm
+```
+
+---
+
+## 17. Reviewer Agent 与定向返工
+
+### `reviewerAgentNode()`
+
+Reviewer 输入包括：
+
+- 用户请求；
+- High-level Plan；
+- Planner 任务；
+- Worker 结果；
+- Merge Summary；
+- Verification Result；
+- 当前 Review 轮次；
+- 当前文件快照。
+
+输出：
+
+```ts
+interface ReviewPayload {
+  decision: "PASS" | "RETRY" | "FAIL";
+  feedback: string;
+  risks: string[];
+  retryTasks: number[];
+}
+```
+
+### PASS
+
+进入 Final Report。
+
+### FAIL
+
+不再自动修改，进入 Final Report，明确报告失败和风险。
+
+### RETRY
+
+`retryTasks` 是 Worker 槽位编号。`retryDispatchNode()` 将槽位写入 `retryTaskSlots`，`dispatchRetryWorkers()` 只为这些槽位创建新的 `Send`。
+
+返工 Worker 会继承：
+
+- 上一轮 Worker Memory；
+- 上一轮同槽位结果；
+- Reviewer feedback；
+- 当前 review iteration。
+
+当前最多两轮返工。超过后自动流程不会继续无限循环。
+
+---
+
+## 18. Final Report Agent
+
+### `finalReportNode()`
+
+Final Report 会汇总：
+
+- 原始用户请求；
+- High-level Plan；
+- Planner 任务；
+- Structured Task List；
+- Worker 结果；
+- Merge 结果；
+- Reviewer 结果；
+- Agent 生命周期；
+- 挂起交互；
+- Verification；
+- 校验输出。
+
+生成 `finalReportSummary`，并通过 `appendSummary()` 写回长期摘要。
+
+随后 Route 的 `streamFinalAnswer()` 会将最终结果继续组织成用户可读回答。
+
+---
+
+## 19. Agent Lifecycle
+
+后端生命周期角色：
+
+```text
+router
+search_agent
+memory_agent
+file_agent
+context_merge
+high_level_planner
+task_planner
+modify_worker
+merge_agent
+reviewer_agent
+verification_agent
+final_report_agent
+```
+
+状态：
+
+```text
+CREATED
+PLANNING
+EXECUTING
+WAITING_TOOL
+COMPRESSING
+READY_TO_MERGE
+MERGING
+REVIEWING
+VERIFYING
+BLOCKED
+COMPLETED
+FAILED
+```
+
+每个事件包含：
+
+- `agentId`；
+- `role`；
+- `status`；
+- `previousStatus`；
+- `slot`；
+- `iteration`；
+- `sequence`；
+- `detail`；
+- `toolName`；
+- `createdAt`。
+
+`AgentState` 同时保存：
+
+- `agentLifecycles`：最新快照，适合 UI 快速展示；
+- `agentLifecycleEvents`：完整时间线，适合审计。
+
+`run-agent-graph.ts` 将 custom stream 中的生命周期事件转换成 `AGENT_LIFECYCLE` 和可读 `STATUS` SSE。
+
+---
+
+## 20. State 设计
+
+### 主图 State
+
+`AgentState` 保存：
+
+- 主线程消息；
+- 当前请求与请求模式；
+- 三路上下文与 merged context；
+- 两层 Planner；
+- Worker 聚合结果；
+- Merge、Verification、Review、Final Report；
+- 交互请求与文件创建授权；
+- Agent 生命周期；
+- 工作区、项目 ID 和 Token 用量。
+
+### Reducer 设计
+
+并行字段不能简单覆盖：
+
+- `modifyResults` 按 `slot` 合并；
+- `agentLifecycles` 按更新时间选择较新快照；
+- `agentLifecycleEvents` 按事件 ID 去重并按时间排序；
+- `tokenUsage` 累加。
+
+### Worker State
+
+`ModifyWorkerState` 没有主线程 `messages`，只包含该 Worker 的隔离输入与输出通道。
+
+这是避免跨 Worker ToolMessage 污染的关键。
+
+---
+
+## 21. Checkpointer 与持久化
+
+### LangGraph Checkpoint
+
+`app/api/chat/agent/checkpointer.ts` 使用自定义 `NodeSqliteSaver`，数据库：
+
+```text
+AGENT_DATA_DIR/langgraph-checkpoints.sqlite
+```
+
+保存：
+
+- checkpoint；
+- metadata；
+- parent checkpoint；
+- pending writes；
+- pending sends。
+
+### Workspace 数据库
+
+`app/lib/server/workspace-store.ts` 使用：
+
+```text
+AGENT_DATA_DIR/agent-workspace.sqlite
+```
+
+主要表：
+
+```text
+projects
+sessions
+project_memory
+file_index
+symbol_index
+code_content
+```
+
+开启：
+
+```text
+PRAGMA journal_mode = WAL
+PRAGMA foreign_keys = ON
+```
+
+### 项目索引
+
+索引规则：
+
+- 跳过 `.git`、`.next`、`node_modules`、`dist`、`build`、`out`、`coverage` 等；
+- 最多 6,000 个文件；
+- 单文件最大 512 KiB；
+- 支持常见 JS/TS、JSON、CSS、HTML、Markdown、YAML、SQL、Python、Go、Java、Rust、Vue 等；
+- 提取简单的 function/class/interface/type/enum/const 符号。
+
+当前内容搜索使用可移植的 `LIKE` 查询，而不是依赖 FTS5。
+
+---
+
+## 22. QA Agent 源码流转
+
+### `app/api/qa/route.ts`
+
+流程：
+
+```text
+前端消息 + 最新用户图片附件
+  ↓
+构造 Provider 无关 LlmMessage
+  ↓
+streamWithLlm(task = chat)
+  ↓
+模型路由与 Provider fallback
+  ↓
+TEXT / USAGE SSE
+```
+
+QA 不使用 Code Graph，也不读取本地项目。
+
+---
+
+## 23. Media Agent 源码流转
+
+### 入口
+
+`app/api/media/generate/route.ts`
 
 负责：
 
-- 工作流怎么跑
-- 节点怎么连
-- 分支怎么走
-- 哪些节点会回环
+- 校验 mode、modelId、prompt；
+- 归一化附件；
+- 校验图片/视频 MIME；
+- 校验大小：
+  - 图片编辑 10 MiB；
+  - 图生视频/参考图生视频 20 MiB；
+  - 视频编辑 100 MiB；
+- 读取 Qwen 凭证；
+- 调用 `generateMedia()`。
 
-它关注的是：
+### 模型注册表
 
-- “内部状态机”
+`app/lib/media/catalog.ts` 将 UI Model ID 映射为：
 
-### `route.ts`
+- Provider；
+- 真实模型 ID；
+- 支持 modes；
+- 输出类型；
+- 协议。
 
-负责：
+图片同步协议和视频异步协议分开处理。
 
-- 前端请求怎么进来
-- graph 怎么启动
-- SSE 状态怎么推给前端
-- 图跑完以后最终文本怎么返回
+### 图片编辑保护
 
-它关注的是：
+`app/lib/media/edit-policy.ts` 会根据用户 Prompt 推断：
 
-- “对外接口和交互体验”
+- 文字修改；
+- 局部编辑；
+- 背景编辑；
+- 风格迁移；
+- 结构化图片。
 
-所以：
+再根据 fidelity 和 typography policy 生成保留规则、负向要求和文字约束。
 
-- 业务决策看 `graph.ts` 和 `workflow-nodes.ts`
-- 前端为什么看到这些状态，看 `route.ts`
+`app/lib/media/edit-quality.ts` 可以使用视觉模型判断结果是否：
 
----
-
-## 12. SQLite 持久化在这套架构里的意义
-
-入口文件：
-
-- `app/api/chat/agent/checkpointer.ts`
-
-这里的关键不是“用了 SQLite”这四个字，而是它解决了什么问题。
-
-它解决的是：
-
-1. 图状态不要只放内存
-2. 同一个 `thread_id` 下次还能继续接着跑
-3. 服务重启后状态尽量不要丢
-
-所以你可以把它理解成：
-
-- 这是 LangGraph 层面的会话状态持久化
-
-它和你原来存聊天内容的 SQLite 是同类问题，但不是同一层职责。
-
-一个更偏：
-
-- 聊天记录 / 工作区数据存储
-
-另一个更偏：
-
-- 状态图执行状态存储
+- 保留主体；
+- 出现重复或重影；
+- 误改未要求区域；
+- 文字严重异常；
+- 值得自动重试。
 
 ---
 
-## 13. 以后如果你要继续改，应该从哪里下手
+## 24. Commerce Agent 源码流转
 
-下面按“想改什么”给一个最快入口。
+### `app/api/commerce/research/route.ts`
 
-### 想改任务拆分格式
+大致阶段：
 
-先看：
+```text
+intent/category
+  ↓
+collect
+  ↓
+normalize
+  ↓
+analyze
+  ↓
+strategy
+  ↓
+report
+```
 
-- `types.ts`
-- `planningAgentNode()`
-- `parsePlannerPayloadWithSchema()`
+### 数据源编排
 
----
+`collectMultiSourceMarketData()`：
 
-### 想改 Planner 的校验规则
+- 并行尝试可用 Provider；
+- 为每个来源生成状态、质量、样本量、覆盖范围和警告；
+- 合并商品信号；
+- 合并观察结果；
+- 根据真实来源可用程度决定运行模式。
 
-先看：
+### Demo 防误用
 
-- `plannerPayloadSchema`
-- `plannerSchemaValidationNode()`
-- `fileUniquenessCheckNode()`
-- `rulesRepairNode()`
+Demo 模式：
 
----
+- 使用明确标记的模拟样本；
+- 不运行月销量等启发式真实估算；
+- 不调用 LLM 生成真实商业策略；
+- 报告明确声明不能作为商业决策事实。
 
-### 想改并发 Modify 的行为
+### 报告
 
-先看：
+最终发送：
 
-- `createModifyAgentNode()`
-- `executeToolBatch()`
-- `executeSingleTool()`
+- `COMMERCE_REPORT`：结构化对象；
+- `TEXT`：人类可读报告；
+- `COMMERCE_PROGRESS`：阶段进度；
+- `USAGE`：LLM Token。
 
----
-
-### 想改 Reviewer 的返工策略
-
-先看：
-
-- `ReviewPayload`
-- `safeParseReviewPayload()`
-- `reviewerAgentNode()`
-- `retryDispatchNode()`
-- `resolveRetryTaskSlots()`
-
----
-
-### 想改最终前端状态提示
-
-先看：
-
-- `app/api/chat/route.ts`
+Electron preload 暴露 `exportCommerceReportPdf()`，主进程将 HTML 打印为 PDF。
 
 ---
 
-### 想改状态持久化
+## 25. 前端如何展示多个 Agent
 
-先看：
+### `useAgentCoordinator.ts`
 
-- `checkpointer.ts`
-- `graph.ts`
+它接收：
+
+- LangGraph `AGENT_LIFECYCLE`；
+- 工具状态；
+- Commerce progress；
+- Media workflow state；
+- 旧版 `AGENT_*` 事件。
+
+后端角色会映射为前端角色，例如：
+
+```text
+search_agent / memory_agent / file_agent → researcher
+high_level_planner / task_planner         → planner
+modify_worker                             → coder
+merge_agent / final_report_agent          → orchestrator
+reviewer_agent                            → reviewer
+verification_agent                        → terminal
+```
+
+前端面板是聚合视图，不代表后端只存在这些固定 Agent。
+
+### `TaskPlanningPanel.tsx`
+
+根据 workflow mode 展示：
+
+- Code 规划阶段；
+- QA 流式阶段；
+- Commerce 阶段；
+- Agent 状态；
+- 工具活动；
+- 生命周期事件；
+- 交互请求。
 
 ---
 
-## 14. 这套架构当前最核心的设计思想
+## 26. 插件系统
 
-如果你以后把很多细节忘了，只记下面这 6 句话就够了：
+内置插件注册表：`app/lib/plugins/registry.ts`
 
-1. 先收集上下文，再规划，不要一上来就改文件。
-2. Planner 的输出不能直接信，必须先做结构化校验。
-3. 并发 Modify 的前提是任务文件尽量互斥。
-4. Merge Patch 现在只是汇总器，不是真正的自动补丁合并器。
-5. Reviewer 负责局部返工，不要让所有 Modify 白跑。
-6. 最后必须补一层真实工程校验，再出 Final Report。
+当前插件：
+
+```text
+code-agent
+commerce-research
+```
+
+QA 是核心能力，不进入插件系统。
+
+插件注册表只保存轻量元数据，不 import Agent 实现，避免核心首屏同步打包重型代码。
 
 ---
 
-## 15. 建议你的复习顺序
+## 27. 修改不同功能时应从哪里下手
 
-如果你下次只想花 10 分钟复习，可以这么做：
+### 修改请求分类
 
-1. 先看 `graph.ts`
-2. 再看 `state.ts`
-3. 再看 `planningAgentNode()`
-4. 再看 `plannerSchemaValidationNode()` 和 `fileUniquenessCheckNode()`
-5. 再看 `createModifyAgentNode()`
-6. 再看 `reviewerAgentNode()`
-7. 最后看 `lintBuildTestNode()` 和 `finalReportNode()`
+```text
+app/api/chat/agent/request-classifier.ts
+app/api/chat/agent/request-routing-nodes.ts
+app/api/chat/agent/graph.ts
+```
 
-如果你按这个顺序走一遍，基本就能重新把整条链路在脑子里搭起来。
+### 修改 Planner 输出格式
+
+```text
+app/api/chat/agent/types.ts
+app/api/chat/agent/workflow-nodes.ts
+app/lib/llm/prompts/registry.ts
+app/api/chat/agent/state.ts
+```
+
+### 修改 Worker 工具
+
+```text
+app/api/chat/tools.ts
+app/api/chat/agent/workflow-nodes.ts
+```
+
+同时检查：
+
+- 工具定义与执行器是否一致；
+- 路径安全；
+- 并行模式是否允许；
+- Tool Status 是否能在 UI 展示。
+
+### 修改 Merge 算法
+
+```text
+resolveSameFileGroups()
+tryThreeWayMergeChanges()
+detectWorkspaceConflicts()
+applyMergedChanges()
+mergeParallelWorkerResults()
+```
+
+都在 `workflow-nodes.ts`。
+
+### 修改 Reviewer 返工
+
+```text
+reviewerAgentNode()
+retryDispatchNode()
+dispatchRetryWorkers()
+MAX_REVIEW_RETRIES
+```
+
+### 修改验证策略
+
+```text
+resolveVerificationProfile()
+detectProjectPackageManager()
+lintBuildTestNode()
+```
+
+### 修改生命周期展示
+
+后端：
+
+```text
+workflow-nodes.ts
+run-agent-graph.ts
+graph-status.ts
+```
+
+前端：
+
+```text
+useAgentCoordinator.ts
+useChatStream.ts
+AgentPanel.tsx
+TaskPlanningPanel.tsx
+```
+
+### 修改 LLM Provider
+
+```text
+app/lib/llm/registry/providers.ts
+app/lib/llm/registry/models.ts
+app/lib/llm/provider-factory.ts
+app/lib/llm/providers/
+app/lib/llm/router/
+```
+
+### 修改 Media
+
+```text
+app/lib/media/catalog.ts
+app/lib/media/dashscope.ts
+app/lib/media/edit-policy.ts
+app/lib/media/edit-quality.ts
+app/api/media/generate/route.ts
+```
+
+### 修改 Commerce
+
+```text
+app/api/commerce/research/route.ts
+app/lib/commerce/orchestrator/
+app/lib/commerce/providers/
+app/lib/commerce/analytics.ts
+app/lib/commerce/types.ts
+```
+
+---
+
+## 28. 当前源码中需要特别注意的事实
+
+1. `workflow-nodes.ts` 仍保留一个旧 `routerNode()` 导出，但当前 `graph.ts` 实际使用的是 `request-routing-nodes.ts` 中的 `requestRouterNode()`。
+2. `app/api/agent/route.ts` 是一个独立的简单 Gemini 示例接口，不是主 Code Agent 入口。
+3. 文档中的项目名已统一为 **Multi-agent**，但源码里仍存在 `Agent Workspace`、`MyApp` 等旧品牌字段。
+4. `electron-builder.yml` 的 Product Name、App ID、快捷方式等仍需要正式重命名。
+5. 打包脚本可以复制 `.env.local` 到 Electron standalone 资源，正式分发前必须评估密钥暴露风险。
+6. 当前项目索引是文本 LIKE 搜索，不是向量语义索引；README 中不要误写成已经实现了向量数据库。
+7. `searchCodebase()` 返回候选文件路径，不返回完整命中行；Worker 仍需 `read_file_from_disk`。
+8. 并发 Worker 阶段禁止终端命令，工程验证统一在 Merge 后执行。
+
+---
+
+## 29. 最后用一段话理解这套架构
+
+Multi-agent 的 Code Agent 不是让多个模型同时随意修改同一个目录，而是：
+
+```text
+Router 先缩小流程
+→ 三个上下文 Agent 并行建立事实基础
+→ 两层 Planner 拆出边界清晰的叶子任务
+→ Dynamic Send 为每个任务创建隔离 Worker
+→ Worker 只提交完整文件提案
+→ Merge 统一解决相同文件、过期基线和写入一致性
+→ Verification 用真实命令检查
+→ Reviewer 只返工有问题的槽位
+→ Final Report 汇总交付
+```
+
+真正的核心不是“Agent 数量多”，而是 **状态隔离、文件写入收口、可验证的交接协议和有限返工循环**。

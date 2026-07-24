@@ -1,399 +1,876 @@
-# AGENTS.md
-本文件是本仓库内所有 AI 编程 Agent 的统一工作说明，目标是让新来的 Agent 能在尽量少的上下文里理解：项目是什么、关键数据流在哪、该改哪里、哪些地方不能乱动。
+# AGENTS.md — Multi-agent 开发与协作规范
 
-> 安全提示：仓库根目录存在 `.env.local` 且包含真实密钥。本文档只描述“变量名与用途”，不记录任何真实值；如需分享仓库或开源，请先移除/轮换这些密钥并确认 `.gitignore` 策略。
+本文件面向：
 
----
+- 在本仓库中工作的编码 Agent；
+- 人类贡献者；
+- 自动化代码审查工具；
+- 需要新增或修改 Agent 工作流的开发者。
 
-# 项目概述
-- 项目形态：同一套代码同时支持 **Next.js Web 应用** 与 **Electron 桌面应用**。
-- 核心问题：提供一个“带工作区与项目索引”的 AI 对话/代码修改工作台。
-  - `qa` 模式：更像普通聊天，直接走 `/api/qa`。
-  - `code` 模式：走 `/api/chat`，后端用 LangGraph 编排多角色工作流，能读文件、检索索引、提出修改并应用补丁，还能执行终端命令（含交互式命令的持续会话）。
-- Web / Electron / Agent / 索引关系：
-  - Web（Next.js）负责 UI、对话记录、工作区管理、API 路由与 SSE 流式渲染。
-  - Electron 主进程负责：启动/托管 Next.js 服务、窗口与原生能力（主题同步、文件夹选择）、以及将 `.env.local` 中的关键变量注入给 Next.js 子进程。
-  - Code Agent 工作在 `/api/chat` 的 LangGraph 工作流中；它读取“真实磁盘源码”，索引仅用于加速候选定位。
-  - 本地索引与会话数据使用 SQLite（Node 内置 `node:sqlite`）落盘。
+所有修改都应以当前源码为准。先阅读 [AGENT_SOURCE_GUIDE.md](./AGENT_SOURCE_GUIDE.md)，再开始改动。
 
 ---
 
-# 技术栈
-来自 [package.json](file:///d:/next-agent/my-app/package.json) / [tsconfig.json](file:///d:/next-agent/my-app/tsconfig.json) / [next.config.ts](file:///d:/next-agent/my-app/next.config.ts) / [electron-builder.yml](file:///d:/next-agent/my-app/electron-builder.yml)。
+# 1. 项目目标
 
-- 框架：Next.js 16（App Router，`output: "standalone"`）
-- UI：React 19
-- 语言：TypeScript 6（`strict: true`，`noEmit: true`）
-- 样式：Tailwind CSS 4 + PostCSS
-- 桌面端：Electron 43（主进程 TS -> esbuild 输出到 `.electron/`），打包用 electron-builder
-- 多 Agent/LLM 编排：`@langchain/langgraph` + `@langchain/core`
-- 模型/SDK：
-  - DashScope（千问）：后端直接以 HTTP 调用（Key 通过 header 或 env 注入）
-  - Gemini：`@google/genai` + 自建 SSE 桥接
-- 数据存储：SQLite（Node 内置 `node:sqlite`，非 `better-sqlite3`）
-- 观测：Sentry for Next.js（含 `tunnelRoute: "/monitoring"`）
+Multi-agent 是一个本地优先的 Electron AI 工作台，包含四条主要能力链路：
+
+1. QA Agent：通用流式问答与图片理解；
+2. Code Agent：本地项目检索、规划、并行修改、合并、验证和审查；
+3. Media Agent：图片/视频生成与编辑；
+4. Commerce Agent：跨境市场情报研究与报告。
+
+贡献原则：
+
+- 保持工作流隔离；
+- 保持本地文件安全；
+- 保持 Agent 状态可观测；
+- 保持模型 Provider 可替换；
+- 保持降级路径可用；
+- 不把 UI 动画当作真实后端执行状态。
 
 ---
 
-# 项目目录
-核心目录树（省略 `node_modules/`、`.next/`、`out/`、`out-server/`、`.electron/` 等生成目录）：
+# 2. 项目命名
+
+对外项目名统一使用：
 
 ```text
-.
-├─ app/
-│  ├─ api/                          # Next.js Route Handlers（服务端）
-│  │  ├─ chat/                      # code 模式：LangGraph 多 Agent + SSE
-│  │  │  └─ agent/                  # 工作流核心（state/graph/nodes/checkpointer）
-│  │  ├─ qa/                        # qa 模式：直接流式转发千问
-│  │  ├─ workspace/                 # Projects/Sessions CRUD（SQLite）
-│  │  ├─ projects/[projectId]/index/# 构建项目索引（SQLite）
-│  │  ├─ geminiChat/                # Gemini SSE 桥接
-│  │  ├─ config/                    # 返回 hasDefaultKey
-│  │  └─ agent/                     # Gemini 单次示例 API（非 LangGraph）
-│  ├─ component/                    # UI 组件（Client Components）
-│  ├─ hooks/                        # 前端状态与 SSE 消费
-│  ├─ lib/server/                   # 仅服务端：workspace-store（SQLite + fs）
-│  ├─ const/                        # 主题与模型列表等常量
-│  ├─ utils/                        # 工具函数（日期、文件解析、Agent 运行态映射）
-│  └─ types/                        # 前端共享类型（SSE packet 等）
-├─ electron/                        # Electron 主进程 & preload（TypeScript 源码）
-├─ scripts/                         # Electron 打包流水线（tsx 执行）
-├─ public/                          # 静态资源（含 icon.png / icon.ico）
-├─ electron-builder.yml             # electron-builder 打包配置
-├─ next.config.ts                   # Next.js 配置（standalone + sentry）
-├─ eslint.config.mjs                # ESLint Flat Config
-├─ tailwind.config.ts               # Tailwind 配置
-└─ AGENT_SOURCE_GUIDE.md            # 现有源码导读（更偏“学习/复习”）
+Multi-agent
+```
+
+新增文档、页面标题、报告、打包配置时不要继续引入：
+
+```text
+Agent Workspace
+MyApp
+白雪条 Agent Runtime
+```
+
+当前旧名称仍存在于部分源码中，重命名时应统一检查：
+
+```text
+package.json
+package lock name
+package.json build.productName / appId
+electron-builder.yml
+Electron window/title bar text
+ChatSidebar.tsx
+CustomTitleBar.tsx
+Commerce report footer
+installer shortcut/artifact names
+README and auxiliary documents
+```
+
+重命名 App ID 或数据库文件名可能影响升级兼容，不能未经说明直接改变用户数据路径。
+
+---
+
+# 3. 技术栈与边界
+
+## 3.1 核心技术
+
+- Electron 43
+- Next.js 16
+- React 19
+- TypeScript 6
+- Tailwind CSS 4
+- LangGraph 1.x
+- LangChain Core 1.x
+- `node:sqlite`
+- Sentry
+
+## 3.2 Client / Server 边界
+
+以下内容只能在服务端或 Electron 主进程使用：
+
+- `fs`、`path`、`node:sqlite`；
+- API Key 与 Service Credential；
+- 本地项目绝对路径；
+- 文件修改与终端命令；
+- LangGraph Checkpointer；
+- Commerce Provider Secret；
+- PDF 导出底层能力。
+
+前端组件不得直接 import 服务端模块。
+
+## 3.3 工作流边界
+
+- QA 不得无条件 import Code Agent Graph。
+- Media 不得通过 `/api/qa` 或 `/api/chat` 伪装成文本模型调用。
+- Commerce 不得把模拟数据当真实市场结论。
+- Code Agent 不得在普通 QA 会话中自动读取本地项目。
+
+---
+
+# 4. 主要目录职责
+
+```text
+app/api/qa/                    QA API
+app/api/chat/                  Code Agent API 与 LangGraph
+app/api/media/                 Media API
+app/api/commerce/              Commerce API
+app/api/workspace/             项目和会话持久化
+app/component/                 UI 组件
+app/hooks/                     前端状态控制
+app/lib/llm/                   LLM Provider、模型路由、Prompt
+app/lib/media/                 媒体模型和策略
+app/lib/commerce/              数据源、指标、报告
+app/lib/server/                Workspace Store 和路径校验
+electron/                      Electron 主进程与 preload
+scripts/                       构建工具
+```
+
+不要把跨层逻辑塞回 `app/page.tsx`。页面入口应以组合 Hooks 和 Components 为主。
+
+---
+
+# 5. Code Agent 的 Agent 清单
+
+后端真实角色：
+
+| Role | 责任 |
+|---|---|
+| `router` | 请求重置、交互恢复和流程分流 |
+| `search_agent` | 项目索引与代码库候选定位 |
+| `memory_agent` | 长期摘要与近期对话整理 |
+| `file_agent` | 指定文件/目录预读 |
+| `context_merge` | 三路上下文合并 |
+| `high_level_planner` | 模块级目标和依赖规划 |
+| `task_planner` | 文件级叶子任务拆分 |
+| `modify_worker` | 隔离执行单个任务并生成文件提案 |
+| `merge_agent` | 合并、冲突检测、统一写入、回滚 |
+| `verification_agent` | 真实 lint/build/test 或文档落盘验证 |
+| `reviewer_agent` | PASS、RETRY、FAIL 决策 |
+| `final_report_agent` | 汇总最终交付 |
+
+控制节点包括：
+
+```text
+missing_file_guard
+simple_edit_planning
+context_fanout
+enrich_context
+planner_schema_validation
+file_uniqueness_check
+retry_planner
+rules_repair
+single_agent_degrade
+structured_task_list
+retry_dispatch
+```
+
+控制节点不是都需要模型。能确定性完成的逻辑优先用代码，不要增加无意义 LLM 调用。
+
+---
+
+# 6. Agent 流转协议
+
+## 6.1 主流程
+
+```text
+Router
+├─ direct answer → End
+├─ workspace_info → Workspace Answer → End
+├─ read_only → Search + Memory + File → Merge Context → Read-only Answer → End
+├─ simple_edit → Missing-file Guard → Deterministic Plan → Worker
+└─ code_change → Missing-file Guard → Context Agents → Hierarchical Planner → Workers
+
+Workers → Merge → Verification → Reviewer
+Reviewer PASS/FAIL → Final Report
+Reviewer RETRY → Retry Dispatcher → Selected Workers → Merge → Verification → Reviewer
+```
+
+## 6.2 上下文交接
+
+Search、Memory、File 只能写各自字段：
+
+```text
+searchContext
+memoryContext
+fileContext
+```
+
+Context Merge 负责生成 `mergedContext`。不要让其中一个上下文 Agent 直接覆盖其他 Agent 的结果。
+
+## 6.3 Planner 交接
+
+High-level Planner 输出 `HighLevelPlanPayload`。
+
+Task Planner 输出 `PlannerPayload`。
+
+任何新增字段都必须同步更新：
+
+```text
+types.ts
+state.ts
+parser/schema validation
+prompt registry
+structured summary
+final report
+frontend types（如果展示）
+```
+
+## 6.4 Worker 交接
+
+Worker 只通过以下聚合通道返回：
+
+```text
+modifyResults
+agentLifecycles
+agentLifecycleEvents
+tokenUsage
+```
+
+禁止向主图 `messages` 写入 Worker 的内部 AI/Tool 消息。
+
+## 6.5 Merge 交接
+
+Worker 的文件结果必须是完整 `WorkerFileChange`，至少包含：
+
+```text
+filePath
+baseContent
+baseContentHash
+proposedContent
+proposedContentHash
+ready
+sourceWorkerIds
+sourceSlots
+mergeStrategy
+```
+
+Merge 成功后才更新正式 `touchedFiles`。
+
+## 6.6 Reviewer 交接
+
+Reviewer 必须返回结构化：
+
+```json
+{
+  "decision": "PASS | RETRY | FAIL",
+  "feedback": "...",
+  "risks": [],
+  "retryTasks": []
+}
+```
+
+`retryTasks` 是 0-based Worker 槽位，不是任务 ID、文件名或 Agent ID。
+
+---
+
+# 7. 修改文件的强制安全流程
+
+编码 Agent 修改项目文件时必须遵守：
+
+```text
+定位文件
+→ 读取完整真实内容
+→ 生成完整最终内容
+→ 查看差异
+→ 标记提案 ready
+→ Merge 统一落盘
+→ 验证
+→ Review
+```
+
+禁止：
+
+- 根据文件名猜测内容；
+- 只读取片段后覆盖完整文件；
+- 在 `fileContent` 中写“其余不变”；
+- 传入 Markdown 代码围栏作为文件内容；
+- Worker 直接 `fs.writeFileSync()` 正式文件；
+- 绕过 Merge 修改并发 Worker 文件；
+- 未经用户确认创建一个被明确描述为“已有文件”的缺失目标；
+- 使用绝对路径或 `../` 越出工作区。
+
+新增文件工具时必须复用或等价实现 `getSafePath()` / Workspace Path 校验。
+
+---
+
+# 8. 并发 Worker 规范
+
+## 8.1 任务边界
+
+Planner 应尽量保证不同 Worker 的 `files` 不重复。
+
+同文件多个提案只应作为异常容错，不应成为常态设计。
+
+## 8.2 隔离
+
+每个 Worker：
+
+- 有独立 runtime messages；
+- 有独立 proposals Map；
+- 有独立 Worker Memory；
+- 只读取 Shared Memory；
+- 不读取其他 Worker 的内部消息；
+- 不执行终端命令。
+
+## 8.3 上下文压缩
+
+不要移除 Worker Memory 压缩而不提供替代方案。长工具链如果一直保留完整消息，会导致：
+
+- Token 暴涨；
+- Provider 上下文限制；
+- 返工难以延续；
+- 多 Worker 成本失控。
+
+压缩结果必须保留：
+
+```text
+已完成动作
+待办动作
+关键文件
+最近观察
+当前任务目标
+```
+
+## 8.4 Worker 结果
+
+Worker 只有在以下条件之一满足时才能结束为成功：
+
+- 至少一个文件提案已经 ready；
+- Reviewer 返工中确认上一轮目标内容仍在，返回 `satisfied`。
+
+模型只说“已完成”但没有提案，不得标记成功。
+
+---
+
+# 9. Merge 规范
+
+Merge 是正式写盘的单一收口点。
+
+任何修改 Merge 的代码都必须保留以下能力：
+
+1. 相同文件路径归一化；
+2. 完全相同提案去重；
+3. 相同基线的非重叠修改合并；
+4. 重叠修改冲突；
+5. 基线不同冲突；
+6. 正式文件执行期间变化检测；
+7. Worker 失败映射到槽位；
+8. 多文件写入失败回滚；
+9. `alreadyAppliedFiles` 识别；
+10. 完整 Merge Summary。
+
+不要为了“提高成功率”直接采用最后写入者覆盖。那会破坏并发安全和用户信任。
+
+新增 Merge Strategy 时同步更新：
+
+```text
+WorkerMergeStrategy
+WorkerFileChange
+MergeResult
+Reviewer prompt/context
+Final Report
+AGENT_SOURCE_GUIDE.md
 ```
 
 ---
 
-# 核心架构
+# 10. Verification 规范
 
-## Electron：主进程与 preload
-- 主进程：[electron/main.ts](file:///d:/next-agent/my-app/electron/main.ts)
-  - 启动 Next.js 子进程（开发态 `next dev`，生产态运行 `resources/standalone/server.js`）。
-  - 读取并加载 `.env.local`（多路径兜底），把 `DASHSCOPE_API_KEY` 等关键变量注入给 Next 子进程。
-  - 负责窗口创建与 Apple 风格标题栏（`frame:false` + `titleBarOverlay`），并把主题色同步到原生标题栏覆盖层。
-  - IPC：支持 `dialog:openDirectory`（选择文件夹）与 `window:setTheme`（同步主题）。
-- Preload：[electron/preload.ts](file:///d:/next-agent/my-app/electron/preload.ts)
-  - 在 `contextIsolation: true` 下通过 `contextBridge` 仅暴露有限 API（`selectFolder`、`setTheme`、平台信息等）。
+## 10.1 文档任务
 
-## Next.js：前端与 API 路由
-- 前端入口：[app/page.tsx](file:///d:/next-agent/my-app/app/page.tsx)
-  - 通过 `useChatStream` 连接 `/api/chat` 或 `/api/qa`，消费 SSE 并更新消息列表、工具活动、交互请求面板等。
-  - 通过 `useWorkspaceController` 管理 Projects/Sessions（调用 `/api/workspace` 等）。
-  - 通过 `useThemeMode` + `getThemeVariables()`（[theme.ts](file:///d:/next-agent/my-app/app/const/theme.ts)）实现深浅色主题并同步到 Electron。
-- API 路由集中在 [app/api](file:///d:/next-agent/my-app/app/api)：
-  - `/api/chat`：LangGraph 多 Agent 编排 + SSE（见 [app/api/chat/route.ts](file:///d:/next-agent/my-app/app/api/chat/route.ts)）
-  - `/api/qa`：直接 SSE 转发千问（见 [app/api/qa/route.ts](file:///d:/next-agent/my-app/app/api/qa/route.ts)）
-  - `/api/workspace`：项目/会话 CRUD（SQLite）（见 [app/api/workspace/route.ts](file:///d:/next-agent/my-app/app/api/workspace/route.ts)）
-  - `/api/projects/[projectId]/index`：构建项目索引（见 [app/api/projects/[projectId]/index/route.ts](file:///d:/next-agent/my-app/app/api/projects/%5BprojectId%5D/index/route.ts)）
+文档任务只检查落盘，不运行全项目构建。不要恢复“所有修改都 pnpm build”的粗暴策略。
 
-## 会话与工作区数据如何保存（SQLite）
-- Workspace DB：[workspace-store.ts](file:///d:/next-agent/my-app/app/lib/server/workspace-store.ts)
-  - 默认路径：`process.cwd()/.agent-data/agent-workspace.sqlite`
-  - 可被环境变量覆盖：`AGENT_DATA_DIR`
-  - 保存内容：
-    - `projects`：项目根目录与索引状态
-    - `sessions`：对话会话（`messages_json`）
-    - `file_index/symbol_index/code_content`：项目索引（文件元信息、符号、全文）
-- LangGraph Checkpoints：[checkpointer.ts](file:///d:/next-agent/my-app/app/api/chat/agent/checkpointer.ts)
-  - 独立 SQLite：`process.cwd()/.agent-data/langgraph-checkpoints.sqlite`
-  - 保存 LangGraph thread 的 checkpoint/writes，用于多轮对话恢复图状态
+## 10.2 JS/TS 任务
 
-## Code Agent 如何读取项目
-- 工具定义：[app/api/chat/tools.ts](file:///d:/next-agent/my-app/app/api/chat/tools.ts)
-  - 典型闭环：`read_file` → `propose_changes` → `diff` → `apply_patch`
-  - 检索：`search_project_index`（SQLite 索引）与 `search_codebase`（直接扫磁盘源码）
-  - 终端：`run_terminal_command` 支持普通命令与“持久交互会话”命令
-- 工作流节点实现：[workflow-nodes.ts](file:///d:/next-agent/my-app/app/api/chat/agent/workflow-nodes.ts)
-  - Search/Memory/File/Planner/Modify/Reviewer/LintBuildTest/FinalReport 等节点都在这里实现
+优先对 touched files 执行 ESLint，减少无关噪声。
 
-## 本地索引如何创建和使用
-- 创建：前端触发 reindex -> 调用 `/api/projects/[projectId]/index` -> `indexProject(...)` 写入 SQLite
-- 使用：SearchAgent 在工作流里调用 `search_project_index`，作为“候选文件定位加速器”
-- 重要边界：索引不是“真实源码来源”，修改时仍必须 `read_file` 读取磁盘真实文件
+## 10.3 Build/Test
 
-## SSE 流式响应如何传递
-- 后端（/api/chat）向前端输出 `text/event-stream`，每个事件形如：
-  - `data: {"type":"STATUS","content":"..."}\n\n`
-- 前端消费位置：
-  - [useChatStream.ts](file:///d:/next-agent/my-app/app/hooks/useChatStream.ts) 会逐行解析 `data:` 并按 `type` 分发
-  - UI 展示：`ChatList`（消息）、`InteractiveRequestPanel`（终端交互）、`AgentPanel`（角色面板）
+只运行 `package.json` 中真实存在的脚本。
 
-## 多 Agent 状态和工具活动如何展示（注意“真实 vs UI”）
-- 工具活动：后端确实会发送 `TOOL_STATUS`，前端将其渲染为 ToolActivity 列表（见 [useChatStream.ts](file:///d:/next-agent/my-app/app/hooks/useChatStream.ts)）。
-- 角色面板：当前主要是“前端推断/模拟状态”：
-  - 前端根据 `STATUS` / `TOOL_STATUS` 文案推断当前角色（见 [agentRuntime.ts](file:///d:/next-agent/my-app/app/utils/agentRuntime.ts) + [useAgentCoordinator.ts](file:///d:/next-agent/my-app/app/hooks/useAgentCoordinator.ts)）
-  - 前端类型里预留了 `AGENT_*` 事件（[workspace.ts](file:///d:/next-agent/my-app/app/types/workspace.ts)），但后端 `/api/chat` 目前未发送这些事件（需按需求补齐）
+## 10.4 失败处理
 
-## 前后端主要数据流（概览）
+Verification 失败不能被 Final Report 隐藏。Reviewer 必须看到结构化失败结果并决定 RETRY 或 FAIL。
 
-```mermaid
-flowchart LR
-  UI[Next.js Client UI\napp/page.tsx] -->|POST /api/workspace| WS[workspace route]
-  UI -->|POST /api/projects/:id/index| IDX[reindex route]
-  UI -->|POST /api/chat (SSE)| CHAT[LangGraph Orchestrator]
-  UI -->|POST /api/qa (SSE)| QA[Qwen proxy]
+## 10.5 命令安全
 
-  WS --> DB1[(SQLite\nagent-workspace.sqlite)]
-  IDX --> DB1
-  CHAT --> DB2[(SQLite\nlanggraph-checkpoints.sqlite)]
-  CHAT --> DB1
-  CHAT -->|SSE: STATUS/TOOL_STATUS/USAGE/TEXT| UI
-  CHAT -->|SSE: INTERACTIVE_REQUEST| UI
-  UI -->|下一轮提交 [INTERACTIVE_REPLY]...| CHAT
+新增命令前检查：
 
-  E[Electron main] -->|spawn Next server| CHAT
-  E -->|IPC: selectFolder/setTheme| UI
-  E -->|inject env + set AGENT_DATA_DIR| CHAT
+- 是否破坏性；
+- 是否可能删除用户数据；
+- 是否需要网络或安装依赖；
+- 是否会进入交互模式；
+- 超时是否合理；
+- 是否能在 Windows/macOS/Linux 工作。
+
+---
+
+# 11. Reviewer 规范
+
+Reviewer 是质量闸门，不是“礼貌性总结”。
+
+它必须基于：
+
+- 用户请求；
+- Planner 验收标准；
+- Worker 结果；
+- Merge 结果；
+- 当前文件快照；
+- Verification 结果。
+
+Reviewer 不得：
+
+- 在 Merge 冲突时返回虚假 PASS；
+- 在没有有效槽位时无限 RETRY；
+- 把 Worker 编号和 0-based slot 混淆；
+- 隐藏验证失败；
+- 只根据 Worker 自述判断成功。
+
+当前最大返工次数为 2。修改该值时要考虑 LangGraph recursion limit、Token 成本和 UI 时间线长度。
+
+---
+
+# 12. Agent Lifecycle 规范
+
+后端 Agent 重要阶段必须上报真实生命周期。
+
+推荐状态顺序：
+
+```text
+CREATED
+→ PLANNING / EXECUTING
+→ WAITING_TOOL（需要时）
+→ COMPRESSING（需要时）
+→ READY_TO_MERGE（Worker）
+→ COMPLETED
+```
+
+失败或暂停：
+
+```text
+BLOCKED
+FAILED
+```
+
+事件必须包含清晰 `detail`，但不得包含：
+
+- API Key；
+- 完整 Secret；
+- 用户私有文件全文；
+- 超长模型 Prompt；
+- 不必要的绝对路径。
+
+前端展示角色只是聚合映射。不要因为 UI 只有 Coder/Reviewer 等角色，就删除后端更细的 Agent Role。
+
+---
+
+# 13. SSE 协议规范
+
+Code/QA 常见事件：
+
+```text
+TEXT
+STATUS
+TOOL_STATUS
+USAGE
+INTERACTIVE_REQUEST
+AGENT_LIFECYCLE
+```
+
+Commerce：
+
+```text
+COMMERCE_PROGRESS
+COMMERCE_REPORT
+AGENT_ERROR
+```
+
+修改 SSE 时同步检查：
+
+```text
+server types
+frontend workspace types
+useChatStream
+useAgentCoordinator
+TaskPlanningPanel
+ChatList
+```
+
+不要发送循环引用、不可序列化对象或整个 LangGraph State。
+
+---
+
+# 14. LLM Gateway 规范
+
+所有文本模型调用优先通过 `app/lib/llm/gateway.ts`。
+
+新增 Provider 时：
+
+1. 在 Provider Catalog 注册；
+2. 增加 Provider 实现或使用 OpenAI-compatible 实现；
+3. 注册模型能力；
+4. 配置推荐任务；
+5. 更新 Credential 解析和 UI Key 管理；
+6. 验证流式、非流式、Vision、Tool Call；
+7. 验证 fallback 行为。
+
+模型路由必须按能力过滤，不能把：
+
+- 无 Vision 模型分配给图片输入；
+- 无 Tool Call 模型分配给 Worker；
+- 非 Chat 媒体模型放入普通聊天路由。
+
+流式 fallback 只能在尚未输出正文前切换，避免两个模型的回答拼接。
+
+---
+
+# 15. Prompt 规范
+
+Prompt 统一放在 `app/lib/llm/prompts/registry.ts`，通过 `renderPrompt()` 暴露。
+
+修改 Prompt 时：
+
+- 保持结构化输出格式可解析；
+- 不让 Prompt 声称存在未实现工具；
+- 明确文件工具闭环；
+- 明确 Worker 不可执行终端命令；
+- 明确 Reviewer 的 slot 语义；
+- 明确 Demo Commerce 不可输出真实商业结论；
+- 避免把密钥或绝对路径拼进 Prompt。
+
+如果修改 JSON 输出格式，必须先改类型和解析器，再改 Prompt。
+
+---
+
+# 16. Workspace 与数据库规范
+
+## 16.1 路径
+
+项目创建必须经过：
+
+```text
+normalizeAndValidateWorkspacePath
+assertExistingWorkspaceDirectory
+```
+
+不要信任前端传入的 `workingDir`。
+
+## 16.2 SQLite
+
+Workspace Store 使用 WAL 和外键。数据库结构变更必须：
+
+- 考虑旧数据迁移；
+- 在事务中执行；
+- 保持失败回滚；
+- 不静默丢弃 sessions/messages；
+- 更新类型与 map 函数。
+
+## 16.3 索引
+
+新增索引文件类型时考虑：
+
+- 是否为文本；
+- 是否可能超大；
+- 是否包含敏感生成文件；
+- 是否应加入 ignored directories；
+- Symbol 提取正则是否支持。
+
+不要把当前 `LIKE` 搜索描述成向量语义搜索。
+
+---
+
+# 17. QA Agent 规范
+
+QA 是核心轻量能力。
+
+- 不依赖 Code Agent 插件开关；
+- 不读取本地项目；
+- 最新用户消息的附件才作为本轮多模态输入；
+- 通过统一 LLM Gateway 流式输出；
+- Token 用量通过 `USAGE` 返回；
+- 内部 reasoning 标记应由前端正确处理，不直接显示为普通正文。
+
+---
+
+# 18. Media Agent 规范
+
+## 18.1 协议隔离
+
+媒体模型不进入普通 LLM Chat Gateway。
+
+## 18.2 附件校验
+
+保持不同 mode 的 MIME 和大小限制。不要只信任文件扩展名。
+
+## 18.3 精准改图
+
+`precise` 模式必须强调：
+
+- 保留未指定区域；
+- 防止重复对象；
+- 防止双边缘和重影；
+- 防止多余文字；
+- 尽量保持构图和长宽比。
+
+## 18.4 质量检查
+
+质量 Guard 是辅助判断，不保证像素级一致。不要在文档中承诺生成模型可以精确替换长文本或完全不重绘。
+
+## 18.5 大文件
+
+视频优先保存远程临时 URL，不要把巨大 Base64 无限制写入 SQLite。
+
+---
+
+# 19. Commerce Agent 规范
+
+## 19.1 数据真实性
+
+每个来源必须返回：
+
+```text
+status
+provider
+quality
+sampleSize
+coverage
+summary
+warnings
+```
+
+报告必须保留 source list 和 confidence score。
+
+## 19.2 Demo 模式
+
+Demo 数据必须：
+
+- 明确标记；
+- 不参与真实商业事实表述；
+- 不生成伪造的销量/利润结论；
+- 不调用策略 LLM 将模拟数据包装成真实建议。
+
+## 19.3 Provider 失败
+
+单个可选 Provider 失败不应阻断整个报告；所有真实来源不可用时才进入 Demo 或明确失败。
+
+## 19.4 PDF
+
+PDF 导出只在 Electron 主进程执行。Web 环境需要提供可解释的降级行为。
+
+---
+
+# 20. Electron 规范
+
+- 主进程负责启动 Next.js 子进程；
+- preload 通过 `contextBridge` 暴露最小 API；
+- 不启用宽泛 Node Integration；
+- IPC 参数必须验证；
+- 主题同步要同时更新网页和原生标题栏；
+- 用户数据写入 `app.getPath("userData")` 下；
+- 关闭应用时正确终止 Next 子进程；
+- 端口处理不能误杀无关用户进程。
+
+打包配置变更时同时检查：
+
+```text
+scripts/build-electron.ts
+electron-builder.yml
+forge.config.ts
+package.json
+electron/main.ts
 ```
 
 ---
 
-# 关键文件
-以下文件属于“改动影响面最大”的入口点或协议点：
+# 21. TypeScript 编码规范
 
-- [package.json](file:///d:/next-agent/my-app/package.json)：脚本/依赖；改 scripts 会影响开发、构建与打包命令
-- [next.config.ts](file:///d:/next-agent/my-app/next.config.ts)：standalone 与 Sentry；改错会影响 Electron 生产态启动
-- [electron/main.ts](file:///d:/next-agent/my-app/electron/main.ts)：Electron 启动、env 注入、Next 子进程；影响桌面端启动稳定性与密钥注入
-- [electron/preload.ts](file:///d:/next-agent/my-app/electron/preload.ts)：安全边界（contextIsolation）；改动会影响 IPC 安全模型
-- [electron-builder.yml](file:///d:/next-agent/my-app/electron-builder.yml)：打包内容/额外资源/点文件白名单；改错会导致生产包缺资源或缺 env
-- [app/api/chat/route.ts](file:///d:/next-agent/my-app/app/api/chat/route.ts)：code 模式入口 + SSE 协议；改动影响全链路
-- [app/api/chat/agent/state.ts](file:///d:/next-agent/my-app/app/api/chat/agent/state.ts)：LangGraph 状态结构；改动影响所有节点与持久化
-- [app/api/chat/agent/graph.ts](file:///d:/next-agent/my-app/app/api/chat/agent/graph.ts)：工作流拓扑；改动影响执行顺序与并发结构
-- [app/api/chat/agent/workflow-nodes.ts](file:///d:/next-agent/my-app/app/api/chat/agent/workflow-nodes.ts)：节点实现与工具执行；改动影响“会不会真的改文件/跑命令”
-- [app/api/chat/agent/checkpointer.ts](file:///d:/next-agent/my-app/app/api/chat/agent/checkpointer.ts)：LangGraph SQLite checkpoint；影响多轮恢复与打包原生依赖风险
-- [app/lib/server/workspace-store.ts](file:///d:/next-agent/my-app/app/lib/server/workspace-store.ts)：工作区/索引 SQLite；改动可能影响用户数据与索引一致性
-- [app/hooks/useChatStream.ts](file:///d:/next-agent/my-app/app/hooks/useChatStream.ts)：前端 SSE 消费与状态机；改动影响 UI 展示与交互体验
-- [app/const/theme.ts](file:///d:/next-agent/my-app/app/const/theme.ts)：主题变量与 Electron 同步；改动影响深浅色与标题栏一致性
+- 开启并遵守 `strict`；
+- 避免无理由 `any`；
+- 外部 JSON 使用 `unknown` 后再校验；
+- 状态枚举使用联合类型；
+- 新增返回结构先定义 interface/type；
+- 保持 Server-only 类型与前端展示类型分离；
+- 对可恢复错误返回结构化状态；
+- 对不可恢复边界错误抛出明确 Error；
+- 不吞掉异常后伪装成功。
+
+导入路径优先使用 `@/`，同目录紧密模块可以使用相对路径。
 
 ---
 
-# 本地开发
-以下命令均来自 [package.json scripts](file:///d:/next-agent/my-app/package.json#L12-L23)；未出现的命令不会在此凭空补充。
+# 22. React 与 Hook 规范
 
-- 安装依赖：`pnpm install`
-  - 依据：项目脚本与锁文件为 pnpm（`pnpm-lock.yaml`，scripts 里大量 `pnpm ...`）
-- Web 开发启动：`pnpm dev`
-- Web 构建：`pnpm build`
-- Web 生产启动（仅 Next）：`pnpm start`
-- ESLint：`pnpm lint`
-- Electron 开发启动：`pnpm electron:dev`
-- Electron 编译主进程：`pnpm electron:compile`
-- Electron 一键构建绿色版（脚本流水线）：`pnpm electron:build`
-- Electron 打包（目录产物）：`pnpm electron:package`
-- Electron 打包（NSIS 安装包）：`pnpm electron:make`
-
-待确认：
-- TypeScript 独立类型检查命令：`package.json` 未提供 `typecheck`/`tsc` script（但 `tsconfig.json` 已启用 `noEmit: true`）
-- 测试命令：`package.json` 未提供 `test` script，仓库未见 Jest/Vitest/Playwright 配置文件
+- 页面组件只做组合，不堆积工作流实现；
+- 一个 Hook 对应一个主要职责；
+- 状态更新使用不可变方式；
+- 大型插件 UI 使用动态 import，避免增加 QA 首屏负担；
+- SSE 解析与 UI 渲染分离；
+- 不根据文案猜测真实后端状态，优先使用生命周期事件；
+- 对旧事件保持兼容时明确标注兼容层。
 
 ---
 
-# 环境变量
-只记录“变量名/用途/必填/读取位置”，不记录真实值。
+# 23. 样式与交互规范
 
-## 必填（运行 code/qa 模式时）
-- `DASHSCOPE_API_KEY`
-  - 用途：调用千问（DashScope）模型
-  - 读取位置：`/api/chat` 与 `/api/qa` 优先读请求头 `x-dashscope-api-key`，否则读 `process.env.DASHSCOPE_API_KEY`
-  - Electron：主进程会从 `.env.local` 加载后注入 Next 子进程 env
+当前 UI 采用轻量 Apple 风格玻璃卡片体系。
 
-## 选填（按功能启用）
-- `GEMINI_API_KEY`
-  - 用途：Gemini API（服务端调用）
-  - 读取位置：`/api/agent`、`/api/geminiChat`（具体以对应 route 实现为准）
-- `NEXT_PUBLIC_GEMINI_API_KEY`
-  - 用途：Gemini Key 的前端侧配置（是否在前端实际使用，需以代码引用为准）
-- `NEXT_PUBLIC_SENTRY_DSN`
-  - 用途：Sentry 客户端 DSN
-  - 读取位置：Next.js + Sentry 配置链路
-- `HTTP_PROXY` / `HTTPS_PROXY`
-  - 用途：为 Gemini SSE 桥接等请求提供代理
-  - 读取位置：`/api/geminiChat` 使用 `https-proxy-agent`
+保持：
 
-## 数据目录与端口（Electron 特别关注）
-- `AGENT_DATA_DIR`
-  - 用途：SQLite 数据目录根路径
-  - 默认：`process.cwd()/.agent-data`
-  - Electron：主进程会覆盖注入到 `app.getPath("userData")/workspace-data`，避免写到安装目录
-- `PORT` / `HOSTNAME`
-  - 用途：Next.js 服务监听地址
-  - Electron：主进程启动 Next 子进程时注入（当前固定 `PORT=3000`，`HOSTNAME=localhost`）
-- `NEXT_PUBLIC_IS_ELECTRON`
-  - 用途：前端判定是否处于 Electron 环境（由主进程注入为 `"1"`）
+- 统一圆角、边框和背景变量；
+- 深浅主题变量；
+- Agent 状态色语义一致；
+- 长内容可滚动；
+- 流式期间不阻塞输入区；
+- 交互式请求明确展示命令、选项和风险；
+- 移动/小窗口宽度下不溢出。
 
-## 仅构建/上传相关（不要提交）
-- `SENTRY_AUTH_TOKEN`
-  - 位置：`.env.sentry-build-plugin`
-  - 用途：Sentry build plugin 上传 sourcemap（如启用）
+不要用纯动画模拟 Agent 完成；动画必须由真实状态驱动。
 
 ---
 
-# 编码规范
-基于现有代码的“实际写法”总结（不是抽象规范）。
+# 24. 新增 Agent 的标准流程
 
-## TypeScript
-- 总体：严格模式（`strict: true`），并用 `noEmit: true` 把 tsc 用作类型检查器
-- 类型文件组织：
-  - 后端 Agent 协议/状态：集中在 `app/api/chat/agent/{types,state}.ts`
-  - 前端 SSE packet：`app/types/workspace.ts`
-- 校验：Planner 的结构化输出使用 `zod` 做 schema 校验
+假设要新增 `security_agent`：
 
-## React / Next.js 组件
-- `app/page.tsx` 与大部分 UI 组件是 Client Component（显式 `"use client"`）
-- Route Handlers 位于 `app/api/**/route.ts`，属于服务端执行环境，可使用 Node API（fs、sqlite 等）
+1. 在 `AgentRole` 中增加角色；
+2. 定义输入、输出和 State 字段；
+3. 确定是否为模型节点或确定性节点；
+4. 实现 Lifecycle Tracker；
+5. 在 `graph.ts` 注册 Node 和边；
+6. 明确它能读取/写入哪些 State 字段；
+7. 定义上游和下游；
+8. 增加失败与降级路径；
+9. 映射前端 Agent 展示角色；
+10. 增加 SSE 类型或复用 `AGENT_LIFECYCLE`；
+11. 更新 Prompt、文档和测试；
+12. 验证 checkpoint 兼容。
 
-## Client 与 Server 边界
-- 仅服务端可用：`app/lib/server/**`（使用 `node:sqlite`、`fs`、`path`）
-- 前端禁止直接 import 这些 server-only 文件；需要通过 API routes 间接访问
-
-## Hook 命名与职责
-- 约定：`useXxx` 负责单一领域状态（聊天流、主题、工作区、Agent UI 协调等）
-- 聊天流（SSE 消费）集中在 [useChatStream.ts](file:///d:/next-agent/my-app/app/hooks/useChatStream.ts)
-
-## import 路径习惯
-- 已配置别名：`@/* -> ./*`（见 tsconfig.json）
-- 项目内实际使用了 `@/` 别名（主要在 server routes 与 agent 节点里）
-
-## 错误处理方式
-- 后端：Route Handler 对缺失 key 等情况返回 `Response.json({error}, {status})`
-- 前端：SSE 解析对不完整帧容错（try/catch 忽略），请求失败时写入兜底提示文本
-
-## 样式与主题变量
-- 主题变量集中在 [app/const/theme.ts](file:///d:/next-agent/my-app/app/const/theme.ts)，通过 `data-theme` + inline `style={{ ...getThemeVariables(theme) }}` 注入 CSS Variables
-- 组件中大量使用 `var(--...)` 读取颜色/阴影/玻璃质感，避免写死深色专用颜色
+新增 Agent 前先判断是否真的需要独立 Agent。纯 Schema 校验、路径检查、格式化、去重等确定性逻辑通常应保持普通节点。
 
 ---
 
-# UI 规范（Apple 风格约束）
-这些约束来自现有 UI 的真实实现方式（主题变量 + 毛玻璃容器 + 克制动画）。
+# 25. 修改代码的标准工作流
 
-- 必须同时支持深色与浅色主题（见 `ThemeMode: "dark" | "light"` 与 `getThemeVariables()`）
-- 颜色优先使用 CSS 主题变量（`var(--app-bg)`, `var(--text-primary)`, `var(--border)` 等）
-- 不在组件里硬编码“只适用于深色模式”的颜色；如确需强调色，优先复用 `--accent-*`
-- 毛玻璃与阴影：
-  - 背景常用 `linear-gradient(... var(--glass-strong) ...)` + `backdrop-filter: blur(...)`
-  - 阴影优先用 `--shadow-*` 变量
-- 动画：短促、平滑，不影响操作（现有 `--ease-apple`，以及 260–300ms 的过渡为主）
-- Electron 标题栏颜色必须与页面主题同步：
-  - 前端 `persistTheme()` 会调用 `window.electronAPI.setTheme(theme)`（存在时）
-  - 主进程接收后更新 `nativeTheme.themeSource` 与 `titleBarOverlay` 颜色
-- 新组件必须同时人工检查深色与浅色模式（至少确保边框/文字/hover 状态可读）
+1. 明确请求属于 QA、Code、Media、Commerce、Workspace 或 Electron。
+2. 阅读最小必要文件，不从文件名猜实现。
+3. 搜索相关类型、调用方和 UI 消费方。
+4. 设计变更边界，避免跨工作流耦合。
+5. 修改类型和核心逻辑。
+6. 更新调用方、事件、Prompt 和文档。
+7. 运行最小相关检查。
+8. 再运行项目级 lint/build（文档任务除外）。
+9. 检查是否泄露 Secret、绝对路径或用户数据。
+10. 在交付中说明变更文件、验证结果和已知风险。
 
 ---
 
-# Agent 协作规范
-本节必须明确区分：前端展示的“角色面板”与后端实际执行的“LangGraph 编排”。
+# 26. 验证命令
 
-## 已实现：后端真实编排（LangGraph）
-- Orchestrator（统一入口）：`/api/chat` 驱动 LangGraph
-- Router：清理上一轮中间态并路由本轮任务
-- Search / Memory / File：并发收集上下文（图结构同时从 Router 出发）
-- Planner：生成结构化任务列表（JSON），并经过 schema 校验与文件唯一性检查
-- Modify A/B/C：三路并发修改槽位（避免同文件并发写）
-- Reviewer：审查并可触发“定向返工”（只重跑失败槽位）
-- Terminal：通过工具执行终端命令；交互式命令支持“持久会话”暂停/恢复
+安装：
 
-## 已实现：前端状态展示（以文案推断为主）
-- 前端固定展示 6 个角色：Orchestrator/Planner/Researcher/Coder/Reviewer/Terminal（见 [AgentPanel.tsx](file:///d:/next-agent/my-app/app/component/AgentPanel.tsx)）
-- 状态来源：
-  - `STATUS` 文案：推断当前角色（`inferAgentKind(...)`）
-  - `TOOL_STATUS`：认为正在执行“工具调用”，同时激活对应角色
+```bash
+pnpm install
+```
 
-## 未实现 / 待确认（不要误报）
-- 后端并未发送 `AGENT_START/AGENT_STATUS/AGENT_PROGRESS/AGENT_FINISH/AGENT_ERROR` 事件；前端虽已定义类型与处理分支，但当前不会触发
-- 终端交互的“低 token 直连恢复接口”目前不存在：前端仍通过再次调用 `/api/chat` 并提交 `[INTERACTIVE_REPLY] ...` 来恢复会话（这会重新走一轮工作流恢复逻辑）
+Lint：
 
----
+```bash
+pnpm lint
+```
 
-# SSE 协议
-协议结构参考 [app/types/workspace.ts](file:///d:/next-agent/my-app/app/types/workspace.ts) 与前端消费实现 [useChatStream.ts](file:///d:/next-agent/my-app/app/hooks/useChatStream.ts)。
+Next.js Build：
 
-## 事件格式
-- 传输：`Content-Type: text/event-stream`
-- 单条消息：以 `data:` 开头，后跟 JSON 字符串，最后以空行结束
+```bash
+pnpm build
+```
 
-## 已支持事件（/api/chat 与 /api/qa）
+Electron 编译：
 
-### TEXT
-- 数据结构：`{ "type": "TEXT", "content": string }`
-- 用途：流式增量文本，前端追加到 assistant 消息
-- 处理位置：`useChatStream.ts` 中 `packet.type === "TEXT"`
+```bash
+pnpm electron:compile
+```
 
-### STATUS
-- 数据结构：`{ "type": "STATUS", "content": string }`
-- 用途：阶段性状态文案（例如 Planner / Reviewer / Lint 等）
-- 处理位置：`useChatStream.ts` 中 `packet.type === "STATUS"`
+Electron 开发：
 
-### TOOL_STATUS
-- 数据结构：`{ "type": "TOOL_STATUS", "content": string }`
-- 用途：工具调用阶段的状态标签（前端显示“正在执行工具调用…”与最近工具列表）
-- 处理位置：`useChatStream.ts` 中 `packet.type === "TOOL_STATUS"`
+```bash
+pnpm electron:dev
+```
 
-### USAGE
-- 数据结构：`{ "type": "USAGE", "content": { prompt:number, completion:number, total:number } }`
-- 用途：token 使用量统计
-- 处理位置：`useChatStream.ts` 中 `packet.type === "USAGE"`
+Electron 打包：
 
-### INTERACTIVE_REQUEST
-- 数据结构：`{ "type": "INTERACTIVE_REQUEST", "payload": InteractiveRequest }`
-- InteractiveRequest 结构（前端）：见 [workspace.ts](file:///d:/next-agent/my-app/app/types/workspace.ts#L9-L18)
-  - `id`：持久终端会话 ID（也是本次交互请求 ID）
-  - `command`：触发交互的命令
-  - `prompt`：提示语
-  - `options`：候选按钮
-  - `promptRound`：第几轮交互
-  - `recentOutput`：最近一段终端输出（增量）
-- 用途：让 UI 暂停在“终端交互面板”，等待用户选择/输入
-- 处理位置：`useChatStream.ts` 中 `packet.type === "INTERACTIVE_REQUEST"`
+```bash
+pnpm electron:package
+pnpm electron:make
+```
 
-## 预留但目前未生效事件（仅类型层存在）
-- `AGENT_START` / `AGENT_STATUS` / `AGENT_PROGRESS` / `AGENT_FINISH` / `AGENT_ERROR`
-  - 现状：前端定义了类型与处理分支，但后端未发送
-  - 如需真实多 Agent 可视化，建议后端补齐发送点并统一 payload 结构
+测试脚本目前只有在 `package.json` 实际提供时才能运行。不要在报告中虚构 `pnpm test` 已通过。
 
 ---
 
-# 修改代码的标准流程
-任何 Agent 在本仓库内修改代码时，必须遵循以下流程（目的是“最小改动 + 可验证 + 可回滚”）：
+# 27. 文档修改规范
 
-1. 先搜索相关文件与引用（例如：从 route 找到调用链，再下钻到 agent 节点/工具实现）。
-2. 阅读完整上下文（至少覆盖：imports、相关类型、调用者与被调用者）。
-3. 说明修改计划与影响范围（哪些文件、哪些行为会改变，是否影响 Electron/Web）。
-4. 优先做最小且完整的修改（能闭环、能跑通；不做“顺手大重构”）。
-5. 不修改无关文件（避免为了“顺手整理”而引入无关 diff）。
-6. 修改后至少执行一种校验：
-   - `pnpm lint`（eslint）
-   - 或 `pnpm build`（Next 构建）
-   - Electron 相关修改则优先再跑：`pnpm electron:dev`（人工验证启动）
-7. 汇报：
-   - 修改了哪些文件
-   - 做了哪些验证（命令与结果）
-   - 遗留风险/待确认点（明确写出来，不要隐藏）
+README 和 Agent 文档必须：
 
-# 禁止事项
-至少包含以下硬约束（违反会导致安全/数据/打包风险）：
+- 项目名使用 Multi-agent；
+- 英文 README 顶部链接中文 README；
+- 中文 README 顶部链接英文 README；
+- 截图板块可以预留，但不要引用不存在的图片；
+- 只描述源码中真实实现；
+- 不把 LIKE 搜索写成向量数据库；
+- 不把 UI Agent 数量写成后端固定 Worker 数量；
+- 不承诺模型可以像素级精准改图；
+- 不把可选 Commerce Provider 写成必需；
+- 不泄露真实环境变量值。
 
-- 不提交真实密钥（API Key、Token、DSN、代理账号等）；文档与日志中也不要打印明文
-- 不随意删除用户数据（`.agent-data/`、Electron `userData` 下的数据库与缓存）
-- 不绕过 `contextIsolation`；不把 `nodeIntegration` 改成 `true`
-- 不在不理解风险时开启 `sandbox`/关闭 `sandbox` 的大改（当前为 `sandbox:false`，需评估后再调整）
-- 不未经确认修改数据库 schema（`workspace-store.ts` 与 `checkpointer.ts` 的建表/字段）
-- 不通过 `any` 大量绕过类型检查；必须解释为何需要以及如何收敛
-- 不伪造“测试/构建通过”；无法验证就明确写“未验证/待确认”
-- 不把纯前端动画/推断状态描述成“后端真实并发执行证据”
-- 不在不知道影响范围时大规模重构（尤其是 `workflow-nodes.ts`、`workspace-store.ts`、`electron/main.ts`）
+---
 
-# 完成标准
-一个任务在本项目中可视为“完成”，需满足：
+# 28. 禁止事项
 
-- 需求实现完整，且与既有工作流/协议兼容
-- TypeScript 无新增错误（至少保持 `pnpm build` 可过）
-- 深色与浅色主题均可用（文字/边框/hover 可读）
-- Electron 与 Web 环境均未被破坏（涉及 Electron 的改动必须人工验证启动）
-- 相关检查已运行（至少 lint 或 build；有测试时再补测试）
-- 变更范围与风险已经说明（含待确认项与后续建议）
+严禁：
 
+- 提交 `.env.local` 或真实密钥；
+- 将 API Key 写入 Graph State、SQLite Message、SSE 或日志；
+- Worker 绕过 Merge 写正式文件；
+- 关闭路径越界检查；
+- 允许未确认的破坏性终端命令；
+- 在 Merge 冲突时仍返回成功；
+- 在 Verification 失败时隐藏失败；
+- 将 Demo Commerce 数据描述为真实市场数据；
+- 将视频 Base64 无限制写入会话数据库；
+- 在 QA 首屏同步 import 全部插件实现；
+- 因为旧文档存在就继续复制错误架构；
+- 声称运行了实际没有运行的命令或测试。
+
+---
+
+# 29. 完成标准
+
+一个代码任务只有在以下条件满足时才算完成：
+
+- 实现符合用户需求；
+- 修改范围可解释；
+- 类型检查与调用链一致；
+- Agent 上下游交接没有断裂；
+- 文件写入仍经过安全收口；
+- 生命周期和 UI 状态能正确反映执行；
+- 相关 lint/build/test 或专用验证已执行；
+- 失败项和未验证项被明确说明；
+- README/Agent 文档在架构变更后同步更新；
+- 没有 Secret、绝对路径或私有数据泄露。
+
+---
+
+# 30. 提交前检查清单
+
+```text
+[ ] 项目名是否统一为 Multi-agent（新增内容）
+[ ] 是否读过实际调用方，而不只改单个文件
+[ ] 是否保持 QA / Code / Media / Commerce 隔离
+[ ] 是否更新类型、State 和 Reducer
+[ ] 是否保持 Worker 消息隔离
+[ ] 是否保持 Worker 不直接写正式文件
+[ ] 是否处理缺失文件确认
+[ ] 是否处理 Merge 冲突与回滚
+[ ] 是否处理 Verification 失败
+[ ] 是否限制 Reviewer 返工
+[ ] 是否更新 SSE 与前端消费类型
+[ ] 是否没有泄露 API Key
+[ ] 是否没有虚构测试结果
+[ ] 是否更新相关文档
+```
