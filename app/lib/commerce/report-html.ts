@@ -68,16 +68,19 @@ function renderProductRows(products: CommerceProductSignal[]): string {
   return products
     .slice(0, 20)
     .map((product) => {
+      const isAmazon = !product.platform || product.platform === "amazon";
       const purchase = product.recentPurchaseLabel
         ? escapeHtml(product.recentPurchaseLabel)
-        : product.estimatedMonthlyUnits
+        : isAmazon && product.estimatedMonthlyUnits
           ? `~${formatCompact(product.estimatedMonthlyUnits.median)}/月`
-          : "-";
+          : product.recentPurchaseLowerBound
+            ? `${formatCompact(product.recentPurchaseLowerBound)}+ 已售`
+            : "-";
       return `
         <tr>
           <td>
             <div class="product-title">${escapeHtml(product.title)}</div>
-            <div class="product-meta">${escapeHtml(product.asin)}${product.brand ? ` · ${escapeHtml(product.brand)}` : ""}</div>
+            <div class="product-meta">${escapeHtml(product.platform || "amazon")} · ${escapeHtml(product.asin)}${product.brand ? ` · ${escapeHtml(product.brand)}` : ""}</div>
           </td>
           <td>${escapeHtml(formatPrice(product.price, product.currency))}</td>
           <td>${product.rating ?? "-"}</td>
@@ -106,6 +109,24 @@ function renderObservationRows(observations: CommerceMarketObservation[]): strin
     .join("");
 }
 
+
+function renderPlatformComparisonRows(
+  metrics: CommerceMarketMetrics,
+): string {
+  return (metrics.platformComparisons || [])
+    .map(
+      (item) => `<tr>
+        <td><strong>${escapeHtml(item.label)}</strong></td>
+        <td>${item.sampleSize}</td>
+        <td>${escapeHtml(formatPrice(item.medianPrice, item.currency))}</td>
+        <td>${item.medianRating ?? "-"}</td>
+        <td>${formatCompact(item.medianReviewCount)}</td>
+        <td>${item.priceSampleSize}/${item.sampleSize}</td>
+      </tr>`,
+    )
+    .join("");
+}
+
 function sourceStatusLabel(
   status: CommerceResearchReport["sources"][number]["status"],
 ): string {
@@ -120,10 +141,21 @@ function sourceStatusLabel(
 function sourceDisplayLabel(
   source: CommerceResearchReport["sources"][number],
 ): string {
-  if (source.id !== "amazon") return source.label;
-  if (source.amazonDataRoute === "api") return `${source.label}（API）`;
-  if (source.amazonDataRoute === "crawler") return `${source.label}（爬虫）`;
-  return source.label;
+  const route = source.dataRoute || source.amazonDataRoute;
+  if (route === "api") return `${source.label}（API）`;
+  if (route === "crawler") {
+    const engine =
+      source.crawlerEngine === "browser"
+        ? "浏览器爬虫"
+        : source.crawlerEngine === "http"
+          ? "HTTP 爬虫"
+          : "爬虫";
+    return `${source.label}（${engine}）`;
+  }
+  const attempted = source.attemptedRoutes || source.amazonAttemptedRoutes || [];
+  return attempted.length
+    ? `${source.label}（已尝试 ${attempted.map((item) => (item === "api" ? "API" : "爬虫")).join(" → ")}）`
+    : source.label;
 }
 
 function renderList(title: string, items: string[], accent: string): string {
@@ -248,6 +280,16 @@ export function buildCommerceReportHtml(report: CommerceResearchReport): string 
       ${renderList("下一步建议", report.insights.actions, "#0071e3")}
     </div>
   </section>
+
+
+  ${(report.metrics.platformComparisons || []).length >= 2 && !isDemo ? `<section class="section">
+    <h2>跨平台公开样本对比</h2>
+    <table>
+      <thead><tr><th>Platform</th><th>Samples</th><th>Median Price</th><th>Median Rating</th><th>Median Reviews</th><th>Price Coverage</th></tr></thead>
+      <tbody>${renderPlatformComparisonRows(report.metrics)}</tbody>
+    </table>
+    <div class="notice">各平台按自身币种独立统计；样本数不代表市场份额，价格未做自动汇率换算。</div>
+  </section>` : ""}
 
   <section class="section">
     <h2>数据源覆盖</h2>

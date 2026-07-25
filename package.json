@@ -20,8 +20,14 @@
     "electron:package": "pnpm electron:build",
     "electron:make": "pnpm electron:build && pnpm electron:prepare-icons && electron-builder",
     "electron:compile": "tsx scripts/compile-electron.ts",
-    "test:commerce-routing": "tsx scripts/test-amazon-data-source.ts",
-    "test:amazon-crawler": "tsx scripts/test-amazon-crawler-network.ts"
+    "test:commerce-routing": "tsx scripts/test-amazon-data-source.ts && tsx scripts/test-platform-data-sources.ts",
+    "test:amazon-crawler": "tsx scripts/test-amazon-crawler-network.ts",
+    "test:platform-routing": "tsx scripts/test-platform-data-sources.ts",
+    "test:platform-data-sources": "tsx scripts/test-platform-data-sources.ts",
+    "test:platform-crawlers": "tsx scripts/test-platform-crawlers-network.ts",
+    "crawler:install-browser": "pnpm dlx playwright@1.61.1 install chromium",
+    "crawler:install-browser:deps": "pnpm dlx playwright@1.61.1 install --with-deps chromium",
+    "test:platform-crawlers:strict": "cross-env COMMERCE_CRAWLER_NETWORK_TEST_STRICT=true tsx scripts/test-platform-crawlers-network.ts"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",
@@ -33,6 +39,7 @@
     "next": "16.2.6",
     "node-fetch": "^2.7.0",
     "pdfjs-dist": "^5.7.284",
+    "playwright-core": "^1.61.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",

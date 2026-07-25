@@ -1,6 +1,7 @@
 import type { AuxiliaryServiceCredentials } from "../../service-credentials";
 import type {
   CommerceCategoryResolution,
+  CommerceCrawlerEngine,
   CommerceDataProviderKind,
   CommerceMarketplaceCode,
   CommerceMarketObservation,
@@ -26,6 +27,8 @@ export interface CommerceProviderSearchResult {
   provider: CommerceDataProviderKind;
   sourceId?: CommerceMarketSourceId;
   products: CommerceProductSignal[];
+  /** 仅爬虫 Provider 返回，供 UI 明确展示 HTTP 或浏览器链路。 */
+  crawlerEngine?: CommerceCrawlerEngine;
   /** 通用公开市场结果；不要求平台商品 ID。 */
   observations?: CommerceMarketObservation[];
   warnings: string[];

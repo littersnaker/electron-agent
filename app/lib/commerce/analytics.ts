@@ -2,6 +2,7 @@ import type {
   CommerceDataProviderKind,
   CommerceMarketMetrics,
   CommerceMarketObservation,
+  CommercePlatformComparison,
   CommerceProductSignal,
   CommerceResearchInsights,
   CommerceSourceReport,
@@ -58,6 +59,7 @@ function demandScoreFromSignals(products: CommerceProductSignal[]): number {
     typeof product.salesRank === "number" ? [product.salesRank] : [],
   );
   const purchases = products.flatMap((product) =>
+    (!product.platform || product.platform === "amazon") &&
     typeof product.recentPurchaseLowerBound === "number"
       ? [product.recentPurchaseLowerBound]
       : [],
@@ -179,11 +181,77 @@ function computeTopBrandShare(products: CommerceProductSignal[]): number | undef
   return round(top / brands.length, 3);
 }
 
+const PLATFORM_LABELS: Record<string, string> = {
+  amazon: "Amazon",
+  "tiktok-shop": "TikTok Shop",
+  temu: "Temu",
+  "1688": "1688",
+  "market-search": "公开市场",
+};
+
+function dominantCurrency(
+  products: CommerceProductSignal[],
+): string | undefined {
+  const counts = new Map<string, number>();
+  for (const product of products) {
+    if (product.price === undefined || !product.currency) continue;
+    counts.set(product.currency, (counts.get(product.currency) || 0) + 1);
+  }
+  return Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0];
+}
+
+/**
+ * 按平台独立统计价格、评分与评论，避免跨币种价格直接混算。
+ * 这里只比较采集到的公开样本，不把样本占比解释成平台市场份额。
+ */
+function buildPlatformComparisons(
+  products: CommerceProductSignal[],
+): CommercePlatformComparison[] {
+  const groups = new Map<string, CommerceProductSignal[]>();
+  for (const product of products) {
+    const platform = product.platform || "amazon";
+    groups.set(platform, [...(groups.get(platform) || []), product]);
+  }
+
+  return Array.from(groups.entries())
+    .map(([platform, items]) => {
+      const currency = dominantCurrency(items);
+      const prices = items.flatMap((item) =>
+        item.price !== undefined && (!currency || item.currency === currency)
+          ? [item.price]
+          : [],
+      );
+      const ratings = items.flatMap((item) =>
+        item.rating !== undefined ? [item.rating] : [],
+      );
+      const reviews = items.flatMap((item) =>
+        item.reviewCount !== undefined ? [item.reviewCount] : [],
+      );
+      return {
+        platform: platform as CommercePlatformComparison["platform"],
+        label: PLATFORM_LABELS[platform] || platform,
+        sampleSize: items.length,
+        priceSampleSize: prices.length,
+        medianPrice: prices.length ? round(median(prices) || 0, 2) : undefined,
+        currency,
+        medianRating: ratings.length ? round(median(ratings) || 0, 2) : undefined,
+        medianReviewCount: reviews.length
+          ? round(median(reviews) || 0)
+          : undefined,
+        topBrandShare: computeTopBrandShare(items),
+      };
+    })
+    .sort((left, right) => right.sampleSize - left.sampleSize);
+}
+
 export function enrichProductsWithEstimates(
   products: CommerceProductSignal[],
 ): CommerceProductSignal[] {
   return products.map((product) => {
     if (product.estimatedMonthlyUnits) return product;
+
+    // TikTok Shop、Temu 与 1688 的“已售”通常不是月度口径，不能套用 Amazon 月销量模型。
+    if (product.platform && product.platform !== "amazon") return product;
 
     const rankEstimate = estimateMonthlyUnitsFromRank(product.salesRank);
     const publicLowerBound = product.recentPurchaseLowerBound;
@@ -223,8 +291,12 @@ export function calculateMarketMetrics(
   products: CommerceProductSignal[],
 ): CommerceMarketMetrics {
   const enriched = enrichProductsWithEstimates(products);
+  const currency = dominantCurrency(enriched);
   const prices = enriched.flatMap((product) =>
-    typeof product.price === "number" ? [product.price] : [],
+    typeof product.price === "number" &&
+    (!currency || !product.currency || product.currency === currency)
+      ? [product.price]
+      : [],
   );
   const ranks = enriched.flatMap((product) =>
     typeof product.salesRank === "number" ? [product.salesRank] : [],
@@ -241,7 +313,15 @@ export function calculateMarketMetrics(
     enriched,
     topBrandShare,
   );
-  const priceScore = priceHealthScore(enriched);
+  const priceScore = priceHealthScore(
+    enriched.filter(
+      (product) =>
+        product.price === undefined ||
+        !currency ||
+        !product.currency ||
+        product.currency === currency,
+    ),
+  );
   const newEntryScore = round(
     competitionScore * 0.55 + priceScore * 0.25 + demandScore * 0.2,
   );
@@ -252,7 +332,6 @@ export function calculateMarketMetrics(
       newEntryScore * 0.2,
   );
 
-  const currency = enriched.find((product) => product.currency)?.currency;
   return {
     sampleSize: enriched.length,
     opportunityScore,
@@ -272,6 +351,7 @@ export function calculateMarketMetrics(
           high: estimates.reduce((sum, value) => sum + value.high, 0),
         }
       : undefined,
+    platformComparisons: buildPlatformComparisons(enriched),
   };
 }
 
@@ -368,6 +448,7 @@ export function calculateMarketIntelligenceMetrics(
     uniqueDomainCount,
     topDomainShare: topDomainShare === undefined ? undefined : round(topDomainShare, 3),
     priceSignalCount: prices.length,
+    platformComparisons: buildPlatformComparisons(products),
   };
 }
 

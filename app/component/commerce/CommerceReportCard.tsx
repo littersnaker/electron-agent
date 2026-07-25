@@ -161,6 +161,18 @@ function ObservationRow({ observation }: { observation: CommerceMarketObservatio
 }
 
 function ProductRow({ product }: { product: CommerceProductSignal }) {
+  const isAmazon = !product.platform || product.platform === "amazon";
+  const demandText = isAmazon
+    ? product.recentPurchaseLowerBound
+      ? `${formatCompact(product.recentPurchaseLowerBound)}+/mo`
+      : product.estimatedMonthlyUnits
+        ? `~${formatCompact(product.estimatedMonthlyUnits.median)}`
+        : "—"
+    : product.recentPurchaseLabel ||
+      (product.recentPurchaseLowerBound
+        ? `${formatCompact(product.recentPurchaseLowerBound)}+ sold`
+        : "—");
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_78px_62px_66px] items-center gap-2 border-t border-[var(--border)] px-2 py-2.5 text-[10px] first:border-t-0">
       <div className="min-w-0">
@@ -194,11 +206,7 @@ function ProductRow({ product }: { product: CommerceProductSignal }) {
         {product.salesRank ? `#${formatCompact(product.salesRank)}` : "—"}
       </div>
       <div className="text-right font-mono text-[var(--text-secondary)]">
-        {product.recentPurchaseLowerBound
-          ? `${formatCompact(product.recentPurchaseLowerBound)}+/mo`
-          : product.estimatedMonthlyUnits
-            ? `~${formatCompact(product.estimatedMonthlyUnits.median)}`
-            : "—"}
+        {demandText}
       </div>
     </div>
   );
@@ -213,20 +221,24 @@ function sourceStatusLabel(status: CommerceResearchReport["sources"][number]["st
   return "获取失败";
 }
 
-function amazonRouteLabel(
+function sourceRouteLabel(
   source: CommerceResearchReport["sources"][number],
 ): string | undefined {
-  if (source.id !== "amazon") return undefined;
-  if (source.amazonDataRoute === "api") return "API";
-  if (source.amazonDataRoute === "crawler") return "爬虫";
+  const route = source.dataRoute || source.amazonDataRoute;
+  if (route === "api") return "API";
+  if (route === "crawler") {
+    if (source.crawlerEngine === "browser") return "浏览器爬虫";
+    if (source.crawlerEngine === "http") return "HTTP 爬虫";
+    return "爬虫";
+  }
   return undefined;
 }
 
-function amazonAttemptedRouteLabel(
+function sourceAttemptedRouteLabel(
   source: CommerceResearchReport["sources"][number],
 ): string | undefined {
-  if (source.id !== "amazon" || source.amazonDataRoute) return undefined;
-  const routes = source.amazonAttemptedRoutes || [];
+  if (sourceRouteLabel(source)) return undefined;
+  const routes = source.attemptedRoutes || source.amazonAttemptedRoutes || [];
   if (!routes.length) return undefined;
   return routes
     .map((route) => (route === "api" ? "API" : "爬虫"))
@@ -249,13 +261,13 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
           </div>
         </div>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {report.sources.map((source) => {
           const isDemoSource = source.status === "demo";
           const ok =
             source.status === "collected" || source.status === "partial";
-          const routeLabel = amazonRouteLabel(source);
-          const attemptedRouteLabel = amazonAttemptedRouteLabel(source);
+          const routeLabel = sourceRouteLabel(source);
+          const attemptedRouteLabel = sourceAttemptedRouteLabel(source);
           return (
             <div
               key={source.id}
@@ -288,7 +300,7 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
                         color: "#ff453a",
                         background: "rgba(255,69,58,0.10)",
                       }}
-                      title="本轮已实际尝试这些 Amazon 数据链路，但未取得可用样本"
+                      title="本轮已实际尝试这些数据链路，但未取得可用样本"
                     >
                       已尝试 {attemptedRouteLabel}
                     </span>
@@ -337,10 +349,10 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
           >
             <span className="font-semibold text-[var(--text-secondary)]">
               {source.label}
-              {amazonRouteLabel(source)
-                ? `（${amazonRouteLabel(source)}）`
-                : amazonAttemptedRouteLabel(source)
-                  ? `（已尝试 ${amazonAttemptedRouteLabel(source)}）`
+              {sourceRouteLabel(source)
+                ? `（${sourceRouteLabel(source)}）`
+                : sourceAttemptedRouteLabel(source)
+                  ? `（已尝试 ${sourceAttemptedRouteLabel(source)}）`
                   : ""}：
             </span>
             {source.error ? `未分析 · ${source.error}` : source.summary}
@@ -351,11 +363,72 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
   );
 }
 
+function PlatformComparison({
+  metrics,
+}: {
+  metrics: CommerceMarketMetrics;
+}) {
+  const comparisons = metrics.platformComparisons || [];
+  if (comparisons.length < 2) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2">
+        <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+          跨平台公开样本对比
+        </div>
+        <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+          各平台按自身币种独立统计；样本数不代表市场份额，价格不做自动汇率换算
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {comparisons.map((item) => (
+          <div
+            key={item.platform}
+            className="rounded-[13px] border px-3 py-2.5"
+            style={{
+              background: "var(--glass-soft)",
+              borderColor: "var(--border)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                {item.label}
+              </span>
+              <span className="font-mono text-[9px] text-[var(--text-tertiary)]">
+                {item.sampleSize} 样本
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[8px]">
+              <span className="text-[var(--text-tertiary)]">中位价格</span>
+              <span className="truncate text-right font-mono text-[var(--text-secondary)]">
+                {formatPrice(item.medianPrice, item.currency)}
+              </span>
+              <span className="text-[var(--text-tertiary)]">中位评分</span>
+              <span className="text-right font-mono text-[var(--text-secondary)]">
+                {item.medianRating ?? "—"}
+              </span>
+              <span className="text-[var(--text-tertiary)]">中位评论</span>
+              <span className="text-right font-mono text-[var(--text-secondary)]">
+                {formatCompact(item.medianReviewCount)}
+              </span>
+              <span className="text-[var(--text-tertiary)]">价格覆盖</span>
+              <span className="text-right font-mono text-[var(--text-secondary)]">
+                {item.priceSampleSize}/{item.sampleSize}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Cross-border Market Intelligence Agent 的结构化结果卡片。
  *
- * 首先展示公开市场 observations；Amazon 商品数据会明确显示来自 API 还是爬虫。
- * 没有 Amazon API 时自动使用公开页面爬虫，只有所有真实来源都失败时才进入 Demo。
+ * 首先展示公开市场 observations；Amazon、TikTok Shop、Temu 与 1688
+ * 都会明确显示来自 API 还是爬虫。只有所有真实来源都失败时才进入 Demo。
  */
 export default function CommerceReportCard({
   report,
@@ -527,6 +600,8 @@ export default function CommerceReportCard({
         </div>
 
         <SourceCoverage report={report} />
+
+        {!isDemo && <PlatformComparison metrics={report.metrics} />}
 
         {!isDemo && report.metrics.estimatedMonthlyUnits && (
           <div

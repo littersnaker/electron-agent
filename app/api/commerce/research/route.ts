@@ -92,12 +92,19 @@ function sourceStatusLabel(
 function sourceDisplayLabel(
   source: CommerceResearchReport["sources"][number],
 ): string {
-  if (source.id !== "amazon") return source.label;
-  if (source.amazonDataRoute === "api") return `${source.label}（API）`;
-  if (source.amazonDataRoute === "crawler") return `${source.label}（爬虫）`;
+  const route = source.dataRoute || source.amazonDataRoute;
+  if (route === "api") return `${source.label}（API）`;
+  if (route === "crawler") {
+    const engine =
+      source.crawlerEngine === "browser"
+        ? "浏览器爬虫"
+        : source.crawlerEngine === "http"
+          ? "HTTP 爬虫"
+          : "爬虫";
+    return `${source.label}（${engine}）`;
+  }
   return source.label;
 }
-
 
 function compactSourceError(value: string | undefined, maximum = 220): string | undefined {
   const normalized = value?.replace(/\s+/gu, " ").trim();
@@ -110,10 +117,36 @@ function compactSourceError(value: string | undefined, maximum = 220): string | 
 function sourceRouteDiagnostic(
   source: CommerceResearchReport["sources"][number],
 ): string | undefined {
-  if (source.id !== "amazon" || source.amazonDataRoute) return undefined;
-  const routes = source.amazonAttemptedRoutes || [];
+  if (source.dataRoute || source.amazonDataRoute) return undefined;
+  const routes = source.attemptedRoutes || source.amazonAttemptedRoutes || [];
   if (!routes.length) return undefined;
   return `已尝试 ${routes.map((route) => (route === "api" ? "API" : "爬虫")).join(" → ")}`;
+}
+
+function platformRouteSummary(
+  sources: CommerceResearchReport["sources"],
+): string {
+  const platformIds = new Set(["amazon", "tiktok-shop", "temu", "1688"]);
+  const summaries = sources
+    .filter((source) => platformIds.has(source.id))
+    .map((source) => {
+      const route = source.dataRoute || source.amazonDataRoute;
+      if (route === "api") return `${source.label} API ${source.sampleSize} 条`;
+      if (route === "crawler") {
+        const engine =
+          source.crawlerEngine === "browser"
+            ? "浏览器爬虫"
+            : source.crawlerEngine === "http"
+              ? "HTTP 爬虫"
+              : "爬虫";
+        return `${source.label} ${engine} ${source.sampleSize} 条`;
+      }
+      const attempted = source.attemptedRoutes || source.amazonAttemptedRoutes || [];
+      return attempted.length
+        ? `${source.label} 已尝试 ${attempted.map((item) => (item === "api" ? "API" : "爬虫")).join("→")}，0 条`
+        : `${source.label} 0 条`;
+    });
+  return summaries.join("；");
 }
 
 function renderReportText(report: CommerceResearchReport): string {
@@ -192,7 +225,7 @@ function progress(
  * 三档运行模式由数据源 Orchestrator 自动判断：
  * - full：公开市场 + 至少一个真实增强来源；
  * - market-intelligence：至少有一组真实数据，但增强覆盖不足；
- * - demo：API、Amazon 爬虫与其他真实来源都不可用时，使用明确标记的模拟数据走完整流程。
+ * - demo：各平台 API、公开页爬虫与其他真实来源都不可用时，使用明确标记的模拟数据走完整流程。
  */
 export async function POST(request: Request): Promise<Response> {
   const credentials = resolveLlmCredentials(request.headers);
@@ -246,7 +279,7 @@ export async function POST(request: Request): Promise<Response> {
           stage: "collect",
           progress: 38,
           detail:
-            "正在采集公开市场信号；Amazon 将优先使用 API，没有 API 或 API 失败时自动切换公开页面爬虫…",
+            "正在并行采集公开市场信号；Amazon、TikTok Shop、Temu 与 1688 均优先使用 API，API 不可用时自动切换公开页面爬虫…",
         });
         const sourceResult = await collectMultiSourceMarketData({
           marketplace: body.marketplace,
@@ -265,15 +298,7 @@ export async function POST(request: Request): Promise<Response> {
         }
 
         const modeMeta = getCommerceRunModeMeta(sourceResult.runMode);
-        const amazonSource = sourceResult.sources.find(
-          (source) => source.id === "amazon",
-        );
-        const amazonRouteDetail =
-          amazonSource?.amazonDataRoute === "api"
-            ? "Amazon 已走 API 链路"
-            : amazonSource?.amazonDataRoute === "crawler"
-              ? "Amazon 已走无 API 爬虫链路"
-              : "Amazon 本轮未取得可用样本";
+        const routeDetail = platformRouteSummary(sourceResult.sources);
 
         progress(controller, encoder, {
           stage: "normalize",
@@ -281,7 +306,7 @@ export async function POST(request: Request): Promise<Response> {
           detail:
             sourceResult.runMode === "demo"
               ? `真实来源暂无可用数据，已进入${modeMeta.label}，正在生成明确标记的模拟样本…`
-              : `${amazonRouteDetail}；已取得 ${sourceResult.observations.length} 条公开市场结果和 ${sourceResult.products.length} 个可结构化商品样本，正在统一口径…`,
+              : `${routeDetail}；共取得 ${sourceResult.observations.length} 条公开市场结果和 ${sourceResult.products.length} 个可结构化商品样本，正在统一口径…`,
         });
 
         // 演示数据只用于验证界面与报告流程，不运行月销量等启发式估算，
@@ -400,7 +425,7 @@ export async function POST(request: Request): Promise<Response> {
                 : `${modeMeta.description} 本轮实际使用：${
                     realSources.map(sourceDisplayLabel).join("、") ||
                     "无可用真实来源"
-                  }。未获取的平台 API 不会阻断报告，也不会参与事实性结论。`,
+                  }。未获取的平台 API 或爬虫不会阻断报告，也不会参与事实性结论。`,
           },
           sources: sourceResult.sources,
           confidenceScore,
@@ -421,7 +446,7 @@ export async function POST(request: Request): Promise<Response> {
           detail:
             sourceResult.runMode === "demo"
               ? "无真实数据演示报告已生成；接入真实数据源后会自动切换为市场洞察或完整研究模式。"
-              : `${modeMeta.label}已完成；${amazonRouteDetail}，结构化报告可直接导出 PDF。`,
+              : `${modeMeta.label}已完成；${routeDetail}，结构化报告可直接导出 PDF。`,
         });
         sendUsage(controller, encoder, {
           prompt: promptTokens,
@@ -453,9 +478,9 @@ export async function POST(request: Request): Promise<Response> {
             "",
             message,
             "",
-            "系统已支持 Amazon API 与公开页面爬虫双链路；如果两条链路都失败，仍会继续检查其他真实来源，最后才进入演示模式。",
+            "系统已支持 Amazon、TikTok Shop、Temu 与 1688 的 API → 公开页面爬虫双链路；单个平台失败不会阻断其他来源。",
             "",
-            "可在右上角「服务与数据源」检查 TalorData；无 Amazon API 时无需额外填写密钥，系统会自动尝试公开页面爬虫。",
+            "可在右上角「服务与数据源」检查 TalorData；没有平台 API 时无需额外填写密钥，系统会自动尝试对应公开页面爬虫。",
           ].join("\n"),
         });
         sendUsage(controller, encoder, {

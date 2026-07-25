@@ -14,7 +14,7 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
-interface PlatformConfig {
+export interface PlatformConfig {
   sourceId: Extract<CommerceMarketSourceId, "tiktok-shop" | "temu" | "1688">;
   kind: Extract<CommerceDataProviderKind, "talordata-tiktok" | "talordata-temu" | "talordata-1688">;
   label: string;
@@ -85,9 +85,12 @@ function normalizeResult(value: JsonRecord, config: PlatformConfig): CommercePro
 }
 
 /**
- * TikTok Shop / Temu / 1688 暂不假装存在“官方公开市场 API”。
- * 在没有平台卖家授权时，使用 TalorData 的公开搜索结果作为市场可见度样本。
- * 如果未来接入官方/第三方 API，只需新增 Provider；Orchestrator 和报告无需重写。
+ * TikTok Shop / Temu / 1688 的 API 数据入口。
+ *
+ * 当前项目把 TalorData 的平台定向 SERP 作为无需卖家授权的 API 候选：
+ * - 有 TalorData Token 时优先走该 API；
+ * - API 未配置、失败或返回空数据时，由 PlatformAutoProvider 自动切换公开页面爬虫；
+ * - Provider 只返回公开可见字段，不把搜索可见度冒充平台官方销量或 GMV。
  */
 export class PlatformSerpProvider implements CommerceDataProvider {
   readonly kind: CommerceDataProviderKind;

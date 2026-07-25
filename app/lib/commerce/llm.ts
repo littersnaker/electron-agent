@@ -122,6 +122,8 @@ function compactProduct(product: CommerceProductSignal): Record<string, unknown>
     reviewCount: product.reviewCount,
     salesRank: product.salesRank,
     salesRankCategory: product.salesRankCategory,
+    recentPurchaseLowerBound: product.recentPurchaseLowerBound,
+    recentPurchaseLabel: product.recentPurchaseLabel,
     estimatedMonthlyUnits: product.estimatedMonthlyUnits,
     badges: product.badges,
     bulletPoints: product.bulletPoints?.slice(0, 5),
@@ -157,10 +159,10 @@ export async function generateCommerceInsights(input: {
         role: "system",
         content: [
           "你是 Cross-border Market Intelligence Agent，负责解释公开市场 SERP、Shopping 与可选平台增强数据。",
-          "Amazon 商品样本可能来自 API，也可能来自公开页面爬虫；必须以 sources 中的 amazonDataRoute 和 provider 为准。",
+          "Amazon、TikTok Shop、Temu 与 1688 商品样本都可能来自 API 或公开页面爬虫；必须以 sources 中的 dataRoute、attemptedRoutes 和 provider 为准。",
           "即使没有 Amazon、Keepa、TikTok Shop、Temu、1688 的付费 API，也必须基于已取得的公开市场或爬虫数据完成一份市场情报初筛。",
           "你只能解释输入中已经给出的数据，不得编造真实搜索量、成交量、GMV、利润率、CPC 或平台私有字段。",
-          "market observations 代表公开搜索可见度，不代表真实销量或平台市场份额。Amazon 爬虫字段同样只代表采集时公开可见的信息。",
+          "market observations 代表公开搜索可见度，不代表真实销量或平台市场份额。任何平台爬虫字段都只代表采集时公开可见的信息。",
           "estimatedMonthlyUnits 只有在输入真的存在时才可引用，并必须当作启发式区间而非平台官方销量。",
           "sources 会明确标记每个平台 collected/partial/unconfigured/empty/error/demo；严禁对未获取的数据源做事实性结论。",
           input.runMode === "full"
@@ -169,6 +171,7 @@ export async function generateCommerceInsights(input: {
               ? "当前为基础市场洞察模式：禁止推断真实销量、GMV、市场份额、利润或供应链成本。"
               : "当前为演示模式：所有数据都是模拟内容，只能说明流程，不得输出任何真实商业判断。",
           "综合结论必须区分：已获取数据支持的判断、缺失数据造成的不确定性、下一步需要补的来源。",
+          "跨平台价格只能引用 metrics.platformComparisons 中按平台、按币种独立计算的结果；禁止直接把 CNY、USD 等不同币种价格相减或判断价差。",
           "只返回 JSON，不要 Markdown。",
           "JSON 字段固定为 summary, opportunities, risks, actions，每个数组最多 6 项。",
           "建议必须具体、可执行，优先告诉运营下一步该验证什么。",

@@ -23,6 +23,12 @@ export type CommerceDataProviderKind =
   | "talordata-tiktok"
   | "talordata-temu"
   | "talordata-1688"
+  | "tiktok-shop-public-page"
+  | "temu-public-page"
+  | "alibaba-1688-public-page"
+  | "tiktok-shop-auto"
+  | "temu-auto"
+  | "alibaba-1688-auto"
   | "keepa"
   | "amazon-sp-api"
   | "amazon-public-page"
@@ -48,8 +54,19 @@ export type CommerceSourceStatus =
 
 export type CommerceDataQuality = "high" | "medium" | "low" | "unavailable";
 
-/** Amazon 来源实际采用的数据链路，供报告与界面透明展示。 */
-export type CommerceAmazonDataRoute = "api" | "crawler";
+/**
+ * 平台数据最终采用的链路。
+ *
+ * - api：TalorData 或平台授权 API；
+ * - crawler：无需平台 API Key 的公开页面采集。
+ */
+export type CommercePlatformDataRoute = "api" | "crawler";
+
+/** 爬虫链路实际使用的执行引擎。 */
+export type CommerceCrawlerEngine = "http" | "browser";
+
+/** 兼容历史代码的 Amazon 专用别名。 */
+export type CommerceAmazonDataRoute = CommercePlatformDataRoute;
 
 /**
  * Commerce Agent 的三档运行模式。
@@ -142,6 +159,18 @@ export interface CommerceProductSignal {
  * - newEntryScore: 进入研究度（是否值得继续投入更昂贵的数据验证）；
  * - opportunityScore: 综合市场信号分，不等于最终备货决策。
  */
+export interface CommercePlatformComparison {
+  platform: CommerceMarketSourceId;
+  label: string;
+  sampleSize: number;
+  priceSampleSize: number;
+  medianPrice?: number;
+  currency?: string;
+  medianRating?: number;
+  medianReviewCount?: number;
+  topBrandShare?: number;
+}
+
 export interface CommerceMarketMetrics {
   sampleSize: number;
   opportunityScore: number;
@@ -161,6 +190,8 @@ export interface CommerceMarketMetrics {
   uniqueDomainCount?: number;
   topDomainShare?: number;
   priceSignalCount?: number;
+  /** 按平台、按币种独立计算，避免把 1688 人民币价格与海外站点价格直接混算。 */
+  platformComparisons?: CommercePlatformComparison[];
 }
 
 /** 单个数据来源的可用性、覆盖字段和分析摘要。 */
@@ -169,12 +200,20 @@ export interface CommerceSourceReport {
   label: string;
   status: CommerceSourceStatus;
   provider?: CommerceDataProviderKind;
-  /** 仅 Amazon 来源使用：明确标记本轮成功采用 API 还是公开页面爬虫。 */
-  amazonDataRoute?: CommerceAmazonDataRoute;
   /**
-   * Amazon 最终失败时记录已实际尝试的链路，例如 ["crawler"] 或 ["api", "crawler"]。
-   * 它只用于故障诊断，不代表这些链路成功返回过数据。
+   * 本轮平台来源最终成功采用的链路。Amazon、TikTok Shop、Temu、1688 都使用该字段。
    */
+  dataRoute?: CommercePlatformDataRoute;
+  /** dataRoute=crawler 时，标记本轮由轻量 HTTP 还是 Playwright 浏览器取得样本。 */
+  crawlerEngine?: CommerceCrawlerEngine;
+  /**
+   * 所有候选链路最终都失败时，记录实际尝试顺序，例如 ["api", "crawler"]。
+   * 该字段只用于故障诊断，不代表这些链路曾成功返回数据。
+   */
+  attemptedRoutes?: CommercePlatformDataRoute[];
+  /** 兼容历史报告与旧 UI；新代码优先读取 dataRoute。 */
+  amazonDataRoute?: CommerceAmazonDataRoute;
+  /** 兼容历史报告与旧 UI；新代码优先读取 attemptedRoutes。 */
   amazonAttemptedRoutes?: CommerceAmazonDataRoute[];
   quality: CommerceDataQuality;
   sampleSize: number;
