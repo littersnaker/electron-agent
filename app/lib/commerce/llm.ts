@@ -123,6 +123,8 @@ function compactProduct(product: CommerceProductSignal): Record<string, unknown>
     salesRank: product.salesRank,
     salesRankCategory: product.salesRankCategory,
     estimatedMonthlyUnits: product.estimatedMonthlyUnits,
+    badges: product.badges,
+    bulletPoints: product.bulletPoints?.slice(0, 5),
   };
 }
 
@@ -155,9 +157,10 @@ export async function generateCommerceInsights(input: {
         role: "system",
         content: [
           "你是 Cross-border Market Intelligence Agent，负责解释公开市场 SERP、Shopping 与可选平台增强数据。",
-          "即使没有 Amazon、Keepa、TikTok Shop、Temu、1688 的付费 API，也必须基于已取得的公开市场数据完成一份市场情报初筛。",
+          "Amazon 商品样本可能来自 API，也可能来自公开页面爬虫；必须以 sources 中的 amazonDataRoute 和 provider 为准。",
+          "即使没有 Amazon、Keepa、TikTok Shop、Temu、1688 的付费 API，也必须基于已取得的公开市场或爬虫数据完成一份市场情报初筛。",
           "你只能解释输入中已经给出的数据，不得编造真实搜索量、成交量、GMV、利润率、CPC 或平台私有字段。",
-          "market observations 代表公开搜索可见度，不代表真实销量或平台市场份额。",
+          "market observations 代表公开搜索可见度，不代表真实销量或平台市场份额。Amazon 爬虫字段同样只代表采集时公开可见的信息。",
           "estimatedMonthlyUnits 只有在输入真的存在时才可引用，并必须当作启发式区间而非平台官方销量。",
           "sources 会明确标记每个平台 collected/partial/unconfigured/empty/error/demo；严禁对未获取的数据源做事实性结论。",
           input.runMode === "full"

@@ -1,4 +1,4 @@
-/** 白雪条 V7 支持的模型供应商。 */
+/** Multi-agent 支持的模型供应商。 */
 export type LlmProviderId =
   | "qwen"
   | "openai"

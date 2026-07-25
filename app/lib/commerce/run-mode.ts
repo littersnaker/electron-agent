@@ -24,7 +24,7 @@ const MODE_META: Record<CommerceRunMode, CommerceRunModeMeta> = {
       "已取得真实公开市场或单一平台数据，但增强数据不足；报告只解释当前可验证字段。",
   },
   demo: {
-    label: "无 API 演示模式",
+    label: "无真实数据演示模式",
     shortLabel: "演示模式",
     description:
       "没有取得真实外部数据，系统使用明确标记的模拟样本展示完整流程，不能用于商业决策。",

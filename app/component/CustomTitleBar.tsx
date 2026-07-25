@@ -58,7 +58,7 @@ export default function CustomTitleBar({
           className="truncate text-[12px] font-semibold tracking-[-0.01em]"
           style={{ color: "var(--text-primary)" }}
         >
-          Agent Workspace
+          Multi-agent
         </span>
         <span
           className="rounded-full px-2 py-0.5 text-[9px] font-medium"

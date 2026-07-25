@@ -1,4 +1,4 @@
-import { TalorDataMarketProvider } from "./talordata-market";
+import { AmazonAutoProvider } from "./amazon-auto";
 import type {
   CommerceProviderSearchInput,
   CommerceProviderSearchResult,
@@ -6,8 +6,10 @@ import type {
 
 /**
  * 兼容旧调用点的 Amazon 单源入口。
- * 新的跨境市场研究主流程已经迁移到 Data Source Orchestrator；新代码应优先调用
- * `collectMultiSourceMarketData`，这里仅保留以避免已有扩展直接断裂。
+ *
+ * 旧代码仍可继续调用 `collectAmazonMarketData`，但内部已经升级为自动双链路：
+ * - 有 Amazon SP-API 或 TalorData Token 时优先使用 API；
+ * - 没有 API，或 API 本轮失败/返回空数据时，自动使用 Amazon 公开页面爬虫。
  */
 export async function collectAmazonMarketData(
   input: CommerceProviderSearchInput,
@@ -16,5 +18,5 @@ export async function collectAmazonMarketData(
     input.serviceCredentials?.talorDataToken ||
     input.serviceCredentials?.serpApi ||
     input.serpApiKey;
-  return new TalorDataMarketProvider(token).searchProducts(input);
+  return new AmazonAutoProvider(token).searchProducts(input);
 }

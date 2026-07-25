@@ -97,6 +97,7 @@ function parseCatalogItem(
 
   return {
     asin,
+    platform: "amazon",
     title: readString(summary, "itemName") || asin,
     brand: readString(summary, "brand"),
     imageUrl: readString(mainImage || null, "link"),
@@ -199,7 +200,7 @@ async function fetchCatalogPage(
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "AgentWorkspace-Commerce/1.0 (Language=TypeScript)",
+      "User-Agent": "Multi-agent-Commerce/1.0 (Language=TypeScript)",
       "x-amz-access-token": accessToken,
       "x-amz-date": new Date()
         .toISOString()
@@ -241,9 +242,15 @@ export class AmazonSpApiProvider implements CommerceDataProvider {
     input: CommerceProviderSearchInput,
   ): Promise<CommerceProviderSearchResult> {
     const products = await fetchCatalogPage(input);
+    if (!products.length) {
+      throw new Error("Amazon SP-API 请求成功，但没有返回可分析的商品样本。");
+    }
+
     return {
       provider: this.kind,
+      sourceId: "amazon",
       products,
+      coverage: ["商品", "品牌", "类目", "图片", "Sales Rank", "变体关系"],
       warnings: [
         "Amazon Catalog Items API 不提供任意竞品的真实订单量；界面中的月销量仅为基于 Sales Rank 的启发式估算。",
         "Catalog Items API 本身不保证返回竞品价格、评分和评论数；如需这些字段，可开启合规的公开页面采集或接入额外授权数据源。",

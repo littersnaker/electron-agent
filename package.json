@@ -19,7 +19,9 @@
     "electron:build": "tsx scripts/build-electron.ts",
     "electron:package": "pnpm electron:build",
     "electron:make": "pnpm electron:build && pnpm electron:prepare-icons && electron-builder",
-    "electron:compile": "tsx scripts/compile-electron.ts"
+    "electron:compile": "tsx scripts/compile-electron.ts",
+    "test:commerce-routing": "tsx scripts/test-amazon-data-source.ts",
+    "test:amazon-crawler": "tsx scripts/test-amazon-crawler-network.ts"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",

@@ -1,5 +1,5 @@
 /*
- * 白雪条 Agent Runtime 的公共结构定义。
+ * Multi-agent Agent Runtime 的公共结构定义。
  *
  * V3 重点：
  * 1. Hierarchical Planner：High-Level Plan -> Parallel Leaf Tasks；

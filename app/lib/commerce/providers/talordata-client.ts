@@ -11,7 +11,7 @@ import {
  *   POST https://serpapi.talordata.net/request
  *
  * 默认优先使用 `/serp/v1/request`，较短的 `/request` 只作为自动兼容回退。
- * 请求使用 Bearer Token 和 `application/x-www-form-urlencoded`。旧版白雪条曾误用账户接口，
+ * 请求使用 Bearer Token 和 `application/x-www-form-urlencoded`。旧版项目曾误用账户接口，
  * 因此这里会主动忽略已知错误地址；私有部署仍可通过 `TALORDATA_SERP_ENDPOINT` 覆盖。
  */
 

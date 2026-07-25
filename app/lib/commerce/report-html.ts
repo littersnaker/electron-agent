@@ -117,6 +117,15 @@ function sourceStatusLabel(
   return "获取失败";
 }
 
+function sourceDisplayLabel(
+  source: CommerceResearchReport["sources"][number],
+): string {
+  if (source.id !== "amazon") return source.label;
+  if (source.amazonDataRoute === "api") return `${source.label}（API）`;
+  if (source.amazonDataRoute === "crawler") return `${source.label}（爬虫）`;
+  return source.label;
+}
+
 function renderList(title: string, items: string[], accent: string): string {
   if (!items.length) return "";
   return `
@@ -216,7 +225,7 @@ export function buildCommerceReportHtml(report: CommerceResearchReport): string 
       <div class="score"><strong>${report.metrics.opportunityScore}</strong><span>${isDemo ? "Demo Signal" : runMode === "full" ? "Multi-source Signal" : "Public Market Signal"}</span><span>${isDemo ? "流程演示" : scoreLabel(report.metrics.opportunityScore)}</span></div>
     </div>
   </section>
-  ${isDemo ? `<div class="demo-warning">无 API 演示模式：本报告中的样本、价格、评论和评分均为模拟内容，仅用于验证流程，不能用于选品、采购、定价或投放决策。</div>` : ""}
+  ${isDemo ? `<div class="demo-warning">无真实数据演示模式：本报告中的样本、价格、评论和评分均为模拟内容，仅用于验证流程，不能用于选品、采购、定价或投放决策。</div>` : ""}
 
   <section class="section">
     <h2>${isDemo ? "演示流程概览" : "市场概览"}</h2>
@@ -244,7 +253,7 @@ export function buildCommerceReportHtml(report: CommerceResearchReport): string 
     <h2>数据源覆盖</h2>
     <table>
       <thead><tr><th>Source</th><th>Status</th><th>Samples</th><th>Coverage / Notes</th></tr></thead>
-      <tbody>${report.sources.map((source) => `<tr><td><strong>${escapeHtml(source.label)}</strong></td><td>${escapeHtml(sourceStatusLabel(source.status))}</td><td>${source.sampleSize}</td><td>${escapeHtml(source.coverage.length ? source.coverage.join(" · ") : source.error || source.summary)}</td></tr>`).join("")}</tbody>
+      <tbody>${report.sources.map((source) => `<tr><td><strong>${escapeHtml(sourceDisplayLabel(source))}</strong></td><td>${escapeHtml(sourceStatusLabel(source.status))}</td><td>${source.sampleSize}</td><td>${escapeHtml(source.coverage.length ? source.coverage.join(" · ") : source.error || source.summary)}</td></tr>`).join("")}</tbody>
     </table>
   </section>
 
@@ -271,7 +280,7 @@ export function buildCommerceReportHtml(report: CommerceResearchReport): string 
     ${report.warnings.map((warning) => `• ${escapeHtml(warning)}`).join("<br />")}
   </section>
 
-  <div class="footer"><span>Agent Workspace · Cross-border Market Intelligence</span><span>生成时间：${escapeHtml(generatedAt)}</span></div>
+  <div class="footer"><span>Multi-agent · Cross-border Market Intelligence</span><span>生成时间：${escapeHtml(generatedAt)}</span></div>
 </div>
 </body>
 </html>`;

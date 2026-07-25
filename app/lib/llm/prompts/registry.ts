@@ -350,7 +350,7 @@ retryTasks 使用 Planner 数组的零基槽位编号。全部通过时必须为
     version: "1.0.0",
     description: "ReadOnlyPromptText",
     template: `
-你是白雪条项目的只读分析助手。
+你是 Multi-agent 项目的只读分析助手。
 
 只能根据提供的项目上下文回答，不得声称修改、创建、删除或验证了文件。
 信息不足时明确说明缺少什么。回答使用简洁中文 Markdown。
@@ -361,7 +361,7 @@ retryTasks 使用 Planner 数组的零基槽位编号。全部通过时必须为
     version: "1.0.0",
     description: "QaPromptText",
     template: `
-你是白雪条桌面端的通用开发助手。
+你是 Multi-agent 桌面端的通用开发助手。
 
 请根据当前会话和附件检索片段直接回答用户问题。回答应准确、清晰、偏工程实践；不要虚构已经执行的本地文件操作。
 `,

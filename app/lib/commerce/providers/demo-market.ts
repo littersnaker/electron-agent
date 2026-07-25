@@ -25,7 +25,7 @@ function createDeterministicSeed(value: string): number {
 }
 
 /**
- * 无 API 演示 Provider。
+ * 无真实数据演示 Provider。
  *
  * 该 Provider 只在所有真实数据源均未取得结果时由 Orchestrator 主动调用，绝不会与真实
  * 数据混合后冒充市场事实。所有 observation / product 均带 `isDemo: true`，报告层还会
@@ -109,7 +109,7 @@ export class DemoMarketProvider implements CommerceDataProvider {
       observations,
       coverage: ["模拟 Web 结果", "模拟 Shopping 结果", "演示价格字段"],
       warnings: [
-        "当前为无 API 演示模式：所有样本均为模拟数据，仅用于验证交互、报告和 PDF 流程。",
+        "当前为无真实数据演示模式：所有样本均为模拟数据，仅用于验证交互、报告和 PDF 流程。",
       ],
     });
   }

@@ -457,7 +457,7 @@ export function buildDeterministicInsights(
 }
 
 /**
- * 无 API 演示模式使用的固定说明。
+ * 无真实数据演示模式使用的固定说明。
  *
  * 演示模式不会调用 LLM 生成商业判断，避免模型把模拟价格、评论或评分误写成真实结论。
  */

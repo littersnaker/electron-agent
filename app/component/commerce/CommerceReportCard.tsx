@@ -213,6 +213,26 @@ function sourceStatusLabel(status: CommerceResearchReport["sources"][number]["st
   return "获取失败";
 }
 
+function amazonRouteLabel(
+  source: CommerceResearchReport["sources"][number],
+): string | undefined {
+  if (source.id !== "amazon") return undefined;
+  if (source.amazonDataRoute === "api") return "API";
+  if (source.amazonDataRoute === "crawler") return "爬虫";
+  return undefined;
+}
+
+function amazonAttemptedRouteLabel(
+  source: CommerceResearchReport["sources"][number],
+): string | undefined {
+  if (source.id !== "amazon" || source.amazonDataRoute) return undefined;
+  const routes = source.amazonAttemptedRoutes || [];
+  if (!routes.length) return undefined;
+  return routes
+    .map((route) => (route === "api" ? "API" : "爬虫"))
+    .join(" → ");
+}
+
 function SourceCoverage({ report }: { report: CommerceResearchReport }) {
   const runMode = resolveCommerceReportRunMode(report);
   const isDemoMode = runMode === "demo";
@@ -234,6 +254,8 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
           const isDemoSource = source.status === "demo";
           const ok =
             source.status === "collected" || source.status === "partial";
+          const routeLabel = amazonRouteLabel(source);
+          const attemptedRouteLabel = amazonAttemptedRouteLabel(source);
           return (
             <div
               key={source.id}
@@ -242,7 +264,36 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
               title={source.error || source.summary}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">{source.label}</span>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                    {source.label}
+                  </span>
+                  {routeLabel ? (
+                    <span
+                      className="shrink-0 rounded-full px-1.5 py-0.5 text-[7px] font-semibold"
+                      style={{
+                        color: routeLabel === "API" ? "#30d158" : "#ff9f0a",
+                        background:
+                          routeLabel === "API"
+                            ? "rgba(48,209,88,0.10)"
+                            : "rgba(255,159,10,0.10)",
+                      }}
+                    >
+                      {routeLabel}
+                    </span>
+                  ) : attemptedRouteLabel ? (
+                    <span
+                      className="shrink-0 rounded-full px-1.5 py-0.5 text-[7px] font-semibold"
+                      style={{
+                        color: "#ff453a",
+                        background: "rgba(255,69,58,0.10)",
+                      }}
+                      title="本轮已实际尝试这些 Amazon 数据链路，但未取得可用样本"
+                    >
+                      已尝试 {attemptedRouteLabel}
+                    </span>
+                  ) : null}
+                </div>
                 <span
                   className="rounded-full px-1.5 py-0.5 text-[8px] font-medium"
                   style={{
@@ -267,7 +318,11 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
                 {source.sampleSize} samples
               </div>
               <div className="mt-1 line-clamp-2 text-[8px] leading-3.5 text-[var(--text-tertiary)]">
-                {source.coverage.length ? source.coverage.join(" · ") : source.summary}
+                {source.error
+                  ? source.error
+                  : source.coverage.length
+                    ? source.coverage.join(" · ")
+                    : source.summary}
               </div>
             </div>
           );
@@ -280,7 +335,14 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
             className="rounded-[11px] border px-3 py-2 text-[9px] leading-4"
             style={{ background: "var(--glass)", borderColor: "var(--border)", color: "var(--text-tertiary)" }}
           >
-            <span className="font-semibold text-[var(--text-secondary)]">{source.label}：</span>
+            <span className="font-semibold text-[var(--text-secondary)]">
+              {source.label}
+              {amazonRouteLabel(source)
+                ? `（${amazonRouteLabel(source)}）`
+                : amazonAttemptedRouteLabel(source)
+                  ? `（已尝试 ${amazonAttemptedRouteLabel(source)}）`
+                  : ""}：
+            </span>
             {source.error ? `未分析 · ${source.error}` : source.summary}
           </div>
         ))}
@@ -292,8 +354,8 @@ function SourceCoverage({ report }: { report: CommerceResearchReport }) {
 /**
  * Cross-border Market Intelligence Agent 的结构化结果卡片。
  *
- * v9 首先展示公开市场 observations；平台商品数据存在时再追加商品增强表。
- * 这样即使用户没有 Amazon / Keepa 等付费 API，报告仍然可以完整交付。
+ * 首先展示公开市场 observations；Amazon 商品数据会明确显示来自 API 还是爬虫。
+ * 没有 Amazon API 时自动使用公开页面爬虫，只有所有真实来源都失败时才进入 Demo。
  */
 export default function CommerceReportCard({
   report,
@@ -417,7 +479,7 @@ export default function CommerceReportCard({
               color: "var(--text-secondary)",
             }}
           >
-            <strong style={{ color: "#ff9f0a" }}>无 API 演示模式：</strong>
+            <strong style={{ color: "#ff9f0a" }}>无真实数据演示模式：</strong>
             当前没有取得真实外部市场数据。页面中的样本、价格和评分均为模拟内容，
             只用于验证完整流程，不能用于选品、采购、定价或投放决策。
           </div>

@@ -26,6 +26,7 @@ export type CommerceDataProviderKind =
   | "keepa"
   | "amazon-sp-api"
   | "amazon-public-page"
+  | "amazon-auto"
   | "serpapi-amazon"
   | "demo-market";
 
@@ -46,6 +47,9 @@ export type CommerceSourceStatus =
   | "demo";
 
 export type CommerceDataQuality = "high" | "medium" | "low" | "unavailable";
+
+/** Amazon 来源实际采用的数据链路，供报告与界面透明展示。 */
+export type CommerceAmazonDataRoute = "api" | "crawler";
 
 /**
  * Commerce Agent 的三档运行模式。
@@ -114,6 +118,10 @@ export interface CommerceProductSignal {
   variationCount?: number;
   recentPurchaseLowerBound?: number;
   recentPurchaseLabel?: string;
+  /** 公开详情页可见的核心卖点；API 不返回时可以为空。 */
+  bulletPoints?: string[];
+  /** 搜索结果页公开展示的 Best Seller / Amazon Choice 等标签。 */
+  badges?: string[];
   estimatedMonthlyUnits?: {
     low: number;
     median: number;
@@ -161,6 +169,13 @@ export interface CommerceSourceReport {
   label: string;
   status: CommerceSourceStatus;
   provider?: CommerceDataProviderKind;
+  /** 仅 Amazon 来源使用：明确标记本轮成功采用 API 还是公开页面爬虫。 */
+  amazonDataRoute?: CommerceAmazonDataRoute;
+  /**
+   * Amazon 最终失败时记录已实际尝试的链路，例如 ["crawler"] 或 ["api", "crawler"]。
+   * 它只用于故障诊断，不代表这些链路成功返回过数据。
+   */
+  amazonAttemptedRoutes?: CommerceAmazonDataRoute[];
   quality: CommerceDataQuality;
   sampleSize: number;
   coverage: string[];

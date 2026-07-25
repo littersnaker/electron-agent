@@ -50,7 +50,7 @@ const PluginCenter = dynamic(() => import("./component/plugins/PluginCenter"), {
 });
 
 /**
- * 白雪条工作台页面入口。
+ * Multi-agent 工作台页面入口。
  *
  * 普通聊天仍走原有 LLM Gateway；图片/视频生成走独立 Media Route；
  * Cross-border Market Intelligence 走独立 Commerce Research Route。三类工作流彼此隔离，避免

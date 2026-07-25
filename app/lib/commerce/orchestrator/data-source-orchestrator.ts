@@ -7,7 +7,11 @@ import type {
   CommerceRunMode,
   CommerceSourceReport,
 } from "../types";
-import { AmazonPublicPageProvider } from "../providers/amazon-public-page";
+import {
+  AmazonAutoProvider,
+  AmazonDataSourceError,
+  getAmazonRouteFromProvider,
+} from "../providers/amazon-auto";
 import { DemoMarketProvider } from "../providers/demo-market";
 import { KeepaProvider } from "../providers/keepa";
 import {
@@ -15,7 +19,6 @@ import {
   PlatformSerpProvider,
 } from "../providers/platform-serp";
 import { TalorDataMarketIntelligenceProvider } from "../providers/talordata-market-intelligence";
-import { TalorDataMarketProvider } from "../providers/talordata-market";
 import type {
   CommerceDataProvider,
   CommerceProviderSearchInput,
@@ -31,7 +34,7 @@ export interface CommerceOrchestrationResult {
 
 const SOURCE_LABELS: Record<CommerceMarketSourceId, string> = {
   "market-search": "公开市场 SERP",
-  amazon: "Amazon 公开结果",
+  amazon: "Amazon 商品数据",
   keepa: "Keepa",
   "tiktok-shop": "TikTok Shop",
   temu: "Temu",
@@ -71,7 +74,16 @@ function reportFromResult(
     ).size;
     metricSummary = `已获取 ${observations.length} 条公开市场结果；Shopping ${shoppingCount} 条；覆盖 ${domainCount} 个可识别域名。`;
   } else if (products.length) {
+    const amazonRoute =
+      sourceId === "amazon"
+        ? getAmazonRouteFromProvider(result.provider)
+        : undefined;
     metricSummary = [
+      amazonRoute === "api"
+        ? "API 链路"
+        : amazonRoute === "crawler"
+          ? "爬虫链路"
+          : undefined,
       `已获取 ${products.length} 个可用样本`,
       metrics?.medianPrice !== undefined
         ? `中位价格 ${metrics.currency || ""} ${metrics.medianPrice}`.trim()
@@ -79,7 +91,9 @@ function reportFromResult(
       metrics?.medianReviewCount !== undefined
         ? `中位评论 ${metrics.medianReviewCount}`
         : "评论覆盖不足",
-    ].join("；");
+    ]
+      .filter(Boolean)
+      .join("；");
   }
 
   return {
@@ -93,6 +107,10 @@ function reportFromResult(
           : "collected"
         : "empty",
     provider: result.provider,
+    amazonDataRoute:
+      sourceId === "amazon"
+        ? getAmazonRouteFromProvider(result.provider)
+        : undefined,
     quality,
     sampleSize,
     coverage: result.coverage || [],
@@ -122,8 +140,10 @@ async function collectOne(
         coverage: [],
         summary:
           sourceId === "market-search"
-            ? "未配置 TalorData，本轮会在所有真实来源都不可用时自动进入无 API 演示模式。"
-            : "当前没有配置这个增强数据源，本轮不会等待它，也不会因此中断报告。",
+            ? "未配置 TalorData；Amazon 来源仍会自动尝试 API 或公开页面爬虫。"
+            : sourceId === "amazon"
+              ? "Amazon API 与公开页面爬虫均被禁用，本轮不会生成 Amazon 商品样本。"
+              : "当前没有配置这个增强数据源，本轮不会等待它，也不会因此中断报告。",
         warnings: [],
       },
       products: [],
@@ -139,6 +159,10 @@ async function collectOne(
       observations: result.observations || [],
     };
   } catch (error) {
+    const amazonError =
+      sourceId === "amazon" && error instanceof AmazonDataSourceError
+        ? error
+        : undefined;
     return {
       report: {
         id: sourceId,
@@ -149,9 +173,19 @@ async function collectOne(
         coverage: [],
         summary:
           sourceId === "market-search"
-            ? "核心公开市场来源获取失败；若其他真实来源也没有数据，系统会自动进入演示模式。"
-            : "本轮该增强来源获取失败，因此没有使用它生成事实性结论。",
-        warnings: [],
+            ? "核心公开市场来源获取失败；系统仍会继续尝试 Amazon 自动数据链路与其他来源。"
+            : sourceId === "amazon"
+              ? amazonError?.attemptedRoutes.includes("crawler")
+                ? "Amazon 已执行公开页面爬虫，但当前网络或页面未返回可解析商品；本轮不会使用 Amazon 数据生成事实性结论。"
+                : "Amazon API 与公开页面爬虫均不可用，本轮不会使用 Amazon 数据生成事实性结论。"
+              : "本轮该增强来源获取失败，因此没有使用它生成事实性结论。",
+        warnings: amazonError
+          ? amazonError.diagnostics.map(
+              (item) =>
+                `${item.label}：${item.configured ? item.message : "未配置，已跳过"}`,
+            )
+          : [],
+        amazonAttemptedRoutes: amazonError?.attemptedRoutes,
         error: error instanceof Error ? error.message : String(error),
       },
       products: [],
@@ -182,6 +216,8 @@ function mergeProductSignals(
               current.recentPurchaseLowerBound,
             recentPurchaseLabel:
               product.recentPurchaseLabel ?? current.recentPurchaseLabel,
+            bulletPoints: product.bulletPoints ?? current.bulletPoints,
+            badges: product.badges ?? current.badges,
           }
         : product,
     );
@@ -214,9 +250,10 @@ function collectWarnings(sources: CommerceSourceReport[]): string[] {
  * 三档运行原则：
  * 1. 完整研究模式：TalorData 公开市场数据 + 至少一个真实增强来源；
  * 2. 基础市场洞察模式：至少一个真实来源有数据，但增强覆盖不足；
- * 3. 无 API 演示模式：所有真实来源均无数据时，使用明确标记的模拟样本走完整流程。
+ * 3. 演示模式：API 与 Amazon 爬虫等所有真实来源都没有数据时，才使用模拟样本。
  *
- * Amazon / Keepa / TikTok Shop / Temu / 1688 永远不是主流程的硬前置条件。
+ * Amazon 来源内部固定执行两条真实链路：有 API 直接使用 API；没有 API 或 API 失败时使用爬虫。
+ * Keepa / TikTok Shop / Temu / 1688 仍然是可选增强，不会阻断主流程。
  */
 export async function collectMultiSourceMarketData(
   input: CommerceProviderSearchInput,
@@ -227,7 +264,7 @@ export async function collectMultiSourceMarketData(
     input.serpApiKey;
 
   const marketSearch = new TalorDataMarketIntelligenceProvider(talorDataToken);
-  const amazonPublicSearch = new TalorDataMarketProvider(talorDataToken);
+  const amazonAuto = new AmazonAutoProvider(talorDataToken);
   const keepa = new KeepaProvider(input.serviceCredentials?.keepaApiKey);
   const platformProviders = PLATFORM_SERP_CONFIGS.map((config) => ({
     sourceId: config.sourceId,
@@ -237,7 +274,7 @@ export async function collectMultiSourceMarketData(
   // 所有真实来源并行执行。任何单个来源失败都只影响其自身状态。
   const tasks = [
     collectOne("market-search", marketSearch, input),
-    collectOne("amazon", amazonPublicSearch, input),
+    collectOne("amazon", amazonAuto, input),
     collectOne("keepa", keepa, input),
     ...platformProviders.map(({ sourceId, provider }) =>
       collectOne(sourceId, provider, input),
@@ -245,44 +282,8 @@ export async function collectMultiSourceMarketData(
   ];
   const results = await Promise.all(tasks);
 
-  // 只有 Amazon 公开结果失败时才尝试直接页面作为 best-effort 增强。
-  // 这个 fallback 永远不会影响核心报告是否可以完成。
-  const amazonIndex = results.findIndex(
-    (item) => item.report.id === "amazon",
-  );
-  if (
-    amazonIndex >= 0 &&
-    results[amazonIndex].report.status === "error" &&
-    process.env.AMAZON_PUBLIC_RESEARCH_ENABLED === "true"
-  ) {
-    const publicPage = new AmazonPublicPageProvider();
-    if (publicPage.isConfigured()) {
-      try {
-        const fallback = await publicPage.searchProducts(input);
-        if (fallback.products.length) {
-          results[amazonIndex] = {
-            products: fallback.products,
-            observations: fallback.observations || [],
-            report: {
-              ...reportFromResult("amazon", fallback),
-              summary: `TalorData 没有解析出 Amazon 结构化商品，已降级到 Amazon 公开页面并取得 ${fallback.products.length} 个增强样本。`,
-              warnings: [
-                results[amazonIndex].report.error ||
-                  "Amazon 公开搜索增强失败",
-                ...fallback.warnings,
-              ],
-            },
-          };
-        }
-      } catch (error) {
-        results[amazonIndex].report.warnings.push(
-          `Amazon 页面备用增强源也失败：${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-  }
+  // AmazonAutoProvider 已在单一来源内部完成“API 优先、无 API/失败则爬虫”的顺序路由。
+  // 因此这里无需再编写第二套 fallback，避免重复请求和状态覆盖。
 
   const realProducts = mergeProductSignals(
     results.flatMap((item) => item.products),
@@ -338,7 +339,7 @@ export async function collectMultiSourceMarketData(
     observations: demoResult.observations || [],
     sources,
     warnings: [
-      "当前没有取得任何真实外部市场数据，报告已切换为无 API 演示模式。所有样本和评分均为模拟内容，不能用于选品、采购或投放决策。",
+      "当前没有取得任何真实外部市场数据，报告已切换为无真实数据演示模式。所有样本和评分均为模拟内容，不能用于选品、采购或投放决策。",
       ...collectWarnings(sources),
     ],
     runMode: "demo",

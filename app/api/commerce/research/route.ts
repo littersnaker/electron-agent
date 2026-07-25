@@ -89,6 +89,33 @@ function sourceStatusLabel(
   return "获取失败";
 }
 
+function sourceDisplayLabel(
+  source: CommerceResearchReport["sources"][number],
+): string {
+  if (source.id !== "amazon") return source.label;
+  if (source.amazonDataRoute === "api") return `${source.label}（API）`;
+  if (source.amazonDataRoute === "crawler") return `${source.label}（爬虫）`;
+  return source.label;
+}
+
+
+function compactSourceError(value: string | undefined, maximum = 220): string | undefined {
+  const normalized = value?.replace(/\s+/gu, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > maximum
+    ? `${normalized.slice(0, maximum - 1)}…`
+    : normalized;
+}
+
+function sourceRouteDiagnostic(
+  source: CommerceResearchReport["sources"][number],
+): string | undefined {
+  if (source.id !== "amazon" || source.amazonDataRoute) return undefined;
+  const routes = source.amazonAttemptedRoutes || [];
+  if (!routes.length) return undefined;
+  return `已尝试 ${routes.map((route) => (route === "api" ? "API" : "爬虫")).join(" → ")}`;
+}
+
 function renderReportText(report: CommerceResearchReport): string {
   const mode = report.runMode || "market-intelligence";
   const modeMeta = getCommerceRunModeMeta(mode);
@@ -131,8 +158,11 @@ function renderReportText(report: CommerceResearchReport): string {
       : "",
     `**数据覆盖**\n${report.sources
       .map(
-        (source) =>
-          `- ${source.label}: ${sourceStatusLabel(source.status)} · ${source.sampleSize} 个样本`,
+        (source) => {
+          const diagnostic = sourceRouteDiagnostic(source);
+          const error = compactSourceError(source.error);
+          return `- ${sourceDisplayLabel(source)}: ${sourceStatusLabel(source.status)} · ${source.sampleSize} 个样本${diagnostic ? ` · ${diagnostic}` : ""}${error ? ` · 原因：${error}` : ""}`;
+        },
       )
       .join("\n")}`,
     "**PDF 报告**\nCross-border Market Intelligence 结构化报告已就绪，可在上方市场卡片中点击「导出 PDF 报告」保存完整版本。",
@@ -162,7 +192,7 @@ function progress(
  * 三档运行模式由数据源 Orchestrator 自动判断：
  * - full：公开市场 + 至少一个真实增强来源；
  * - market-intelligence：至少有一组真实数据，但增强覆盖不足；
- * - demo：所有真实来源都不可用，使用明确标记的模拟数据走完整流程。
+ * - demo：API、Amazon 爬虫与其他真实来源都不可用时，使用明确标记的模拟数据走完整流程。
  */
 export async function POST(request: Request): Promise<Response> {
   const credentials = resolveLlmCredentials(request.headers);
@@ -216,7 +246,7 @@ export async function POST(request: Request): Promise<Response> {
           stage: "collect",
           progress: 38,
           detail:
-            "正在采集公开 SERP / Shopping 市场信号，并并行尝试可用的平台增强来源…",
+            "正在采集公开市场信号；Amazon 将优先使用 API，没有 API 或 API 失败时自动切换公开页面爬虫…",
         });
         const sourceResult = await collectMultiSourceMarketData({
           marketplace: body.marketplace,
@@ -235,13 +265,23 @@ export async function POST(request: Request): Promise<Response> {
         }
 
         const modeMeta = getCommerceRunModeMeta(sourceResult.runMode);
+        const amazonSource = sourceResult.sources.find(
+          (source) => source.id === "amazon",
+        );
+        const amazonRouteDetail =
+          amazonSource?.amazonDataRoute === "api"
+            ? "Amazon 已走 API 链路"
+            : amazonSource?.amazonDataRoute === "crawler"
+              ? "Amazon 已走无 API 爬虫链路"
+              : "Amazon 本轮未取得可用样本";
+
         progress(controller, encoder, {
           stage: "normalize",
           progress: 58,
           detail:
             sourceResult.runMode === "demo"
               ? `真实来源暂无可用数据，已进入${modeMeta.label}，正在生成明确标记的模拟样本…`
-              : `已取得 ${sourceResult.observations.length} 条公开市场结果和 ${sourceResult.products.length} 个可结构化商品样本，正在统一口径…`,
+              : `${amazonRouteDetail}；已取得 ${sourceResult.observations.length} 条公开市场结果和 ${sourceResult.products.length} 个可结构化商品样本，正在统一口径…`,
         });
 
         // 演示数据只用于验证界面与报告流程，不运行月销量等启发式估算，
@@ -358,7 +398,7 @@ export async function POST(request: Request): Promise<Response> {
               sourceResult.runMode === "demo"
                 ? "本轮没有取得真实外部市场数据，已使用明确标记的模拟样本展示完整产品流程。模拟内容不会被当作市场事实，也不能用于商业决策。"
                 : `${modeMeta.description} 本轮实际使用：${
-                    realSources.map((source) => source.label).join("、") ||
+                    realSources.map(sourceDisplayLabel).join("、") ||
                     "无可用真实来源"
                   }。未获取的平台 API 不会阻断报告，也不会参与事实性结论。`,
           },
@@ -380,8 +420,8 @@ export async function POST(request: Request): Promise<Response> {
           progress: 100,
           detail:
             sourceResult.runMode === "demo"
-              ? "无 API 演示报告已生成；接入真实数据源后会自动切换为市场洞察或完整研究模式。"
-              : `${modeMeta.label}已完成，结构化报告可直接导出 PDF。`,
+              ? "无真实数据演示报告已生成；接入真实数据源后会自动切换为市场洞察或完整研究模式。"
+              : `${modeMeta.label}已完成；${amazonRouteDetail}，结构化报告可直接导出 PDF。`,
         });
         sendUsage(controller, encoder, {
           prompt: promptTokens,
@@ -413,9 +453,9 @@ export async function POST(request: Request): Promise<Response> {
             "",
             message,
             "",
-            "系统已经支持完整研究、基础市场洞察和无 API 演示三档模式；如果仍然失败，通常代表类目理解或报告生成等非数据源步骤出现异常。",
+            "系统已支持 Amazon API 与公开页面爬虫双链路；如果两条链路都失败，仍会继续检查其他真实来源，最后才进入演示模式。",
             "",
-            "可在右上角「服务与数据源」重新测试 TalorData。新的连接测试不仅检查 HTTP 是否成功，还会验证响应中能否解析出真实搜索结果。",
+            "可在右上角「服务与数据源」检查 TalorData；无 Amazon API 时无需额外填写密钥，系统会自动尝试公开页面爬虫。",
           ].join("\n"),
         });
         sendUsage(controller, encoder, {

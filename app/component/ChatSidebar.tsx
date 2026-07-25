@@ -225,7 +225,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             className="text-[14px] font-semibold tracking-[-0.01em]"
             style={{ color: COLORS.text }}
           >
-            Agent Workspace
+            Multi-agent
           </div>
           <div className="mt-0.5 text-[10px]" style={{ color: COLORS.textSubtle }}>
             核心问答 · Agent 按需加载
