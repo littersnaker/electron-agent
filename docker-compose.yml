@@ -3,6 +3,8 @@ services:
   web:
     build: .
     ports:
-      - "3000:3000"
+      # 只声明容器端口，让 Docker 自动分配一个可用的宿主机端口。
+      # 启动后可运行 `docker compose port web 3000` 查询实际访问端口。
+      - "3000"
     environment:
       - NODE_ENV=production

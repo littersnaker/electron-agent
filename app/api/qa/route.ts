@@ -1,3 +1,4 @@
+// 模块说明：负责 route 接口及服务端流程。
 import { NextResponse } from "next/server";
 import { resolveLlmCredentials } from "@/app/lib/llm/credentials";
 import { streamWithLlm } from "@/app/lib/llm/gateway";

@@ -1,3 +1,4 @@
+// 模块说明：负责 registry 核心服务与领域逻辑。
 /** Prompt 注册表中的稳定标识。 */
 export type PromptId =
   | "final_answer"

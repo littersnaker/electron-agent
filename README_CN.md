@@ -408,14 +408,20 @@ pnpm dev
 pnpm electron:dev
 ```
 
-Electron 主进程会启动或连接到 `3000` 端口的 Next.js 服务。
+Electron 主进程启动前会从 `3000` 开始扫描可用端口，并把最终端口同时注入
+Next.js 子进程和 BrowserWindow。`3000` 被占用时会自动使用 `3001`、`3002` 等
+可用端口，不再结束占用端口的其他程序。
 
 ### 检查与构建
 
 ```bash
 pnpm lint
 pnpm build
+pnpm test:electron-port
 ```
+
+`pnpm test:electron-port` 会临时占用一个随机本机端口，验证 Electron 能自动跳过该端口，
+并在端口释放后重新选择它。
 
 ### 仅编译 Electron 主进程
 
@@ -515,12 +521,13 @@ pnpm electron:make
 
 ## 本地数据
 
-默认会创建两个服务端数据库：
+默认会创建三个服务端数据库：
 
 ```text
 .agent-data/
 ├── agent-workspace.sqlite          # 项目、会话、项目记忆和索引
-└── langgraph-checkpoints.sqlite    # LangGraph 线程 checkpoint 与 pending write
+├── langgraph-checkpoints.sqlite    # LangGraph 线程 checkpoint 与 pending write
+└── agent-observability.sqlite      # Agent Trace、工具事件与在线评估报告
 ```
 
 Workspace 数据库使用 WAL 和外键。项目索引保存文件元数据、可检索文本和简单符号记录。当前索引上限为 6,000 个支持类型文件，单文件最大 512 KiB。
@@ -557,7 +564,9 @@ Worker 获取基线之后，正式文件被其他进程或人工修改。系统�
 
 ### Electron 打开启动错误页
 
-检查 `3000` 端口是否占用、打包资源中是否存在 standalone server，以及 Next 子进程日志是否提示环境变量或原生依赖缺失。
+应用会自动选择可用端口。请检查打包资源中是否存在 standalone server，以及 Next
+子进程日志是否提示环境变量、依赖或原生模块缺失。启动日志中的“已选择可用端口”会
+显示本次实际使用的端口。
 
 ## 项目截图
 
@@ -594,3 +603,6 @@ node_modules/
 ## License
 
 MIT，详见 [LICENSE](./LICENSE)。
+## Agent 生产能力扩展
+
+本项目已加入在线评估、Human-in-the-loop 风险审批、MCP 工具接入、工具参数自动修复、Agent Trace 可观测性和上下文缓存。配置与接口说明见 [AGENT_PRODUCTION_FEATURES.md](./AGENT_PRODUCTION_FEATURES.md)，运行后可访问 `/observability` 查看 Trace 时间线与评估报告。

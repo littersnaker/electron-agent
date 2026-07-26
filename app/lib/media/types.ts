@@ -1,9 +1,10 @@
+// 模块说明：负责 types 核心服务与领域逻辑。
 import type {
   ImageEditFidelity,
   MediaMode,
   MessageAttachment,
   TypographyPolicy,
-} from "@/app/const/pageConst";
+} from "@/app/constants/page-constants";
 import type { LlmCredentials } from "@/app/lib/llm/types";
 import type { TokenInfo } from "@/app/types/workspace";
 

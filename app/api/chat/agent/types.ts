@@ -1,3 +1,4 @@
+// 模块说明：负责 types 接口及服务端流程。
 /*
  * Multi-agent Agent Runtime 的公共结构定义。
  *
@@ -74,7 +75,9 @@ export type CommandExecutionMode = "normal" | "pty";
 export type InteractiveResponseMode = "auto" | "llm" | "user" | "cancel";
 export type InteractiveRequestSource =
   | "terminal"
-  | "file_create_confirmation";
+  | "file_create_confirmation"
+  | "risk_approval"
+  | "mcp_tool_approval";
 export type InteractivePromptKind =
   | "confirm"
   | "select"
@@ -115,6 +118,16 @@ export interface InteractiveRequest {
   recentOutput: string;
   /** UI 卡片可选展示字段；终端请求无需提供。 */
   title?: string;
+  /** 风险审批类别，供前端展示和 Router 恢复流程。 */
+  approvalKind?: "workspace_write" | "mcp_tool";
+  /** 风险等级仅用于解释，不直接替代服务端规则判断。 */
+  riskLevel?: "medium" | "high";
+  /** 被审批的工具名或 Merge 操作名。 */
+  toolName?: string;
+  /** 只保存经过截断和脱敏的参数预览，不能保存密钥。 */
+  toolArguments?: Record<string, unknown>;
+  /** 服务端生成的稳定授权令牌，批准后写入本轮 State。 */
+  approvalToken?: string;
   description?: string;
   filePath?: string;
   /**
@@ -180,6 +193,8 @@ export interface ModifyWorkerInput {
   requestMode: AgentRequestMode;
   /** 用户在 UI 中已明确允许创建的缺失文件。 */
   approvedMissingFiles: string[];
+  /** 当前任务已由用户批准的风险操作令牌。 */
+  approvedRiskActions: string[];
   model: string;
   workingDir: string;
   projectId: string;

@@ -1,3 +1,4 @@
+// 模块说明：负责 route 接口及服务端流程。
 import {
   AIMessage,
   type BaseMessage,
@@ -180,7 +181,12 @@ export async function POST(request: Request): Promise<Response> {
                 finalState.interactiveRequest.source ===
                 "file_create_confirmation"
                   ? "⏸ 目标文件不存在，等待你确认是否新建。"
-                  : "⏸ 终端正在等待用户输入，已保留当前进程现场。",
+                  : finalState.interactiveRequest.source === "risk_approval"
+                    ? "⏸ 检测到高风险工作区写入，等待你批准。"
+                    : finalState.interactiveRequest.source ===
+                        "mcp_tool_approval"
+                      ? "⏸ MCP 工具需要人工批准后才能执行。"
+                      : "⏸ 终端正在等待用户输入，已保留当前进程现场。",
             });
             sendUsage(
               controller,

@@ -1,3 +1,4 @@
+// 模块说明：负责 types 核心服务与领域逻辑。
 /**
  * Cross-border Market Intelligence Agent 的共享类型。
  *

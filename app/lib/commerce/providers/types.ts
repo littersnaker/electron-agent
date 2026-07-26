@@ -1,3 +1,4 @@
+// 模块说明：负责 types 核心服务与领域逻辑。
 import type { AuxiliaryServiceCredentials } from "../../service-credentials";
 import type {
   CommerceCategoryResolution,

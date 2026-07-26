@@ -1,3 +1,4 @@
+// 模块说明：负责 stream final answer 接口及服务端流程。
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { streamWithLlm } from "@/app/lib/llm/gateway";
 import type { LlmCredentials, LlmMessage } from "@/app/lib/llm/types";
@@ -69,6 +70,10 @@ function buildModelMessages(finalState: AgentStateValues): LlmMessage[] {
     role: "user",
     content: `以下是本轮 LangGraph 生成的 Agent Final Report。请只做自然、准确的最终表达，不要增加未发生的操作：\n\n${
       finalState.finalReportSummary || "本轮没有生成 Final Report。"
+    }${
+      finalState.evaluationSummary
+        ? `\n\n[在线质量评估，仅用于透明披露，不得篡改执行事实]\n${finalState.evaluationSummary}`
+        : ""
     }`,
   });
 

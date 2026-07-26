@@ -1,3 +1,4 @@
+// 模块说明：负责 data source orchestrator 核心服务与领域逻辑。
 import { calculateMarketMetrics, inferDataQuality } from "../analytics";
 import { inferCommerceRunMode } from "../run-mode";
 import type {

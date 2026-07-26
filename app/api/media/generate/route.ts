@@ -1,9 +1,10 @@
+// 模块说明：负责 route 接口及服务端流程。
 import { NextResponse } from "next/server";
 import type {
   ImageEditFidelity,
   MediaMode,
   TypographyPolicy,
-} from "@/app/const/pageConst";
+} from "@/app/constants/page-constants";
 import { resolveLlmCredentials } from "@/app/lib/llm/credentials";
 import { getMediaModelDefinition } from "@/app/lib/media/catalog";
 import { generateMedia } from "@/app/lib/media/dashscope";

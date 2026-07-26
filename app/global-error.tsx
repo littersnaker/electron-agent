@@ -1,3 +1,4 @@
+// 模块说明：负责 global error 页面或应用入口逻辑。
 "use client";
 
 import * as Sentry from "@sentry/nextjs";

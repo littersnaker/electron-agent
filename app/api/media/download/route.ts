@@ -1,3 +1,4 @@
+// 模块说明：负责 route 接口及服务端流程。
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";

@@ -1,10 +1,11 @@
+// 模块说明：负责 useComposer 状态管理与业务编排。
 "use client";
 
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { normalizeAttachedFile } from "../const/pageConst";
-import type { AttachedFile } from "../const/pageConst";
-import { parseSelectedFile } from "../utils/fileParser";
+import { normalizeAttachedFile } from "../constants/page-constants";
+import type { AttachedFile } from "../constants/page-constants";
+import { parseUserSelectedFile } from "../utilities/file-parser";
 
 export function useComposer() {
   const [input, setInput] = useState("");
@@ -19,7 +20,7 @@ export function useComposer() {
 
       setIsParsingFile(true);
       try {
-        const parsedFile = await parseSelectedFile(file);
+        const parsedFile = await parseUserSelectedFile(file);
         setAttachedFile(normalizeAttachedFile(parsedFile));
       } finally {
         setIsParsingFile(false);

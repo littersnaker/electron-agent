@@ -1,3 +1,4 @@
+// 模块说明：负责 page 页面或应用入口逻辑。
 'use client';
 
 import React, { useState } from 'react';
@@ -49,7 +50,7 @@ export default function LoginPage() {
       {/* Login Card */}
       <div className="relative z-10 w-full max-w-md mx-4">
         <div className="bg-white/80 backdrop-blur-xl border border-slate-200/80 rounded-2xl shadow-2xl p-8 space-y-8 animate-fade-in-up">
-          
+
           <div className="text-center">
             <h2 className="mt-6 text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
               Welcome Back

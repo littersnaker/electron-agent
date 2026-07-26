@@ -1,3 +1,4 @@
+// 模块说明：负责 route 接口及服务端流程。
 import * as Sentry from "@sentry/nextjs";
 export const dynamic = "force-dynamic";
 

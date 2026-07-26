@@ -1,3 +1,4 @@
+// 模块说明：负责 index 核心服务与领域逻辑。
 import { AmazonAutoProvider } from "./amazon-auto";
 import type {
   CommerceProviderSearchInput,

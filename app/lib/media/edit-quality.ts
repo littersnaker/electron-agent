@@ -1,4 +1,5 @@
-import type { MessageAttachment } from "@/app/const/pageConst";
+// 模块说明：负责 edit quality 核心服务与领域逻辑。
+import type { MessageAttachment } from "@/app/constants/page-constants";
 import { completeWithLlm } from "@/app/lib/llm/gateway";
 import type { LlmCredentials, LlmTokenUsage } from "@/app/lib/llm/types";
 import type { MediaAttachmentInput } from "./types";

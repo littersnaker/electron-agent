@@ -1,3 +1,4 @@
+// 模块说明：负责 sse 接口及服务端流程。
 export type SseController = ReadableStreamDefaultController<Uint8Array>;
 
 /** 将统一 JSON 事件写入 SSE 流。 */

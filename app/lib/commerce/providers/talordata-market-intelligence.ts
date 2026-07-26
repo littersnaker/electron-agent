@@ -1,3 +1,4 @@
+// 模块说明：负责 talordata market intelligence 核心服务与领域逻辑。
 import { createHash } from "node:crypto";
 import { getCommerceMarketplace } from "../marketplaces";
 import type {

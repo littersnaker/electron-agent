@@ -1,3 +1,4 @@
+// 模块说明：负责 resolve chat workspace 接口及服务端流程。
 import path from "path";
 import { getProjectById } from "@/app/lib/server/workspace-store";
 import {

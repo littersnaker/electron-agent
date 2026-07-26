@@ -1,3 +1,4 @@
+// 模块说明：负责 demo market 核心服务与领域逻辑。
 import { getCommerceMarketplace } from "../marketplaces";
 import type {
   CommerceMarketObservation,

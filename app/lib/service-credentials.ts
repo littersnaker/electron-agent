@@ -1,3 +1,4 @@
+// 模块说明：负责 service credentials 核心服务与领域逻辑。
 /**
  * Commerce / market-data credentials that are not LLM provider keys.
  *

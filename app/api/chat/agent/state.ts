@@ -1,3 +1,4 @@
+// 模块说明：负责 state 接口及服务端流程。
 import type { BaseMessage } from "@langchain/core/messages";
 import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import {
@@ -29,6 +30,24 @@ import type {
 
 const replaceValue = <T>(current: T, next: T | undefined): T =>
   next === undefined ? current : next;
+
+/**
+ * 主线程只保留最近 24 条消息。
+ *
+ * LangGraph 的 messagesStateReducer 仍负责消息 ID 覆盖与 RemoveMessage 语义，
+ * 最后再截断窗口，既避免破坏框架行为，也防止长时间循环让 Checkpoint 无限增长。
+ */
+const MAX_MAIN_MESSAGES = 24;
+const limitedMessagesReducer = (
+  currentState: BaseMessage[],
+  newValue: BaseMessage[] | undefined,
+): BaseMessage[] => {
+  if (newValue === undefined) return currentState;
+  return messagesStateReducer(currentState, newValue).slice(-MAX_MAIN_MESSAGES);
+};
+
+/** 生命周期完整历史已写入 Trace SQLite；State 仅保留最近事件供 UI 即时展示。 */
+const MAX_LIFECYCLE_EVENTS_IN_STATE = 200;
 
 const mergeModifyResults = (
   currentState: ModifyTaskResult[],
@@ -73,10 +92,12 @@ const mergeLifecycleEvents = (
 
   const eventMap = new Map(currentState.map((event) => [event.id, event]));
   newValue.forEach((event) => eventMap.set(event.id, event));
-  return Array.from(eventMap.values()).sort((left, right) => {
-    const timeDiff = Date.parse(left.createdAt) - Date.parse(right.createdAt);
-    return timeDiff !== 0 ? timeDiff : left.sequence - right.sequence;
-  });
+  return Array.from(eventMap.values())
+    .sort((left, right) => {
+      const timeDiff = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+      return timeDiff !== 0 ? timeDiff : left.sequence - right.sequence;
+    })
+    .slice(-MAX_LIFECYCLE_EVENTS_IN_STATE);
 };
 
 /*
@@ -91,7 +112,7 @@ const mergeLifecycleEvents = (
  */
 export const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
-    reducer: messagesStateReducer,
+    reducer: limitedMessagesReducer,
     default: () => [],
   }),
   model: Annotation<string>,
@@ -226,6 +247,15 @@ export const AgentState = Annotation.Root({
     reducer: replaceValue,
     default: () => "",
   }),
+  /** 完整报告已外置到 Trace SQLite；State 只保存轻量引用，避免重复上下文。 */
+  evaluationReportId: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
+  evaluationSummary: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
+  }),
   touchedFiles: Annotation<string[]>({
     reducer: replaceValue,
     default: () => [],
@@ -241,6 +271,20 @@ export const AgentState = Annotation.Root({
   approvedMissingFiles: Annotation<string[]>({
     reducer: replaceValue,
     default: () => [],
+  }),
+  /** 当前任务已获用户批准的高风险操作令牌；Router 会在普通新任务时清空。 */
+  approvedRiskActions: Annotation<string[]>({
+    reducer: replaceValue,
+    default: () => [],
+  }),
+  /** 风险审批恢复标志：为 true 时直接回到审批节点，不重复执行 Planner/Worker。 */
+  resumeFromRiskApproval: Annotation<boolean>({
+    reducer: replaceValue,
+    default: () => false,
+  }),
+  approvalResumeTarget: Annotation<"" | "merge" | "worker">({
+    reducer: replaceValue,
+    default: () => "",
   }),
 
   // Lifecycle Snapshot 供 UI 快速读取当前状态，Events 供审计/时间线使用。
@@ -298,6 +342,20 @@ export const ModifyWorkerState = Annotation.Root({
   approvedMissingFiles: Annotation<string[]>({
     reducer: replaceValue,
     default: () => [],
+  }),
+  /** 当前任务已获用户批准的高风险操作令牌；Router 会在普通新任务时清空。 */
+  approvedRiskActions: Annotation<string[]>({
+    reducer: replaceValue,
+    default: () => [],
+  }),
+  /** 风险审批恢复标志：为 true 时直接回到审批节点，不重复执行 Planner/Worker。 */
+  resumeFromRiskApproval: Annotation<boolean>({
+    reducer: replaceValue,
+    default: () => false,
+  }),
+  approvalResumeTarget: Annotation<"" | "merge" | "worker">({
+    reducer: replaceValue,
+    default: () => "",
   }),
   model: Annotation<string>,
   workingDir: Annotation<string>,

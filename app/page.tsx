@@ -1,28 +1,29 @@
+// 模块说明：负责 page 页面或应用入口逻辑。
 /* eslint-disable react-hooks/immutability */
 "use client";
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MouseEvent } from "react";
-import AgentPanel from "./component/AgentPanel";
-import ApiKeyModal from "./component/ApiKeyModal";
-import ChatComposer from "./component/ChatComposer";
-import ChatList from "./component/ChatList";
-import ChatSidebar from "./component/ChatSidebar";
-import CustomTitleBar from "./component/CustomTitleBar";
-import WorkspaceHeader from "./component/WorkspaceHeader";
+import AgentPanel from "./components/AgentPanel";
+import ApiKeyModal from "./components/ApiKeyModal";
+import ChatComposer from "./components/ChatComposer";
+import ChatList from "./components/ChatList";
+import ChatSidebar from "./components/ChatSidebar";
+import CustomTitleBar from "./components/CustomTitleBar";
+import WorkspaceHeader from "./components/WorkspaceHeader";
 import {
   AVAILABLE_CHAT_MODELS,
   getAvailableMediaModelOptions,
-} from "./const/modelList";
+} from "./constants/modelList";
 import type {
   ComposerMode,
   ImageEditFidelity,
   MediaMode,
   SessionMode,
   TypographyPolicy,
-} from "./const/pageConst";
-import { getThemeVariables } from "./const/theme";
+} from "./constants/page-constants";
+import { getThemeVariables } from "./constants/theme";
 import { useAgentCoordinator } from "./hooks/useAgentCoordinator";
 import { useApiKey } from "./hooks/useApiKey";
 import { useChatStream } from "./hooks/useChatStream";
@@ -38,14 +39,14 @@ import type { CommerceMarketplaceCode } from "./lib/commerce/types";
 import type { BuiltinPluginId } from "./lib/plugins/types";
 
 // 插件专属 UI 使用动态分包；核心 QA 首屏不会同步加载这些面板。
-const TaskPlanningPanel = dynamic(() => import("./component/TaskPlanningPanel"), {
+const TaskPlanningPanel = dynamic(() => import("./components/TaskPlanningPanel"), {
   ssr: false,
 });
 const InteractiveRequestPanel = dynamic(
-  () => import("./component/InteractiveRequestPanel"),
+  () => import("./components/InteractiveRequestPanel"),
   { ssr: false },
 );
-const PluginCenter = dynamic(() => import("./component/plugins/PluginCenter"), {
+const PluginCenter = dynamic(() => import("./components/plugins/PluginCenter"), {
   ssr: false,
 });
 

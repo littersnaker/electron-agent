@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "id": "local-tools",
+      "name": "本地 MCP 工具服务",
+      "url": "http://localhost:8787/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer ${LOCAL_MCP_TOKEN}"
+      },
+      "requireApproval": ["write_file", "delete_file"]
+    }
+  ]
+}

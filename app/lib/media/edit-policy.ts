@@ -1,7 +1,8 @@
+// 模块说明：负责 edit policy 核心服务与领域逻辑。
 import type {
   ImageEditFidelity,
   TypographyPolicy,
-} from "@/app/const/pageConst";
+} from "@/app/constants/page-constants";
 
 export type ImageEditIntent =
   | "text-only"

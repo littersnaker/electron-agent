@@ -1,3 +1,4 @@
+// 模块说明：负责 useWorkspaceController 状态管理与业务编排。
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,9 +8,9 @@ import type {
   Message,
   SessionMode,
   WorkspaceProject,
-} from "../const/pageConst";
+} from "../constants/page-constants";
 import type { WorkspaceResponse } from "../types/workspace";
-import { buildWelcomeMessages } from "../utils/agentRuntime";
+import { buildWelcomeMessages } from "../utilities/agent-runtime";
 
 async function requestCreateSession(
   mode: SessionMode,

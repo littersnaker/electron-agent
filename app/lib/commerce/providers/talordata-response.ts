@@ -1,3 +1,4 @@
+// 模块说明：负责 talordata response 核心服务与领域逻辑。
 /**
  * TalorData SERP 响应结构兼容层。
  *

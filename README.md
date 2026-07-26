@@ -413,14 +413,20 @@ pnpm dev
 pnpm electron:dev
 ```
 
-The Electron main process starts or connects to a Next.js server on port `3000`.
+Before starting Next.js, the Electron main process scans for an available local
+port beginning at `3000`. If that port is occupied, it automatically moves to
+`3001`, `3002`, and so on without terminating the process that owns the port.
 
 ### Static validation
 
 ```bash
 pnpm lint
 pnpm build
+pnpm test:electron-port
 ```
+
+`pnpm test:electron-port` temporarily occupies a random local port, verifies
+that Electron skips it, and then confirms the released port can be selected.
 
 ### Compile only the Electron main/preload process
 
@@ -525,12 +531,13 @@ Add validation to the workspace creation endpoint and update its error handling 
 
 ## Local Data
 
-By default, two server-side databases are created:
+By default, three server-side databases are created:
 
 ```text
 .agent-data/
 ├── agent-workspace.sqlite          # projects, sessions, project memory, index data
-└── langgraph-checkpoints.sqlite    # LangGraph thread checkpoints and pending writes
+├── langgraph-checkpoints.sqlite    # LangGraph thread checkpoints and pending writes
+└── agent-observability.sqlite      # Agent traces, tool events, and evaluations
 ```
 
 The workspace database uses WAL mode and foreign keys. The index stores file metadata, selected text content, and simple symbol records. Current indexing limits include a maximum of 6,000 supported files and 512 KiB per indexed file.
@@ -567,7 +574,10 @@ No usable real source returned data. Configure and test TalorData or another sup
 
 ### Electron opens a startup error page
 
-Check whether port `3000` is occupied, whether the standalone server exists in packaged resources, and whether the Next.js child-process logs show a missing environment or native dependency.
+The application selects an available port automatically. Check whether the
+standalone server exists in packaged resources and whether the Next.js child
+process logs report missing environment variables, dependencies, or native
+modules. The startup log prints the actual selected port.
 
 ## Screenshots
 
@@ -604,3 +614,7 @@ node_modules/
 ## License
 
 MIT. See [LICENSE](./LICENSE).
+
+## Agent production features
+
+The project now includes online evaluation, human-in-the-loop risk approval, MCP tool integration, tool-call repair, local Agent tracing, and bounded context caching. See [AGENT_PRODUCTION_FEATURES.md](./AGENT_PRODUCTION_FEATURES.md). The trace dashboard is available at `/observability` after startup.

@@ -1,3 +1,4 @@
+// 模块说明：负责 marketplaces 核心服务与领域逻辑。
 import type { CommerceMarketplaceCode } from "./types";
 
 export interface CommerceMarketplaceDefinition {

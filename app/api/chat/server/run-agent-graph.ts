@@ -1,6 +1,11 @@
+// 模块说明：负责 run agent graph 接口及服务端流程。
 import type { BaseMessage } from "@langchain/core/messages";
 import { runWithLlmCredentials } from "@/app/lib/llm/request-context";
 import type { LlmCredentials } from "@/app/lib/llm/types";
+import {
+  markCurrentTracePaused,
+  runWithAgentTrace,
+} from "@/app/lib/agent-runtime/trace-store";
 import { graph } from "../agent/graph";
 import { emitGraphUpdateStatus, formatLifecycleStatus } from "./graph-status";
 import { sendSse } from "./sse";
@@ -38,70 +43,95 @@ export async function runAgentGraph({
   controller,
   encoder,
 }: RunAgentGraphOptions): Promise<AgentStateValues> {
-  return runWithLlmCredentials(llmCredentials, async () => {
-    const snapshot = await graph.getState({
-      configurable: { thread_id: sessionId },
-    });
-    const hasExistingState = (snapshot.values?.messages?.length || 0) > 0;
-    const messagesToGraph = hasExistingState
-      ? inputMessages.slice(-2)
-      : inputMessages;
+  const humanMessages = inputMessages.filter(
+    (message) => message._getType() === "human",
+  );
+  const latestHumanMessage = humanMessages[humanMessages.length - 1];
+  const requestPreview = latestHumanMessage
+    ? String(latestHumanMessage.content)
+    : "空请求";
 
-    const stream = await graph.stream(
-      {
-        messages: messagesToGraph,
-        model,
-        workingDir,
-        projectId,
-      },
-      {
-        configurable: {
-          thread_id: sessionId,
-          working_dir: workingDir,
-        },
-        recursionLimit: 80,
-        streamMode: ["updates", "custom"],
-      },
-    );
+  return runWithAgentTrace(
+    {
+      sessionId,
+      projectId,
+      model,
+      request: requestPreview,
+    },
+    async () =>
+      runWithLlmCredentials(llmCredentials, async () => {
+        const snapshot = await graph.getState({
+          configurable: { thread_id: sessionId },
+        });
+        const hasExistingState = (snapshot.values?.messages?.length || 0) > 0;
+        const messagesToGraph = hasExistingState
+          ? inputMessages.slice(-2)
+          : inputMessages;
 
-    let lastNodeTimestamp = performance.now();
+        const stream = await graph.stream(
+          {
+            messages: messagesToGraph,
+            model,
+            workingDir,
+            projectId,
+          },
+          {
+            configurable: {
+              thread_id: sessionId,
+              working_dir: workingDir,
+            },
+            recursionLimit: 80,
+            streamMode: ["updates", "custom"],
+          },
+        );
 
-    for await (const streamChunk of stream) {
-      const [mode, chunk] = streamChunk as [string, unknown];
+        let lastNodeTimestamp = performance.now();
 
-      if (mode === "custom") {
-        const custom = chunk as {
-          type?: string;
-          payload?: AgentLifecycleEventPayload;
-        };
-        if (custom.type === "AGENT_LIFECYCLE" && custom.payload) {
-          sendSse(controller, encoder, {
-            type: "AGENT_LIFECYCLE",
-            payload: custom.payload,
-          });
-          sendSse(controller, encoder, {
-            type: "STATUS",
-            content: `🔄 ${formatLifecycleStatus(custom.payload)}`,
-          });
+        for await (const streamChunk of stream) {
+          const [mode, chunk] = streamChunk as [string, unknown];
+
+          if (mode === "custom") {
+            const custom = chunk as {
+              type?: string;
+              payload?: AgentLifecycleEventPayload;
+            };
+            if (custom.type === "AGENT_LIFECYCLE" && custom.payload) {
+              sendSse(controller, encoder, {
+                type: "AGENT_LIFECYCLE",
+                payload: custom.payload,
+              });
+              sendSse(controller, encoder, {
+                type: "STATUS",
+                content: `🔄 ${formatLifecycleStatus(custom.payload)}`,
+              });
+            }
+            continue;
+          }
+
+          const updates = chunk as Record<string, Record<string, unknown>>;
+          const now = performance.now();
+          const elapsedSeconds = ((now - lastNodeTimestamp) / 1000).toFixed(1);
+          lastNodeTimestamp = now;
+          emitGraphUpdateStatus(
+            updates,
+            elapsedSeconds,
+            controller,
+            encoder,
+          );
         }
-        continue;
-      }
 
-      const updates = chunk as Record<string, Record<string, unknown>>;
-      const now = performance.now();
-      const elapsedSeconds = ((now - lastNodeTimestamp) / 1000).toFixed(1);
-      lastNodeTimestamp = now;
-      emitGraphUpdateStatus(
-        updates,
-        elapsedSeconds,
-        controller,
-        encoder,
-      );
-    }
-
-    const finalSnapshot = await graph.getState({
-      configurable: { thread_id: sessionId },
-    });
-    return finalSnapshot.values as AgentStateValues;
-  });
+        const finalSnapshot = await graph.getState({
+          configurable: { thread_id: sessionId },
+        });
+        const finalState = finalSnapshot.values as AgentStateValues;
+        if (finalState.interactiveRequest) {
+          markCurrentTracePaused(
+            finalState.interactiveRequest.description ||
+              finalState.interactiveRequest.prompt ||
+              "等待用户交互",
+          );
+        }
+        return finalState;
+      }),
+  );
 }

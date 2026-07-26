@@ -1,3 +1,4 @@
+// 模块说明：负责 model router 核心服务与领域逻辑。
 import {
   AUTO_MODEL_ID,
   LLM_MODEL_CATALOG,

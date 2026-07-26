@@ -1,3 +1,4 @@
+// 模块说明：负责 scorer 核心服务与领域逻辑。
 import type {
   LlmCapability,
   LlmModelDefinition,

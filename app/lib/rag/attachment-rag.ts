@@ -1,7 +1,8 @@
+// 模块说明：负责 attachment rag 核心服务与领域逻辑。
 /**
  * 现有附件上传链路的轻量 RAG 适配器。
  *
- * PDF 仍由 useComposer / fileParser 提取文本层；本模块只负责：
+ * PDF 仍由 useComposer / file-parser 提取文本层；本模块只负责：
  * 1. 把较长的 textContent 切片并建立内存索引；
  * 2. 根据本次提交的问题检索相关片段；
  * 3. 返回一个只替换 textContent 的附件副本。
@@ -10,7 +11,7 @@
  * 中加入 Embedding 混合排序，而不用改变聊天提交链路。
  */
 
-import type { AttachedFile } from "../../const/pageConst";
+import type { AttachedFile } from "../../constants/page-constants";
 import { chunkDocumentText } from "./chunker";
 import { createRagDocumentIndex, retrieveRagChunks } from "./retriever";
 import type { RagDocumentIndex, RagRetrievalOptions } from "./types";

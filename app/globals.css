@@ -1,3 +1,4 @@
+/* 模块说明：负责 globals 页面或应用入口逻辑。 */
 @import "tailwindcss";
 @plugin "@tailwindcss/typography"; /* 🔥 v4 插件引入专属新写法 */
 

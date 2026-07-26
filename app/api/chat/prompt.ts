@@ -1,3 +1,4 @@
+// 模块说明：负责 prompt 接口及服务端流程。
 import { renderPrompt } from "@/app/lib/llm/prompts/registry";
 
 /**

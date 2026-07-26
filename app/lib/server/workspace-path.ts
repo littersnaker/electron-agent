@@ -1,3 +1,4 @@
+// 模块说明：负责 workspace path 核心服务与领域逻辑。
 import fs from "fs";
 import path from "path";
 

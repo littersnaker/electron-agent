@@ -1,3 +1,4 @@
+// 模块说明：负责 credentials 核心服务与领域逻辑。
 import {
   LLM_PROVIDER_CATALOG,
   LLM_PROVIDER_IDS,

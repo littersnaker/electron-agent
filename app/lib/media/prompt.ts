@@ -1,4 +1,5 @@
-import type { MediaMode, TypographyPolicy } from "@/app/const/pageConst";
+// 模块说明：负责 prompt 核心服务与领域逻辑。
+import type { MediaMode, TypographyPolicy } from "@/app/constants/page-constants";
 
 interface BuildMediaPromptOptions {
   prompt: string;

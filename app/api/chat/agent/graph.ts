@@ -1,3 +1,4 @@
+// 模块说明：负责 graph 接口及服务端流程。
 import { END, Send, START, StateGraph } from "@langchain/langgraph";
 import { getLangGraphCheckpointer } from "./checkpointer";
 import {
@@ -19,6 +20,7 @@ import { createDefaultWorkerMemory } from "./types";
 import {
   fileAgentNode,
   fileUniquenessCheckNode,
+  agentEvaluationNode,
   finalReportNode,
   highLevelPlanningAgentNode,
   lintBuildTestNode,
@@ -35,6 +37,7 @@ import {
   searchAgentNode,
   singleAgentDegradeNode,
   structuredTaskListNode,
+  workspaceRiskApprovalNode,
 } from "./workflow-nodes";
 
 type AgentRuntimeState = typeof AgentState.State;
@@ -78,6 +81,7 @@ function buildWorkerInput(
     previousResult: previousResult || null,
     requestMode: state.requestMode,
     approvedMissingFiles: state.approvedMissingFiles || [],
+    approvedRiskActions: state.approvedRiskActions || [],
     model: state.model || "auto",
     // /api/chat 已经验证工作目录，图内不再静默退回 process.cwd()。
     workingDir: state.workingDir,
@@ -132,7 +136,13 @@ function dispatchRetryWorkers(state: AgentRuntimeState) {
 /** Router 后先处理直接回答，再把修改任务送入缺失文件确认 Guard。 */
 function routeAfterRouter(
   state: AgentRuntimeState,
-): "direct" | "workspace" | "guard" | "context" {
+): "direct" | "workspace" | "guard" | "context" | "risk" | "worker" {
+  if (state.resumeFromRiskApproval && state.approvalResumeTarget === "merge") {
+    return "risk";
+  }
+  if (state.resumeFromRiskApproval && state.approvalResumeTarget === "worker") {
+    return "worker";
+  }
   if (state.directAnswer?.trim()) return "direct";
   if (state.requestMode === "workspace_info") return "workspace";
   if (
@@ -161,6 +171,13 @@ function routeAfterMissingFileGuard(
 /** 上下文合并后，只读请求直接回答，代码修改请求才进入 Planner。 */
 function routeAfterContext(state: AgentRuntimeState): "read" | "change" {
   return state.requestMode === "read_only" ? "read" : "change";
+}
+
+/** HITL 审批节点有请求时暂停，否则继续进入 Merge。 */
+function routeAfterRiskApproval(
+  state: AgentRuntimeState,
+): "wait" | "continue" {
+  return state.interactiveRequest ? "wait" : "continue";
 }
 
 /*
@@ -192,19 +209,23 @@ const workflow = new StateGraph(AgentState)
   .addNode("structured_task_list", structuredTaskListNode)
   .addNode("retry_dispatch", retryDispatchNode)
   .addNode("modify_worker", modifyWorkerNode)
+  .addNode("workspace_risk_approval", workspaceRiskApprovalNode)
   .addNode("merge_patch", mergePatchNode)
   .addNode("lint_build_test", lintBuildTestNode)
   .addNode("reviewer_agent", reviewerAgentNode)
-  .addNode("final_report", finalReportNode);
+  .addNode("final_report", finalReportNode)
+  .addNode("agent_evaluation", agentEvaluationNode);
 
 workflow.addEdge(START, "router");
 workflow.addConditionalEdges("router", routeAfterRouter, {
-  direct: END,
+  direct: "agent_evaluation",
   workspace: "workspace_info_answer",
   guard: "missing_file_guard",
   context: "context_fanout",
+  risk: "workspace_risk_approval",
+  worker: "retry_dispatch",
 });
-workflow.addEdge("workspace_info_answer", END);
+workflow.addEdge("workspace_info_answer", "agent_evaluation");
 
 workflow.addConditionalEdges("missing_file_guard", routeAfterMissingFileGuard, {
   wait: END,
@@ -233,7 +254,7 @@ workflow.addConditionalEdges("enrich_context", routeAfterContext, {
   read: "read_only_answer",
   change: "high_level_planning_agent",
 });
-workflow.addEdge("read_only_answer", END);
+workflow.addEdge("read_only_answer", "agent_evaluation");
 
 workflow.addEdge("high_level_planning_agent", "planning_agent");
 workflow.addEdge("planning_agent", "planner_schema_validation");
@@ -281,7 +302,15 @@ workflow.addConditionalEdges(
   dispatchInitialWorkers,
   ["modify_worker", "merge_patch"],
 );
-workflow.addEdge("modify_worker", "merge_patch");
+workflow.addEdge("modify_worker", "workspace_risk_approval");
+workflow.addConditionalEdges(
+  "workspace_risk_approval",
+  routeAfterRiskApproval,
+  {
+    wait: END,
+    continue: "merge_patch",
+  },
+);
 workflow.addEdge("merge_patch", "lint_build_test");
 workflow.addEdge("lint_build_test", "reviewer_agent");
 workflow.addConditionalEdges(
@@ -302,7 +331,8 @@ workflow.addConditionalEdges(
   dispatchRetryWorkers,
   ["modify_worker", "merge_patch"],
 );
-workflow.addEdge("final_report", END);
+workflow.addEdge("final_report", "agent_evaluation");
+workflow.addEdge("agent_evaluation", END);
 
 export const graph = workflow.compile({
   checkpointer: getLangGraphCheckpointer(),

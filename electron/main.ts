@@ -6,33 +6,20 @@ import {
   ipcMain,
   dialog,
   nativeTheme,
+  type WebContents,
 } from "electron";
 import path from "path";
 import fs from "fs";
-import { spawn, ChildProcess, execSync } from "child_process";
+import http from "http";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import * as dotenv from "dotenv";
+import { findAvailableServerPort, SERVER_HOST } from "./server-port";
 type AppTheme = "dark" | "light";
 
-const TITLE_BAR_HEIGHT = 44;
 const WINDOW_THEME = {
-  dark: {
-    backgroundColor: "#09090b",
-    overlayColor: "#0f0f12",
-    symbolColor: "#f5f5f7",
-  },
-  light: {
-    backgroundColor: "#eef1f6",
-    overlayColor: "#f1f4f9",
-    symbolColor: "#1d1d1f",
-  },
-} satisfies Record<
-  AppTheme,
-  {
-    backgroundColor: string;
-    overlayColor: string;
-    symbolColor: string;
-  }
->;
+  dark: { backgroundColor: "#09090b" },
+  light: { backgroundColor: "#eef1f6" },
+} satisfies Record<AppTheme, { backgroundColor: string }>;
 
 const STARTUP_PAGE_THEME = {
   dark: {
@@ -108,22 +95,7 @@ function persistWindowTheme(theme: AppTheme): void {
 }
 
 function applyThemeToWindow(win: BrowserWindow, theme: AppTheme): void {
-  const palette = WINDOW_THEME[theme];
-
-  win.setBackgroundColor(palette.backgroundColor);
-
-  // Windows / Linux 的右上角最小化、最大化和关闭按钮属于原生标题栏覆盖层，
-  // 网页中的 CSS 和 backdrop-filter 无法绘制这块区域，必须由主进程更新。
-  if (
-    (process.platform === "win32" || process.platform === "linux") &&
-    typeof win.setTitleBarOverlay === "function"
-  ) {
-    win.setTitleBarOverlay({
-      color: palette.overlayColor,
-      symbolColor: palette.symbolColor,
-      height: TITLE_BAR_HEIGHT,
-    });
-  }
+  win.setBackgroundColor(WINDOW_THEME[theme].backgroundColor);
 }
 
 function applyNativeWindowTheme(theme: AppTheme): void {
@@ -134,6 +106,134 @@ function applyNativeWindowTheme(theme: AppTheme): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     applyThemeToWindow(mainWindow, theme);
   }
+}
+
+/**
+ * 注册自定义窗口按钮 IPC。
+ *
+ * 原生 titleBarOverlay 位于 Chromium 渲染层上方，网页弹窗无法通过 z-index 覆盖。
+ * 因此主窗口使用 frame:false，并由 React / 启动页自行绘制最小化、最大化和关闭按钮。
+ */
+function registerWindowControlIpc(): void {
+  const resolveWindow = (sender: WebContents) =>
+    BrowserWindow.fromWebContents(sender);
+
+  ipcMain.on("window:minimize", (event) => {
+    resolveWindow(event.sender)?.minimize();
+  });
+
+  ipcMain.on("window:close", (event) => {
+    resolveWindow(event.sender)?.close();
+  });
+
+  ipcMain.handle("window:isMaximized", (event) => {
+    return resolveWindow(event.sender)?.isMaximized() ?? false;
+  });
+
+  ipcMain.handle("window:toggleMaximize", (event) => {
+    const targetWindow = resolveWindow(event.sender);
+    if (!targetWindow) return false;
+
+    if (targetWindow.isMaximized()) targetWindow.unmaximize();
+    else targetWindow.maximize();
+
+    return targetWindow.isMaximized();
+  });
+}
+
+function buildInlineWindowControlsStyles(theme: AppTheme): string {
+  const isDark = theme === "dark";
+  const titlebarBackground = isDark
+    ? "rgba(15,15,18,0.78)"
+    : "rgba(246,247,250,0.76)";
+  const controlBackground = isDark
+    ? "rgba(38,38,42,0.72)"
+    : "rgba(255,255,255,0.72)";
+  const borderColor = isDark
+    ? "rgba(255,255,255,0.09)"
+    : "rgba(15,23,42,0.09)";
+  const iconColor = isDark ? "rgba(245,245,247,0.72)" : "rgba(29,29,31,0.68)";
+
+  return `
+  .window-titlebar {
+    position: fixed;
+    z-index: 100;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    height: 44px;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 12px;
+    border-bottom: 1px solid ${borderColor};
+    background: ${titlebarBackground};
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    -webkit-app-region: drag;
+  }
+
+  .window-controls {
+    display: flex;
+    height: 32px;
+    overflow: hidden;
+    border: 1px solid ${borderColor};
+    border-radius: 11px;
+    background: ${controlBackground};
+    color: ${iconColor};
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 5px 14px rgba(15,23,42,0.06);
+    -webkit-app-region: no-drag;
+  }
+
+  .window-control {
+    display: flex;
+    width: 40px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-left: 1px solid ${borderColor};
+    background: transparent;
+    color: inherit;
+    cursor: default;
+    transition: background 140ms ease, color 140ms ease;
+  }
+
+  .window-control:first-child {
+    border-left: 0;
+  }
+
+  .window-control:hover {
+    background: rgba(127,127,127,0.12);
+  }
+
+  .window-control.close:hover {
+    background: #ff5f57;
+    color: white;
+  }
+
+  .window-control svg {
+    width: 14px;
+    height: 14px;
+  }
+  `;
+}
+
+function buildInlineWindowControlsHtml(): string {
+  return `
+  <div class="window-titlebar">
+    <div class="window-controls" aria-label="窗口控制">
+      <button class="window-control" aria-label="最小化窗口" onclick="window.electronAPI?.windowControls?.minimize()">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+      </button>
+      <button class="window-control" aria-label="最大化或还原窗口" onclick="window.electronAPI?.windowControls?.toggleMaximize()">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="1.2" stroke="currentColor" stroke-width="1.15"/></svg>
+      </button>
+      <button class="window-control close" aria-label="关闭窗口" onclick="window.electronAPI?.windowControls?.close()">
+        <svg viewBox="0 0 16 16" fill="none"><path d="m4.5 4.5 7 7m0-7-7 7" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>`;
 }
 
 function maskSecret(secret?: string): string {
@@ -202,16 +302,183 @@ try {
   // not a squirrel install, continue
 }
 
-const PORT = 3000;
-const DEV_URL = `http://localhost:${PORT}`;
-
+/**
+ * Electron 主进程运行时状态。
+ *
+ * 这些变量必须定义在模块级作用域中，因为窗口创建、Next.js 子进程启动、错误页展示、
+ * 应用退出清理等多个函数都会共享它们。之前替换动态端口代码时误删了这一组声明，
+ * 导致 TypeScript 报出 `isDev/serverReady/serverFailed` 等名称不存在，并在编译后的
+ * JavaScript 中触发 `ReferenceError: isDev is not defined`。
+ */
+const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
 let serverReady = false;
 let serverFailed = false;
 let lastServerError = "";
+let appIsQuitting = false;
 
-const isDev = !app.isPackaged;
+/**
+ * Next.js 内嵌服务的端口和访问地址在启动时动态确定。
+ * 初始值只用于满足严格类型检查；真正加载页面前，`startServer` 一定会完成赋值。
+ */
+let serverPort = 0;
+let serverUrl = "";
+
+const ELECTRON_NEXT_DIST_DIR = ".next-electron";
+const SERVER_PID_FILE = "embedded-next-server.json";
+const SERVER_START_TIMEOUT_MS = 60_000;
+const SERVER_PROBE_INTERVAL_MS = 300;
+
+interface EmbeddedServerPidRecord {
+  pid: number;
+  projectPath: string;
+  startedAt: number;
+}
+
+function getServerPidFilePath(): string {
+  return path.join(app.getPath("userData"), SERVER_PID_FILE);
+}
+
+function removeServerPidFile(): void {
+  try {
+    fs.rmSync(getServerPidFilePath(), { force: true });
+  } catch (error) {
+    console.warn("[Electron] 清理 Next.js PID 文件失败:", error);
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 结束 Next.js 的完整进程树。
+ *
+ * Windows 下仅调用 ChildProcess.kill() 可能只关闭外层 cmd，真正的 Node/Next 子进程
+ * 仍会继续监听端口。因此这里使用 taskkill /T，确保子孙进程一起退出。
+ */
+function terminateProcessTree(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "taskkill",
+      ["/PID", String(pid), "/T", "/F"],
+      { windowsHide: true, stdio: "ignore" },
+    );
+
+    if (!result.error && result.status === 0) return;
+  }
+
+  try {
+    if (process.platform !== "win32") process.kill(-pid, "SIGTERM");
+    else process.kill(pid, "SIGTERM");
+  } catch {
+    // 进程已结束时无需继续处理。
+  }
+}
+
+function stopServerProcess(): void {
+  const pid = serverProcess?.pid;
+  if (pid) terminateProcessTree(pid);
+
+  serverProcess = null;
+  serverReady = false;
+  removeServerPidFile();
+}
+
+/** 清理本应用上一次异常退出时遗留的内嵌 Next.js 进程。 */
+function cleanupKnownStaleServerProcess(): void {
+  const pidFilePath = getServerPidFilePath();
+  if (!fs.existsSync(pidFilePath)) return;
+
+  try {
+    const record = JSON.parse(
+      fs.readFileSync(pidFilePath, "utf8"),
+    ) as Partial<EmbeddedServerPidRecord>;
+
+    const belongsToCurrentProject =
+      record.projectPath === app.getAppPath() &&
+      typeof record.pid === "number" &&
+      Number.isInteger(record.pid);
+
+    // 只处理本项目在最近一天内记录的进程，避免误杀被系统复用 PID 的其他程序。
+    const isRecent =
+      typeof record.startedAt === "number" &&
+      Date.now() - record.startedAt < 24 * 60 * 60 * 1000;
+
+    if (belongsToCurrentProject && isRecent && isProcessAlive(record.pid!)) {
+      console.warn(`[Electron] 正在清理遗留的 Next.js 进程 PID=${record.pid}`);
+      terminateProcessTree(record.pid!);
+    }
+  } catch (error) {
+    console.warn("[Electron] 读取 Next.js PID 文件失败:", error);
+  } finally {
+    removeServerPidFile();
+  }
+}
+
+function persistServerPid(pid: number): void {
+  const record: EmbeddedServerPidRecord = {
+    pid,
+    projectPath: app.getAppPath(),
+    startedAt: Date.now(),
+  };
+
+  fs.writeFileSync(getServerPidFilePath(), JSON.stringify(record), "utf8");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function probeServer(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = http.get(
+      {
+        hostname: SERVER_HOST,
+        port: serverPort,
+        path: "/",
+        timeout: 1_500,
+      },
+      (response) => {
+        response.resume();
+        resolve((response.statusCode ?? 500) < 500);
+      },
+    );
+
+    request.once("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.once("error", () => resolve(false));
+  });
+}
+
+/**
+ * 轮询真实 HTTP 响应，而不是依赖 Next.js 日志里的 URL 文本。
+ * Next 在打印 Local 地址时尚未一定完成编译，过早 loadURL 会产生 ERR_CONNECTION_RESET。
+ */
+async function waitForServerAvailability(): Promise<void> {
+  const deadline = Date.now() + SERVER_START_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (serverFailed || !serverProcess) {
+      throw new Error(lastServerError || "Next.js 服务进程已提前退出");
+    }
+
+    if (await probeServer()) return;
+    await delay(SERVER_PROBE_INTERVAL_MS);
+  }
+
+  throw new Error(`等待 Next.js 服务超时：${serverUrl}`);
+}
 
 // 运行时窗口图标统一来自 public/icon.png。
 function getRuntimeIconPath(): string | undefined {
@@ -306,6 +573,12 @@ function buildLoadingHtml(
     user-select: none;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+
+    /*
+     * 当前窗口使用无边框标题栏。把整个加载页声明为可拖动区域后，用户可在服务启动
+     * 期间按住页面任意空白位置或卡片移动窗口，不必等待 React 主页面加载完成。
+     */
+    -webkit-app-region: drag;
   }
 
   .startup-card {
@@ -335,6 +608,7 @@ function buildLoadingHtml(
     backdrop-filter: blur(30px) saturate(145%);
     -webkit-backdrop-filter: blur(30px) saturate(145%);
     animation: cardEnter 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    cursor: move;
   }
 
   .icon {
@@ -428,6 +702,8 @@ function buildLoadingHtml(
     }
   }
 
+${buildInlineWindowControlsStyles(theme)}
+
   @media (prefers-reduced-motion: reduce) {
     .startup-card,
     .icon,
@@ -439,6 +715,7 @@ function buildLoadingHtml(
 </style>
 </head>
 <body>
+  ${buildInlineWindowControlsHtml()}
   <main class="startup-card" aria-live="polite">
     <div class="icon">${iconContent}</div>
     <div class="title">智能助手</div>
@@ -452,56 +729,21 @@ function buildLoadingHtml(
 }
 
 /**
- * Kill any stale "next dev" processes that may hold the lock.
- * Uses PowerShell for reliable process matching on Windows.
- */
-function killStaleDevServer(): void {
-  if (process.platform === "win32") {
-    try {
-      // 用 PowerShell 杀掉命令行包含 "next" 和 "dev" 的 node 进程
-      execSync(
-        `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name='node.exe'\\" | Where-Object { $_.CommandLine -match 'next' -and $_.CommandLine -match 'dev' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
-        {
-          stdio: "ignore",
-          shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-          timeout: 8000,
-        },
-      );
-      console.log("[Electron] Killed stale next dev processes");
-    } catch {
-      // 没有残留进程，忽略
-    }
-    // 也杀掉占用目标端口的进程
-    try {
-      execSync(
-        `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${PORT} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
-        {
-          stdio: "ignore",
-          shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
-          timeout: 8000,
-        },
-      );
-    } catch {
-      // 端口未占用，忽略
-    }
-  } else {
-    try {
-      execSync(`pkill -f "next dev"`, { stdio: "ignore", timeout: 5000 });
-    } catch {
-      // ignore
-    }
-  }
-  // 等待 500ms 让进程退出并释放文件句柄
-  const start = Date.now();
-  while (Date.now() - start < 500) {
-    /* busy wait */
-  }
-}
-
-/**
  * Start the Next.js server as a child process.
  */
-function startServer(): void {
+async function startServer(): Promise<void> {
+  // 先清理上一次异常退出遗留的内嵌服务，再进行端口探测。
+  cleanupKnownStaleServerProcess();
+
+  // 每次启动都重新探测端口，确保应用不会依赖上一次运行时的端口状态。
+  serverPort = await findAvailableServerPort();
+  serverUrl = `http://${SERVER_HOST}:${serverPort}`;
+  serverReady = false;
+  serverFailed = false;
+  lastServerError = "";
+
+  console.log(`[Electron] 已选择可用端口 ${serverPort}，服务地址 ${serverUrl}`);
+
   const dashscopeApiKey = process.env.DASHSCOPE_API_KEY;
   const serpApiKey = process.env.SERPAPI_API_KEY;
   const talorDataApiToken = process.env.TALORDATA_API_TOKEN;
@@ -518,8 +760,22 @@ function startServer(): void {
   const env = {
     ...process.env, // 继承主进程的环境变量
     NEXT_PUBLIC_IS_ELECTRON: "1",
-    PORT: String(PORT),
-    HOSTNAME: "localhost",
+
+    // Next.js 服务端使用当前动态探测到的端口和本机 IPv4 地址。
+    PORT: String(serverPort),
+    HOSTNAME: SERVER_HOST,
+
+    // 开发环境下让 Webpack HMR 与 Electron 实际加载的动态端口保持一致，
+    // 避免页面已切换端口，但热更新 WebSocket 仍连接 3000。
+    NEXT_HMR_HOST: SERVER_HOST,
+    NEXT_HMR_PORT: String(serverPort),
+
+    // Electron 启动 Next.js 子进程时启用轮询监听，提升 Windows 环境下的文件变更稳定性。
+    WATCHPACK_POLLING: "true",
+
+    // Electron 开发服务使用独立构建目录，避免与用户单独运行的 `next dev`
+    // 或旧版本残留进程共同读写 `.next/dev`，导致连接重置和构建目录损坏。
+    NEXT_DIST_DIR: ELECTRON_NEXT_DIST_DIR,
 
     // 💡 关键：在这里显式注入！
     // 这样子进程启动时，就能拿到从 .env.local 读取到的这个值
@@ -547,32 +803,63 @@ function startServer(): void {
     `[Electron] 准备启动 Next 子进程，DASHSCOPE_API_KEY=${maskSecret(dashscopeApiKey)}, TALORDATA_API_TOKEN=${maskSecret(talorDataApiToken || serpApiKey)}, KEEPA_API_KEY=${maskSecret(keepaApiKey)}, TIKTOK_CLIENT_KEY=${maskSecret(tiktokClientKey)}, TEMU_APP_KEY=${maskSecret(temuAppKey)}, ALIBABA_1688_APP_KEY=${maskSecret(alibaba1688AppKey)}`,
   );
 
-  // 清理残留的 dev server 进程和锁文件
+  // 只清理 Electron 专属构建目录中的锁文件，不删除整个 dev 构建目录。
+  // 删除整个 `.next/dev` 会让仍在运行的 Next 进程发生连接重置。
   if (isDev) {
-    killStaleDevServer();
-    const devLockPath = path.join(app.getAppPath(), ".next", "dev");
+    const devLockPath = path.join(
+      app.getAppPath(),
+      ELECTRON_NEXT_DIST_DIR,
+      "dev",
+      "lock",
+    );
     try {
-      if (fs.existsSync(devLockPath)) {
-        fs.rmSync(devLockPath, { recursive: true, force: true });
-        console.log("[Electron] Removed stale Next.js dev lock");
-      }
-    } catch (e) {
-      console.warn("[Electron] Could not remove dev lock:", e);
+      fs.rmSync(devLockPath, { force: true });
+    } catch (error) {
+      console.warn("[Electron] 清理开发锁失败:", error);
     }
   }
 
   if (isDev) {
-    serverProcess = spawn(
+    const nextCliPath = path.join(
+      app.getAppPath(),
+      "node_modules",
       "next",
-      ["dev", "--webpack", "--port", String(PORT)],
-      {
-        cwd: app.getAppPath(),
-        env,
-        stdio: "pipe",
-        shell: true,
-        windowsHide: true,
-      },
+      "dist",
+      "bin",
+      "next",
     );
+
+    if (!fs.existsSync(nextCliPath)) {
+      throw new Error(`未找到 Next.js CLI：${nextCliPath}`);
+    }
+
+    const nextDevArguments = [
+      nextCliPath,
+      "dev",
+      "--webpack",
+      "--hostname",
+      SERVER_HOST,
+      "--port",
+      String(serverPort),
+    ];
+    const nextProcessEnv = {
+      ...env,
+      // 使用 Electron 可执行文件作为 Node 运行时，避免 Windows shell 产生无法回收的子进程。
+      ELECTRON_RUN_AS_NODE: "1",
+    };
+
+    console.log(
+      `[Electron] 启动 Next.js：${process.execPath} ${nextDevArguments.slice(1).join(" ")}`,
+    );
+
+    serverProcess = spawn(process.execPath, nextDevArguments, {
+      cwd: app.getAppPath(),
+      env: nextProcessEnv,
+      stdio: "pipe",
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    });
   } else {
     // Production: run standalone server.js.
     // ELECTRON_RUN_AS_NODE=1 makes Electron binary behave as plain Node.js.
@@ -587,16 +874,18 @@ function startServer(): void {
     });
   }
 
+  if (!serverProcess.pid) {
+    throw new Error("Next.js 子进程未返回有效 PID");
+  }
+  persistServerPid(serverProcess.pid);
+
   serverProcess.stdout?.on("data", (data: Buffer) => {
     const output = data.toString();
     console.log(`[Next.js] ${output}`);
-    if (
-      !serverReady &&
-      (output.includes("Ready") || output.includes(`localhost:${PORT}`))
-    ) {
-      serverReady = true;
-      // 多等 1 秒确保页面可访问
-      setTimeout(() => loadMainWindowWithRetry(), 1000);
+
+    // Next.js 的一部分构建错误会写入 stdout，一并保留给错误页。
+    if (/error|failed|exception/iu.test(output)) {
+      lastServerError += output;
     }
   });
 
@@ -616,29 +905,27 @@ function startServer(): void {
     serverFailed = true;
   });
 
-  serverProcess.on("close", (code) => {
-    console.log(`Next.js server exited with code ${code}`);
+  serverProcess.on("close", (code, signal) => {
+    console.log(`Next.js server exited with code ${code}, signal ${signal}`);
     serverProcess = null;
+    serverReady = false;
+    removeServerPidFile();
+
+    if (appIsQuitting) return;
+
     if (code !== 0 && code !== null) {
       serverFailed = true;
-      // 2 秒后若仍无成功加载，显示错误页
-      setTimeout(() => {
-        if (!serverReady) {
-          showErrorPage(
-            lastServerError || `Next.js server exited with code ${code}`,
-          );
-        }
-      }, 2000);
+      const message =
+        lastServerError ||
+        `Next.js server exited with code ${code}${signal ? `, signal ${signal}` : ""}`;
+      showErrorPage(message);
     }
   });
 
-  // Fallback: if server doesn't emit "Ready" within 40s, still try to load
-  setTimeout(() => {
-    if (!serverReady && !serverFailed) {
-      serverReady = true;
-      loadMainWindowWithRetry();
-    }
-  }, 40000);
+  // 以真实 HTTP 响应作为就绪标准，避免日志提前出现端口后立即 loadURL。
+  await waitForServerAvailability();
+  serverReady = true;
+  await loadMainWindowWithRetry();
 }
 
 /**
@@ -652,14 +939,9 @@ function createWindow(): BrowserWindow {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    // 完全移除原生标题栏和 titleBarOverlay，避免系统窗口按钮压在网页弹窗上方。
     frame: false,
     backgroundColor: nativeWindowTheme.backgroundColor,
-    titleBarStyle: "hidden", // 强制开启隐藏标题栏模式
-    titleBarOverlay: {
-      color: nativeWindowTheme.overlayColor,
-      symbolColor: nativeWindowTheme.symbolColor,
-      height: TITLE_BAR_HEIGHT,
-    },
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -689,12 +971,22 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
+  const notifyMaximizedState = () => {
+    if (!win.webContents.isDestroyed()) {
+      win.webContents.send("window:maximized-changed", win.isMaximized());
+    }
+  };
+
+  win.on("maximize", notifyMaximizedState);
+  win.on("unmaximize", notifyMaximizedState);
+  win.webContents.on("did-finish-load", notifyMaximizedState);
   win.on("closed", () => {
     mainWindow = null;
   });
-  win.webContents.openDevTools({
-    mode: "detach", // 单独窗口
-  });
+
+  if (isDev && process.env.ELECTRON_OPEN_DEVTOOLS === "1") {
+    win.webContents.openDevTools({ mode: "detach" });
+  }
 
   return win;
 }
@@ -749,7 +1041,12 @@ function showErrorPage(message: string): void {
     padding: 40px;
     text-align: center;
     -webkit-font-smoothing: antialiased;
+
+    /* 错误页同样属于无边框窗口，保留背景拖动能力。 */
+    -webkit-app-region: drag;
   }
+
+${buildInlineWindowControlsStyles(currentTheme)}
 
   .icon {
     width: 68px;
@@ -798,6 +1095,10 @@ function showErrorPage(message: string): void {
     word-break: break-all;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
+
+    /* 日志需要允许鼠标滚动和选择文字，因此排除出拖动区域。 */
+    -webkit-app-region: no-drag;
+    user-select: text;
   }
 
   .btn {
@@ -816,6 +1117,9 @@ function showErrorPage(message: string): void {
     transition:
       transform 150ms ease,
       filter 150ms ease;
+
+    /* 可交互控件必须标记为 no-drag，否则点击事件会被窗口拖动行为吞掉。 */
+    -webkit-app-region: no-drag;
   }
 
   .btn:hover {
@@ -829,10 +1133,11 @@ function showErrorPage(message: string): void {
 </style>
 </head>
 <body>
+  ${buildInlineWindowControlsHtml()}
   <div class="icon">!</div>
   <div class="title">服务启动失败</div>
   <div class="subtitle">
-    Next.js 服务未能正常启动，可能是端口占用或进程残留。请尝试关闭所有 Node.js 进程后重试。
+    Next.js 服务未能正常启动。应用已自动选择可用端口，请根据下方日志检查依赖、环境变量或构建资源是否完整。
   </div>
   <div class="log">${safeMessage}</div>
   <button class="btn" onclick="location.reload()">重试</button>
@@ -848,42 +1153,34 @@ function showErrorPage(message: string): void {
 /**
  * Load the Next.js URL with retry logic.
  */
-function loadMainWindowWithRetry(): void {
-  if (!mainWindow) return;
+async function loadMainWindowWithRetry(): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
 
-  const maxRetries = 8;
-  let attempt = 0;
+  const maxRetries = 5;
 
-  function tryLoad() {
-    attempt++;
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    if (serverFailed || !serverProcess) {
+      throw new Error(lastServerError || "Next.js 服务进程已经退出");
+    }
+
     console.log(
-      `[Electron] Loading ${DEV_URL} (attempt ${attempt}/${maxRetries})`,
+      `[Electron] Loading ${serverUrl} (attempt ${attempt}/${maxRetries})`,
     );
 
-    mainWindow!
-      .loadURL(DEV_URL)
-      .then(() => {
-        console.log("[Electron] Page loaded successfully");
-        if (isDev) {
-          mainWindow!.webContents.openDevTools();
-        }
-      })
-      .catch((err) => {
-        console.error(
-          `[Electron] Failed to load (attempt ${attempt}):`,
-          err.message,
-        );
-        if (attempt < maxRetries) {
-          setTimeout(tryLoad, 2000);
-        } else {
-          console.error(
-            "[Electron] Max retries reached, page may not be available",
-          );
-          showErrorPage(lastServerError || err.message);
-        }
-      });
+    try {
+      await mainWindow.loadURL(serverUrl);
+      console.log("[Electron] Page loaded successfully");
+      if (isDev && process.env.ELECTRON_OPEN_DEVTOOLS === "1") {
+        mainWindow.webContents.openDevTools();
+      }
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Electron] Failed to load (attempt ${attempt}):`, message);
+      if (attempt === maxRetries) throw error;
+      await delay(1_000);
+    }
   }
-  tryLoad();
 }
 
 /**
@@ -990,46 +1287,81 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit(); // 如果已经有一个实例在运行，直接退出当前实例
 } else {
-  // 只有获取到锁才执行后续启动逻辑
-  app.whenReady().then(() => {
-    currentTheme = readPersistedWindowTheme();
-    nativeTheme.themeSource = currentTheme;
+  // 只有获取到锁才执行后续启动逻辑。
+  void app
+    .whenReady()
+    .then(() => {
+      currentTheme = readPersistedWindowTheme();
+      nativeTheme.themeSource = currentTheme;
 
-    Menu.setApplicationMenu(null);
-    mainWindow = createWindow();
+      Menu.setApplicationMenu(null);
+      registerWindowControlIpc();
+      mainWindow = createWindow();
 
-    ipcMain.on("window:setTheme", (_event, theme: unknown) => {
-      if (!isAppTheme(theme)) {
-        console.warn("[Electron] 忽略无效主题值:", theme);
+      ipcMain.on("window:setTheme", (_event, theme: unknown) => {
+        if (!isAppTheme(theme)) {
+          console.warn("[Electron] 忽略无效主题值:", theme);
+          return;
+        }
+
+        applyNativeWindowTheme(theme);
+      });
+
+      // 注册选择文件夹的 IPC 事件。
+      ipcMain.handle("dialog:openDirectory", async () => {
+        if (!mainWindow) return null;
+
+        const { canceled, filePaths } = await dialog.showOpenDialog(
+          mainWindow,
+          {
+            properties: ["openDirectory"],
+            title: "选择项目工作目录",
+          },
+        );
+
+        if (canceled || filePaths.length === 0) {
+          return null;
+        }
+
+        return filePaths[0];
+      });
+
+      ipcMain.handle("commerce:exportPdf", async (_event, payload: unknown) => {
+        if (!isCommercePdfPayload(payload)) {
+          throw new Error("PDF 导出参数无效");
+        }
+
+        return exportCommerceReportPdf(payload);
+      });
+
+      // 动态端口探测是异步操作。这里集中捕获服务启动异常，并把错误展示在当前加载窗口中。
+      void startServer().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("[Electron] 启动内嵌 Next.js 服务失败:", error);
+        serverFailed = true;
+        lastServerError = message;
+        showErrorPage(message);
+      });
+
+      setupAutoUpdater();
+    })
+    .catch((error: unknown) => {
+      // 捕获窗口创建、IPC 注册等初始化阶段的异常，避免出现
+      // UnhandledPromiseRejectionWarning 后应用停在空白加载页。
+      const message =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
+      console.error("[Electron] 应用初始化失败:", error);
+      serverFailed = true;
+      lastServerError = message;
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        showErrorPage(message);
         return;
       }
 
-      applyNativeWindowTheme(theme);
+      dialog.showErrorBox("应用初始化失败", message);
+      app.quit();
     });
-
-    // ⚡ 新增：注册选择文件夹的 IPC 事件
-    ipcMain.handle("dialog:openDirectory", async () => {
-      if (!mainWindow) return null;
-      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-        properties: ["openDirectory"], // 只允许选择文件夹
-        title: "选择项目工作目录",
-      });
-      if (canceled || filePaths.length === 0) {
-        return null;
-      }
-      return filePaths[0]; // 返回选中的文件夹绝对路径
-    });
-
-    ipcMain.handle("commerce:exportPdf", async (_event, payload: unknown) => {
-      if (!isCommercePdfPayload(payload)) {
-        throw new Error("PDF 导出参数无效");
-      }
-      return exportCommerceReportPdf(payload);
-    });
-
-    startServer();
-    setupAutoUpdater();
-  });
 }
 
 app.on("window-all-closed", () => {
@@ -1039,8 +1371,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
+  appIsQuitting = true;
+  stopServerProcess();
 });

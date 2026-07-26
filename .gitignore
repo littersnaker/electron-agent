@@ -46,6 +46,7 @@ next-env.d.ts
 
 # Electron
 .electron/
+.next-electron/
 .agent-data/
 out/
 out-server/
@@ -55,3 +56,6 @@ dist/
 agents/*
 
 app.zip
+# Agent 本地 Trace / 评估数据库与含密钥的项目 MCP 配置
+.agent-data/
+.agent-mcp.json

@@ -1,3 +1,4 @@
+// 模块说明：负责 layout 页面或应用入口逻辑。
 import type { Metadata } from "next";
 import "./globals.css";
 

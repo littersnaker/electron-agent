@@ -1,3 +1,4 @@
+// 模块说明：负责 types 接口及服务端流程。
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentRequestMode, InteractiveRequest } from "../agent/types";
 
@@ -30,6 +31,8 @@ export interface AgentStateValues extends Record<string, unknown> {
   requestMode?: AgentRequestMode;
   directAnswer?: string;
   finalReportSummary?: string;
+  evaluationReportId?: string;
+  evaluationSummary?: string;
   tokenUsage?: { prompt: number; completion: number; total: number };
   interactiveRequest?: InteractiveRequest | null;
 }

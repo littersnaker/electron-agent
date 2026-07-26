@@ -1,3 +1,4 @@
+// 模块说明：负责 persistent terminal session 接口及服务端流程。
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { CommandExecutionMode, InteractivePromptKind, InteractiveRequest } from "./types";
 

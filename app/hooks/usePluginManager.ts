@@ -1,3 +1,4 @@
+// 模块说明：负责 usePluginManager 状态管理与业务编排。
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";

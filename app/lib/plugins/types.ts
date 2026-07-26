@@ -1,4 +1,5 @@
-import type { SessionMode } from "../../const/pageConst";
+// 模块说明：负责 types 核心服务与领域逻辑。
+import type { SessionMode } from "../../constants/page-constants";
 
 /**
  * 内置功能插件标识。

@@ -1,3 +1,4 @@
+// 模块说明：负责 provider factory 核心服务与领域逻辑。
 import { getProviderDefinition } from "./registry/providers";
 import { GeminiProvider } from "./providers/gemini";
 import { OpenAiCompatibleProvider } from "./providers/openai-compatible";

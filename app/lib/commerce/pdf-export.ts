@@ -1,3 +1,4 @@
+// 模块说明：负责 pdf export 核心服务与领域逻辑。
 "use client";
 
 import type { CommerceResearchReport } from "./types";

@@ -1,3 +1,4 @@
+// 模块说明：负责 talordata market 核心服务与领域逻辑。
 import { getCommerceMarketplace } from "../marketplaces";
 import type { CommerceProductSignal } from "../types";
 import {

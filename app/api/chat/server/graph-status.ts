@@ -1,3 +1,4 @@
+// 模块说明：负责 graph status 接口及服务端流程。
 import { sendSse } from "./sse";
 import type { SseController } from "./sse";
 import type { AgentLifecycleEventPayload } from "./types";
@@ -54,10 +55,12 @@ export function emitGraphUpdateStatus(
     ["high_level_planning_agent", "🧭 High-Level Planner 已完成规划"],
     ["planning_agent", "📝 Task Planner 已生成并行任务"],
     ["structured_task_list", "📋 Structured Task List 已生成"],
+    ["workspace_risk_approval", "🛡️ 工作区风险审批检查已完成"],
     ["merge_patch", "🧷 Merge 已完成冲突检查与统一落盘"],
     ["lint_build_test", "🧪 工程验证已完成"],
     ["reviewer_agent", "🕵️ Reviewer 已完成统一审查"],
     ["final_report", "✅ Final Report 已生成"],
+    ["agent_evaluation", "📊 Agent 在线质量评估已完成"],
   ];
 
   for (const [nodeName, message] of statusMessages) {

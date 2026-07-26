@@ -1,3 +1,4 @@
+// 模块说明：负责 request context 核心服务与领域逻辑。
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { LlmCredentials } from "./types";
 

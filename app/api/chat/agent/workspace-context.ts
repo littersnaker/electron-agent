@@ -1,3 +1,4 @@
+// 模块说明：负责 workspace context 接口及服务端流程。
 import fs from "fs";
 import path from "path";
 import type { WorkspaceRuntimeInfo } from "./types";

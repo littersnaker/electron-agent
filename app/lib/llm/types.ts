@@ -1,3 +1,4 @@
+// 模块说明：负责 types 核心服务与领域逻辑。
 /** Multi-agent 支持的模型供应商。 */
 export type LlmProviderId =
   | "qwen"

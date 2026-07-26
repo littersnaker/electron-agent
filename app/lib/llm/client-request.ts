@@ -1,10 +1,11 @@
+// 模块说明：负责 client request 核心服务与领域逻辑。
 import { LLM_PROVIDER_CATALOG } from "./registry/providers";
 import type { LlmCredentials } from "./types";
 
 interface AttachmentLike {
   name: string;
   type: string;
-  /** 兼容旧 fileParser：可以是纯 Base64，也可以是完整 Data URL。 */
+  /** 兼容旧 file-parser：可以是纯 Base64，也可以是完整 Data URL。 */
   base64: string;
   /** 新的统一字段：浏览器预览使用的完整 Data URL。 */
   dataUrl?: string;

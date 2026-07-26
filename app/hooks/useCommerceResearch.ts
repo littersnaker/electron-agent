@@ -1,3 +1,4 @@
+// 模块说明：负责 useCommerceResearch 状态管理与业务编排。
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -5,7 +6,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   ChatSession,
   Message,
-} from "../const/pageConst";
+} from "../constants/page-constants";
 import type {
   CommerceMarketplaceCode,
   CommerceProgressEvent,

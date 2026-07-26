@@ -1,3 +1,4 @@
+// 模块说明：负责 request classifier 接口及服务端流程。
 import type { AgentRequestMode } from "./types";
 
 const CHANGE_REQUEST_PATTERN =

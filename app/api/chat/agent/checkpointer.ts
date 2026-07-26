@@ -1,3 +1,4 @@
+// 模块说明：负责 checkpointer 接口及服务端流程。
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import fs from "fs";
 import path from "path";

@@ -19,7 +19,9 @@
     "electron:build": "tsx scripts/build-electron.ts",
     "electron:package": "pnpm electron:build",
     "electron:make": "pnpm electron:build && pnpm electron:prepare-icons && electron-builder",
-    "electron:compile": "tsx scripts/compile-electron.ts",
+    "electron:compile": "pnpm electron:typecheck && tsx scripts/compile-electron.ts",
+    "test:electron-port": "tsx scripts/test-electron-port-selection.ts",
+    "test:agent-runtime": "tsx scripts/test-agent-production-features.ts",
     "test:commerce-routing": "tsx scripts/test-amazon-data-source.ts && tsx scripts/test-platform-data-sources.ts",
     "test:amazon-crawler": "tsx scripts/test-amazon-crawler-network.ts",
     "test:platform-routing": "tsx scripts/test-platform-data-sources.ts",
@@ -27,7 +29,8 @@
     "test:platform-crawlers": "tsx scripts/test-platform-crawlers-network.ts",
     "crawler:install-browser": "pnpm dlx playwright@1.61.1 install chromium",
     "crawler:install-browser:deps": "pnpm dlx playwright@1.61.1 install --with-deps chromium",
-    "test:platform-crawlers:strict": "cross-env COMMERCE_CRAWLER_NETWORK_TEST_STRICT=true tsx scripts/test-platform-crawlers-network.ts"
+    "test:platform-crawlers:strict": "cross-env COMMERCE_CRAWLER_NETWORK_TEST_STRICT=true tsx scripts/test-platform-crawlers-network.ts",
+    "electron:typecheck": "tsc --project electron/tsconfig.json --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",

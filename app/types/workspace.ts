@@ -1,5 +1,6 @@
-import type { AgentKind, AgentStatus } from "../component/AgentPanel";
-import type { ChatSession, WorkspaceProject } from "../const/pageConst";
+// 模块说明：维护 workspace 共享类型定义。
+import type { AgentKind, AgentStatus } from "../components/AgentPanel";
+import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
 import type { CommerceProgressEvent, CommerceResearchReport } from "../lib/commerce/types";
 
 export interface WorkspaceResponse {
@@ -9,7 +10,9 @@ export interface WorkspaceResponse {
 
 export type InteractiveRequestSource =
   | "terminal"
-  | "file_create_confirmation";
+  | "file_create_confirmation"
+  | "risk_approval"
+  | "mcp_tool_approval";
 
 export interface InteractiveRequest {
   id: string;
@@ -19,6 +22,8 @@ export interface InteractiveRequest {
   prompt: string;
   mode: "normal" | "pty";
   suggestedMode: "auto" | "llm" | "user";
+  kind?: "confirm" | "select" | "multiselect" | "input";
+  allowMultiple?: boolean;
   options: Array<{ label: string; value: string }>;
   promptRound: number;
   recentOutput: string;
@@ -26,6 +31,13 @@ export interface InteractiveRequest {
   description?: string;
   filePath?: string;
   originalUserRequest?: string;
+  approvalKind?: "workspace_write" | "mcp_tool";
+  riskLevel?: "medium" | "high";
+  toolName?: string;
+  toolArguments?: Record<string, unknown>;
+  approvalToken?: string;
+  workerId?: string;
+  slot?: number;
 }
 
 export interface ToolActivity {

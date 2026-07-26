@@ -26,6 +26,7 @@ Agent Workspace/
 | `pnpm electron:build` | 完整打包：编译 + `next build` + 复制静态资源 + electron-builder 绿色版 |
 | `pnpm electron:package` | 仅生成绿色版目录（不打包安装包） |
 | `pnpm electron:make` | 生成 Windows NSIS 安装包（.exe） |
+| `pnpm test:electron-port` | 占用随机端口并验证动态端口选择与释放后的恢复行为 |
 
 ## 开发流程
 
@@ -35,7 +36,8 @@ pnpm electron:dev
 ```
 
 开发模式下：
-- Next.js 运行在 `http://localhost:3000`
+- Electron 会从 `3000` 开始扫描空闲端口，Next.js 使用本次检测到的端口
+- 若 `3000` 已被占用，会自动使用 `3001`、`3002` 等端口，不会结束其他项目进程
 - Electron 窗口自动加载该地址并打开 DevTools
 - 修改 React 页面会触发 Next.js 热更新
 - 修改 `electron/*.ts` 需要重新运行 `pnpm electron:dev`
@@ -68,7 +70,7 @@ pnpm electron:make
 │  │   - 页面路由 (/, /apitest, ...)      │   │
 │  └─────────────────────────────────────┘   │
 │                    │                        │
-│                    ▼ localhost:3000         │
+│                    ▼ 动态本机端口             │
 │  ┌─────────────────────────────────────┐   │
 │  │       BrowserWindow (Chromium)       │   │
 │  │       渲染 React 页面 + 客户端逻辑    │   │

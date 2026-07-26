@@ -1,4 +1,5 @@
-import type { MediaMode } from "@/app/const/pageConst";
+// 模块说明：负责 catalog 核心服务与领域逻辑。
+import type { MediaMode } from "@/app/constants/page-constants";
 import type { MediaModelDefinition } from "./types";
 
 export const DEFAULT_MEDIA_MODEL_ID = "qwen:qwen-image-2.0-pro";

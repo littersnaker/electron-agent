@@ -1,3 +1,4 @@
+// 模块说明：负责 route 接口及服务端流程。
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextResponse } from "next/server";
 import fetch from "node-fetch";
@@ -7,15 +8,15 @@ export const runtime = "nodejs";
 
 // ⚠️【重要：请核对你的梯子端口】如果是 Clash 默认通常是 7890，v2ray 通常是 10809
 // 把顶部的代理配置改成这样：
-const MY_PROXY_PORT = process.env.PROXY_PORT || "7890"; 
+const MY_PROXY_PORT = process.env.PROXY_PORT || "7890";
 
 // 显式指定 http 协议头，有时候能解决 node-fetch 的握手失败问题
-const proxyUrl = `http://127.0.0.1:${MY_PROXY_PORT}`; 
+const proxyUrl = `http://127.0.0.1:${MY_PROXY_PORT}`;
 
-const agent = process.env.NODE_ENV === "development" 
+const agent = process.env.NODE_ENV === "development"
   ? new HttpsProxyAgent(proxyUrl, {
       keepAlive: true, // 🔥 让连接保持活跃，防止被代理软件中途切断
-    }) 
+    })
   : undefined;
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type GeminiPart = { text?: string };
@@ -56,16 +57,16 @@ async function requestGeminiStreamFetch(contents: GeminiContent[]) {
   });
 
   console.log("📡 [Gemini] 正在通过代理发起流式文本生成请求...");
-  
+
   const response = await fetch(GEMINI_STREAM_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-cache, no-transform",
-      "X-Accel-Buffering": "no", 
+      "X-Accel-Buffering": "no",
     },
     body,
-    agent, 
+    agent,
   });
 
   if (!response.ok) {
@@ -132,9 +133,9 @@ export async function POST(req: Request) {
     // 3. 直接发起流式请求（不再调用坑人的 countTokens，省下一半的配额和网络开销！）
     const geminiResponse = await requestGeminiStreamFetch(cleanMessages.map(toGeminiContent));
     console.log("✅ [Gemini] 成功建立流式连接，开始桥接数据...");
-    
+
     const encoder = new TextEncoder();
-    
+
     const outputStream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(": connected\n\n"));
@@ -160,7 +161,7 @@ export async function POST(req: Request) {
             try {
               const parsed = JSON.parse(dataJson) as GeminiStreamChunk;
               const candidate = parsed.candidates?.[0];
-              
+
               if (candidate?.finishReason && candidate.finishReason !== "STOP") {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(`[AI 拒绝回答: ${candidate.finishReason}]`)}\n\n`));
                 continue;

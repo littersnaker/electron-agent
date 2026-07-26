@@ -1,3 +1,4 @@
+// 模块说明：负责 useMediaGeneration 状态管理与业务编排。
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -9,8 +10,8 @@ import type {
   MediaMode,
   Message,
   TypographyPolicy,
-} from "../const/pageConst";
-import { toMessageAttachment } from "../const/pageConst";
+} from "../constants/page-constants";
+import { toMessageAttachment } from "../constants/page-constants";
 import {
   buildLlmRequestHeaders,
   buildMediaAttachmentPayload,
