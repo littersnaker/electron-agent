@@ -436,7 +436,7 @@ pnpm electron:package
 pnpm electron:make
 ```
 
-构建脚本会编译 Electron、构建 Next.js standalone、复制 `.next/standalone`、静态资源、`public`，并在存在时复制 `.env.local`，最后调用 electron-builder。
+构建脚本会编译 Electron、构建 Next.js standalone、复制 `.next-electron/standalone`、静态资源、`public`，并在存在时复制 `.env.local`，最后调用 electron-builder。
 
 > 当前源码中仍存在 `Agent Workspace`、`MyApp` 等旧名称。文档和目标项目名统一为 **Multi-agent**。正式发布前应同步修改 `package.json`、`electron-builder.yml`、Electron 窗口标题、报告页脚、App ID、安装包名称和快捷方式名称。
 

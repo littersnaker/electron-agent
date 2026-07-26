@@ -865,7 +865,7 @@ async function startServer(): Promise<void> {
     // ELECTRON_RUN_AS_NODE=1 makes Electron binary behave as plain Node.js.
     const serverPath = app.isPackaged
       ? path.join(process.resourcesPath, "standalone", "server.js")
-      : path.join(__dirname, "../.next/standalone", "server.js"); // 开发环境路径视你实际情况而定
+      : path.join(__dirname, "../.next-electron/standalone", "server.js"); // 开发环境路径视你实际情况而定
     const serverEnv = { ...env, ELECTRON_RUN_AS_NODE: "1" };
     serverProcess = spawn(process.execPath, [serverPath], {
       cwd: path.join(process.resourcesPath, "standalone"),

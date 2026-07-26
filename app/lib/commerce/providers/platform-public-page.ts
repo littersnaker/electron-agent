@@ -3,9 +3,9 @@
  * 说明：内部实现已按企业级单一职责拆分；保留原导入路径，避免影响调用方。
  */
 export { PLATFORM_CRAWLER_DEFINITIONS } from "./platform-public-page/crawler-definitions";
-export { PlatformCrawlerDefinition } from "./platform-public-page/crawler-definitions";
+export type { PlatformCrawlerDefinition } from "./platform-public-page/crawler-definitions";
 export { PlatformPublicPageProvider } from "./platform-public-page/public-page-provider";
-export { SupportedPlatformSource } from "./platform-public-page/crawler-definitions";
+export type { SupportedPlatformSource } from "./platform-public-page/crawler-definitions";
 export { assertPlatformPageUsable } from "./platform-public-page/network-client";
 export { buildPlatformSearchUrl } from "./platform-public-page/search-url-builder";
 export { mergePlatformProducts } from "./platform-public-page/payload-extraction";

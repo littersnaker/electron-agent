@@ -73,6 +73,7 @@ export default function WindowControls() {
     const controls = window.electronAPI?.windowControls;
     if (!controls) return undefined;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSupported(true);
     void controls.isMaximized().then(setMaximized);
     return controls.onMaximizedChange(setMaximized);

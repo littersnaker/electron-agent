@@ -227,7 +227,6 @@ export function useWorkspaceController(
 
   const addProject = useCallback(async () => {
     try {
-      // @ts-expect-error Electron preload API is injected at runtime.
       const rootPath = await window.electronAPI?.selectFolder?.();
       if (!rootPath) return null;
 

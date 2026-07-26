@@ -1,11 +1,12 @@
 import type { NextConfig } from "next";
 
 /**
- * Electron 开发服务通过 NEXT_DIST_DIR 使用独立缓存目录。
- * 普通 Web 开发与生产构建仍沿用 Next.js 默认的 `.next`。
+ * Next.js 开发态与生产构建统一使用 `.next-electron`。
+ * production standalone 服务会生成在 `.next-electron/standalone`。
  */
 const nextConfig: NextConfig = {
-  distDir: process.env.NEXT_DIST_DIR?.trim() || ".next",
+  output: "standalone",
+  distDir: ".next-electron",
 };
 
 export default nextConfig;

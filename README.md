@@ -446,7 +446,7 @@ Build an installer:
 pnpm electron:make
 ```
 
-The build script compiles Electron, builds Next.js in standalone mode, copies `.next/standalone`, static assets, public assets, and optionally `.env.local`, then invokes electron-builder.
+The build script compiles Electron, builds Next.js in standalone mode, copies `.next-electron/standalone`, static assets, public assets, and optionally `.env.local`, then invokes electron-builder.
 
 > The current source tree still contains several legacy package and installer labels such as `Agent Workspace` and `MyApp`. Documentation and the intended product name are **Multi-agent**. Before publishing binaries, align `package.json`, `electron-builder.yml`, Electron window labels, report footers, app IDs, artifact names, and installer shortcut names.
 

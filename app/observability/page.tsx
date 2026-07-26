@@ -146,6 +146,7 @@ export default function ObservabilityPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTraces();
   }, [loadTraces]);
 

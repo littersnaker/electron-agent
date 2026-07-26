@@ -1,96 +1,109 @@
 /// <reference types="node" />
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 const rootDir = process.cwd();
+const nextDistDirName = ".next-electron";
+const nextDistDir = path.join(rootDir, nextDistDirName);
+const standaloneSource = path.join(nextDistDir, "standalone");
+const staticSource = path.join(nextDistDir, "static");
+const outServerRoot = path.join(rootDir, "out-server");
+const outServerDir = path.join(outServerRoot, "standalone");
 
-try {
-  console.log('=== Step 1: 编译 Electron 主进程 TypeScript ===');
-  execSync('pnpm electron:compile', { stdio: 'inherit', cwd: rootDir });
+/** 执行项目命令，并把子进程输出同步到当前终端。 */
+function runCommand(command: string): void {
+  execSync(command, {
+    stdio: "inherit",
+    cwd: rootDir,
+    env: process.env,
+  });
+}
 
-  console.log('\n=== Step 2: 构建 Next.js 前端项目 (Standalone Mode) ===');
-  execSync('pnpm run build', { stdio: 'inherit', cwd: rootDir });
+/** 校验 Next.js standalone 构建产物是否完整。 */
+function assertStandaloneBuild(): void {
+  const serverEntry = path.join(standaloneSource, "server.js");
 
-  console.log('\n=== Step 3: 自动整理 Next.js 生产环境服务文件 ===');
-  const outServerDir = path.join(rootDir, 'out-server/standalone');
+  if (!fs.existsSync(standaloneSource)) {
+    throw new Error(
+      `${nextDistDirName}/standalone 目录不存在，请确认 next.config.ts 同时配置了 output: "standalone" 和 distDir: "${nextDistDirName}"。`,
+    );
+  }
 
-  fs.rmSync(path.join(rootDir, 'out-server'), { recursive: true, force: true });
+  if (!fs.existsSync(serverEntry)) {
+    throw new Error(
+      `${nextDistDirName}/standalone/server.js 不存在，Next.js standalone 构建不完整。`,
+    );
+  }
+
+  if (!fs.existsSync(staticSource)) {
+    throw new Error(
+      `${nextDistDirName}/static 目录不存在，Next.js 静态资源构建不完整。`,
+    );
+  }
+}
+
+/** 将 standalone、静态资源和 public 整理到 Electron 资源目录。 */
+function prepareStandaloneRuntime(): void {
+  fs.rmSync(outServerRoot, { recursive: true, force: true });
   fs.mkdirSync(outServerDir, { recursive: true });
 
-  const standaloneSource = path.join(rootDir, '.next/standalone');
-  if (!fs.existsSync(standaloneSource)) {
-    throw new Error('.next/standalone 目录不存在，请检查 Next.js 是否成功构建。');
-  }
-  fs.cpSync(standaloneSource, outServerDir, { recursive: true, dereference: true });
+  fs.cpSync(standaloneSource, outServerDir, {
+    recursive: true,
+    dereference: true,
+  });
 
-  const destStatic = path.join(outServerDir, '.next/static');
-  fs.mkdirSync(destStatic, { recursive: true });
-  fs.cpSync(path.join(rootDir, '.next/static'), destStatic, { recursive: true });
+  // server.js 会按照自定义 distDir 查找静态资源。
+  const destinationStatic = path.join(
+    outServerDir,
+    nextDistDirName,
+    "static",
+  );
+  fs.mkdirSync(destinationStatic, { recursive: true });
+  fs.cpSync(staticSource, destinationStatic, { recursive: true });
 
-  const sourcePublic = path.join(rootDir, 'public');
+  const sourcePublic = path.join(rootDir, "public");
   if (fs.existsSync(sourcePublic)) {
-    const destPublic = path.join(outServerDir, 'public');
-    fs.mkdirSync(destPublic, { recursive: true });
-    fs.cpSync(sourcePublic, destPublic, { recursive: true });
+    fs.cpSync(sourcePublic, path.join(outServerDir, "public"), {
+      recursive: true,
+    });
   }
 
-  /*
-   * Electron 打包后不会天然带上项目根目录的 .env.local。
-   * 这里显式把它复制进 standalone 资源目录，供主进程启动时读取，
-   * 再把 DASHSCOPE_API_KEY、SERPAPI_API_KEY / TALORDATA_API_TOKEN 等变量
-   * 显式注入给 Next 子进程。Token 只随本机 Electron 资源分发，不写入前端 bundle。
-   */
-  const sourceEnvLocal = path.join(rootDir, '.env.local');
-  if (fs.existsSync(sourceEnvLocal)) {
-    fs.cpSync(sourceEnvLocal, path.join(outServerDir, '.env.local'));
-    console.log('已复制 .env.local 到 standalone 运行目录。');
+  copyEnvironmentFile();
+}
 
-    // 只检查变量名是否存在，不输出任何 Secret 内容，避免构建日志泄露 Token。
-    const envText = fs.readFileSync(sourceEnvLocal, 'utf8');
-    const expectedKeys = [
-      'DASHSCOPE_API_KEY',
-      'SERPAPI_API_KEY',
-      'TALORDATA_API_TOKEN',
-      'KEEPA_API_KEY',
-      'TIKTOK_CLIENT_KEY',
-      'TIKTOK_CLIENT_SECRET',
-      'TIKTOK_MERCHANT_ID',
-      'TEMU_APP_KEY',
-      'TEMU_APP_SECRET',
-      'TEMU_ACCESS_TOKEN',
-      'ALIBABA_1688_APP_KEY',
-      'ALIBABA_1688_APP_SECRET',
-      'ALIBABA_1688_ACCESS_TOKEN',
-    ];
-    for (const key of expectedKeys) {
-      const present = new RegExp(`^\\s*${key}\\s*=`, 'mu').test(envText);
-      console.log(`[env] ${key}: ${present ? '已包含' : '未配置'}`);
-    }
-  } else {
-    console.warn('未找到项目根目录 .env.local，打包后的应用将只能依赖系统环境变量。');
+/** 将本机环境变量文件复制到内嵌 Next.js 服务目录。 */
+function copyEnvironmentFile(): void {
+  const sourceEnvLocal = path.join(rootDir, ".env.local");
+  if (!fs.existsSync(sourceEnvLocal)) {
+    console.warn(
+      "未找到项目根目录 .env.local，打包后的应用将依赖系统环境变量。",
+    );
+    return;
   }
 
-  console.log('\n=== Step 3.5: 同步 Electron 图标资源 ===');
-  execSync('pnpm electron:prepare-icons', { stdio: 'inherit', cwd: rootDir });
+  fs.cpSync(sourceEnvLocal, path.join(outServerDir, ".env.local"));
+  console.log("已复制 .env.local 到 standalone 运行目录。");
+}
 
-  // const symlinkPaths = [
-  //   // path.join(outServerDir, 'node_modules'),
-  //   // path.join(outServerDir, '.next', 'node_modules'),
-  // ];
-  // for (const p of symlinkPaths) {
-  //   if (fs.existsSync(p)) {
-  //     fs.rmSync(p, { recursive: true, force: true });
-  //   }
-  // }
+try {
+  console.log("=== Step 1: 编译 Electron 主进程 TypeScript ===");
+  runCommand("pnpm electron:compile");
 
-  console.log('\n=== Step 4: electron-builder 打包绿色运行版 ===');
-  execSync('pnpm exec electron-builder --dir', { stdio: 'inherit', cwd: rootDir });
+  console.log(
+    "\n=== Step 2: 构建 Next.js 前端项目 (.next-electron / Standalone) ===",
+  );
+  runCommand("pnpm run build");
 
-  console.log('\n🎉 [成功] 绿色运行版已生成！请前往 out/MyApp-win32-x64 目录查看。');
-  console.log('💡 如需生成安装包，请运行: pnpm electron:make');
+  console.log("\n=== Step 3: 校验并整理 Next.js 生产服务文件 ===");
+  assertStandaloneBuild();
+  prepareStandaloneRuntime();
 
+  console.log("\n✅ Electron 打包资源准备完成。");
+  console.log(
+    "后续 electron-builder 会由 package.json 脚本显式读取 electron-builder.yml。",
+  );
 } catch (error) {
-  console.error('\n❌ 构建或打包过程中发生错误:', error);
+  console.error("\n❌ 构建资源准备过程中发生错误:", error);
   process.exit(1);
 }

@@ -5,10 +5,6 @@
   "main": ".electron/main.js",
   "author": "white",
   "description": "AI Chat Application",
-  "build": {
-    "productName": "Agent Workspace",
-    "appId": "com.agent.workspace"
-  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
@@ -16,9 +12,9 @@
     "lint": "eslint",
     "electron:dev": "pnpm electron:compile && electron .",
     "electron:prepare-icons": "tsx scripts/prepare-electron-icons.ts",
-    "electron:build": "tsx scripts/build-electron.ts",
+    "electron:build": "pnpm electron:prepare && pnpm electron:prepare-icons && pnpm exec electron-builder --dir --config electron-builder.yml",
     "electron:package": "pnpm electron:build",
-    "electron:make": "pnpm electron:build && pnpm electron:prepare-icons && electron-builder",
+    "electron:make": "pnpm electron:prepare && pnpm electron:prepare-icons && pnpm exec electron-builder --config electron-builder.yml",
     "electron:compile": "pnpm electron:typecheck && tsx scripts/compile-electron.ts",
     "test:electron-port": "tsx scripts/test-electron-port-selection.ts",
     "test:agent-runtime": "tsx scripts/test-agent-production-features.ts",
@@ -30,7 +26,8 @@
     "crawler:install-browser": "pnpm dlx playwright@1.61.1 install chromium",
     "crawler:install-browser:deps": "pnpm dlx playwright@1.61.1 install --with-deps chromium",
     "test:platform-crawlers:strict": "cross-env COMMERCE_CRAWLER_NETWORK_TEST_STRICT=true tsx scripts/test-platform-crawlers-network.ts",
-    "electron:typecheck": "tsc --project electron/tsconfig.json --noEmit"
+    "electron:typecheck": "tsc --project electron/tsconfig.json --noEmit",
+    "electron:prepare": "tsx scripts/build-electron.ts"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",
