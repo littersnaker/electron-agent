@@ -37,7 +37,9 @@
     "crawler:install-browser:deps": "pnpm dlx playwright@1.61.1 install --with-deps chromium",
     "test:platform-crawlers:strict": "cross-env COMMERCE_CRAWLER_NETWORK_TEST_STRICT=true tsx scripts/test-platform-crawlers-network.ts",
     "test:context-memory": "tsx scripts/test-context-memory.ts",
-    "test:memory-reflection": "tsx scripts/test-memory-reflection.ts"
+    "test:memory-reflection": "tsx scripts/test-memory-reflection.ts",
+    "test:amazon-listing-demo": "tsx scripts/test-amazon-listing-demo.ts",
+    "test:commerce-planning": "tsx scripts/test-commerce-planning-sync.ts"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",

@@ -394,6 +394,8 @@ export default function Home() {
                   <ChatComposer
                     mode={workspace.activeSession?.mode}
                     commerceMarketplace={commerceMarketplace}
+                    commerceWorkflowMode={commerce.workflowMode}
+                    onCommerceWorkflowModeChange={commerce.setWorkflowMode}
                     onCommerceMarketplaceChange={setCommerceMarketplace}
                     commerceDataSourceState={apiKey.commerceDataSourceState}
                     onOpenServiceSettings={apiKey.openKeyModal}
@@ -435,7 +437,7 @@ export default function Home() {
                   isStreaming={isBusy}
                   workflowMode={
                     workspace.activeSession?.mode === "commerce"
-                      ? "commerce"
+                      ? `commerce-${commerce.workflowMode}`
                       : effectiveComposerMode
                   }
                 />

@@ -6,13 +6,13 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, DragEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
-import { COMMERCE_MARKETPLACES } from "../../lib/commerce/marketplaces";
 import {
   collectClipboardAttachments,
   collectDroppedAttachments,
   createFilePickerCandidates,
 } from "../../utilities/attachment-input";
 import ModelSelector from "../ModelSelector";
+import { CommerceControls } from "./commerce-controls";
 import { AttachmentList } from "./attachment-list";
 import {
   IMAGE_EDIT_FIDELITY_OPTIONS,
@@ -28,6 +28,8 @@ import type { ChatComposerProps } from "./chat-composer-config";
 export function ChatComposer({
   mode,
   commerceMarketplace = "US",
+  commerceWorkflowMode = "research",
+  onCommerceWorkflowModeChange,
   onCommerceMarketplaceChange,
   commerceDataSourceState = "none",
   onOpenServiceSettings,
@@ -312,78 +314,15 @@ export function ChatComposer({
       )}
 
       {mode === "commerce" && (
-        <div
-          className="mb-2 flex flex-wrap items-center gap-2 rounded-[15px] border px-3 py-2.5"
-          style={{
-            background: "linear-gradient(145deg, rgba(10,132,255,0.08), var(--glass-soft))",
-            borderColor: "rgba(10,132,255,0.16)",
-          }}
-        >
-          <div className="mr-1 min-w-[92px]">
-            <div className="text-[10px] font-semibold text-[var(--text-secondary)]">
-              目标市场
-            </div>
-            <div className="mt-0.5 text-[8px] text-[var(--text-quaternary)]">
-              决定本地化搜索与货币
-            </div>
-          </div>
-          <div className="flex flex-1 flex-wrap gap-1.5">
-            {COMMERCE_MARKETPLACES.map((marketplace) => {
-              const selected = commerceMarketplace === marketplace.code;
-              return (
-                <button
-                  key={marketplace.code}
-                  type="button"
-                  onClick={() =>
-                    onCommerceMarketplaceChange?.(marketplace.code)
-                  }
-                  disabled={disabled}
-                  className="rounded-full border px-2.5 py-1.5 text-[9px] font-medium transition-all disabled:opacity-40"
-                  style={{
-                    background: selected
-                      ? "rgba(10,132,255,0.14)"
-                      : "transparent",
-                    borderColor: selected
-                      ? "rgba(10,132,255,0.30)"
-                      : "var(--border)",
-                    color: selected
-                      ? "#64b5ff"
-                      : "var(--text-tertiary)",
-                  }}
-                  title={`${marketplace.label} · ${marketplace.currency}`}
-                >
-                  {marketplace.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex w-full flex-wrap items-center justify-between gap-2 text-[8px] leading-4 text-[var(--text-quaternary)]">
-            <span>
-              核心流程只依赖公开 SERP / Shopping；Amazon、Keepa 等付费数据均为可选增强。
-            </span>
-            <button
-              type="button"
-              onClick={onOpenServiceSettings}
-              className="rounded-full border px-2.5 py-1 text-[8px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
-              style={{
-                color: commerceDataSourceState !== "none" ? "#0a84ff" : "var(--text-secondary)",
-                borderColor: commerceDataSourceState !== "none"
-                  ? "rgba(10,132,255,0.25)"
-                  : "var(--border)",
-                background: commerceDataSourceState !== "none"
-                  ? "rgba(10,132,255,0.10)"
-                  : "var(--glass)",
-              }}
-              title="TalorData 是核心公开市场搜索源；留空时优先读取应用打包的默认环境 Token"
-            >
-              {commerceDataSourceState === "environment"
-                ? "TalorData 默认源已就绪"
-                : commerceDataSourceState === "local"
-                  ? "TalorData Token 已设置"
-                  : "数据源设置"}
-            </button>
-          </div>
-        </div>
+        <CommerceControls
+          workflowMode={commerceWorkflowMode}
+          onWorkflowModeChange={onCommerceWorkflowModeChange}
+          marketplaceCode={commerceMarketplace}
+          onMarketplaceChange={onCommerceMarketplaceChange}
+          dataSourceState={commerceDataSourceState}
+          onOpenServiceSettings={onOpenServiceSettings}
+          disabled={disabled}
+        />
       )}
 
       <div
@@ -426,7 +365,7 @@ export function ChatComposer({
           minRows={2}
           maxRows={7}
           disabled={disabled}
-          placeholder={resolvePlaceholder(mode, composerMode)}
+          placeholder={resolvePlaceholder(mode, composerMode, commerceWorkflowMode)}
           className="max-h-44 min-w-0 w-full resize-none bg-transparent px-2.5 pb-2 pt-1.5 text-[13px] leading-6 outline-none placeholder:text-[var(--text-quaternary)] disabled:opacity-50"
           style={{ color: "var(--text-primary)" }}
         />
@@ -497,9 +436,9 @@ export function ChatComposer({
                     ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
-              title={resolveSubmitLabel(mode, composerMode)}
+              title={resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}
             >
-              {resolveSubmitLabel(mode, composerMode)}
+              {resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}
             </button>
           </div>
         </div>

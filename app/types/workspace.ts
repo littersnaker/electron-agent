@@ -2,6 +2,7 @@
 import type { AgentKind, AgentStatus } from "../components/AgentPanel";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
 import type { CommerceProgressEvent, CommerceResearchReport } from "../lib/commerce/types";
+import type { AmazonListingDemoReport } from "../lib/commerce/listing/types";
 
 export interface WorkspaceResponse {
   projects: WorkspaceProject[];
@@ -46,6 +47,10 @@ export interface ToolActivity {
   status: "running" | "completed" | "error";
   startedAt: number;
   endedAt?: number;
+  /** 当前阶段的实时说明；任务规划可直接展示，不再回退到通用文案。 */
+  detail?: string;
+  /** 工作流提供的稳定阶段 ID；任务规划优先按该字段匹配，避免依赖展示文案。 */
+  stageId?: string;
 }
 
 export interface TokenInfo {
@@ -102,6 +107,7 @@ export type StreamPacketType =
   | "AGENT_LIFECYCLE"
   | "COMMERCE_PROGRESS"
   | "COMMERCE_REPORT"
+  | "COMMERCE_LISTING"
   | "AGENT_START"
   | "AGENT_STATUS"
   | "AGENT_PROGRESS"
@@ -115,6 +121,7 @@ export interface StreamPacket {
     | InteractiveRequest
     | AgentLifecycleEventPayload
     | CommerceProgressEvent
-    | CommerceResearchReport;
+    | CommerceResearchReport
+    | AmazonListingDemoReport;
   agent?: AgentEventPayload;
 }

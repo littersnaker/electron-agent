@@ -1,4 +1,10 @@
 // 模块说明：负责 config 用户界面组件。
+import {
+  AMAZON_LISTING_PROGRESS_STAGES,
+  COMMERCE_RESEARCH_PROGRESS_STAGES,
+  getCommerceActivityStageId,
+} from "../../lib/commerce/progress-stages";
+import type { CommerceWorkflowMode } from "../../lib/commerce/listing/types";
 import type {
   PlanningStageDefinition,
   PlanningStageStatus,
@@ -85,53 +91,34 @@ export const CODE_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
 
 
 /**
- * Cross-border Market Intelligence Agent 的阶段直接对应独立市场研究流程。
- * 它不使用 Code Agent 的 Planner / Merge / Build 语义，避免运营任务出现误导性状态。
+ * 将 Commerce 的共享阶段定义映射为右侧任务规划结构。
+ * 标题、顺序和稳定 stage ID 都来自同一来源，避免活动面板与任务规划漂移。
  */
-export const COMMERCE_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
-  {
-    id: "commerce-intent",
-    title: "理解研究目标",
-    description: "识别目标市场、品类范围与研究决策目标",
+function toCommercePlanningStages(
+  mode: CommerceWorkflowMode,
+  stages: typeof COMMERCE_RESEARCH_PROGRESS_STAGES,
+): PlanningStageDefinition[] {
+  return stages.map((item) => ({
+    id: `commerce-${mode}-${item.stage}`,
+    title: item.title,
+    description: item.description,
     agentTypes: [],
-    activityKeys: ["理解运营目标", "intent", "运营目标"],
-  },
-  {
-    id: "commerce-category",
-    title: "生成市场检索计划",
-    description: "将自然语言描述解析为公开 SERP / Shopping 检索词与细分方向",
-    agentTypes: [],
-    activityKeys: ["解析跨平台类目", "category", "类目"],
-  },
-  {
-    id: "commerce-collect",
-    title: "采集公开市场信号",
-    description: "TalorData 为核心；Amazon、Keepa、TikTok、Temu、1688 作为可选增强",
-    agentTypes: [],
-    activityKeys: ["并行采集市场数据", "collect", "市场数据"],
-  },
-  {
-    id: "commerce-normalize",
-    title: "统一市场观察",
-    description: "去重公开结果并统一域名、价格、评分与商品增强字段",
-    agentTypes: [],
-    activityKeys: ["清洗市场样本", "normalize", "清洗"],
-  },
-  {
-    id: "commerce-analyze",
-    title: "计算市场指标",
-    description: "以确定性代码计算市场活跃度、竞争开放度与价格信号",
-    agentTypes: [],
-    activityKeys: ["计算市场指标", "analyze", "市场指标"],
-  },
-  {
-    id: "commerce-strategy",
-    title: "生成市场情报结论",
-    description: "区分已获取数据与缺失数据，生成机会、风险和下一步验证动作",
-    agentTypes: [],
-    activityKeys: ["生成运营策略", "完成市场研究", "strategy", "策略"],
-  },
-];
+    activityKeys: [item.title],
+    activityStageIds: [getCommerceActivityStageId(mode, item.stage)],
+  }));
+}
+
+/** 市场研究模式只展示实际执行的六个阶段。 */
+export const COMMERCE_RESEARCH_STAGE_DEFINITIONS = toCommercePlanningStages(
+  "research",
+  COMMERCE_RESEARCH_PROGRESS_STAGES,
+);
+
+/** Listing Demo 模式只展示实际执行的七个阶段。 */
+export const AMAZON_LISTING_STAGE_DEFINITIONS = toCommercePlanningStages(
+  "listing",
+  AMAZON_LISTING_PROGRESS_STAGES,
+);
 
 /**
  * 媒体任务使用独立阶段。

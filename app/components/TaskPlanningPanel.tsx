@@ -3,8 +3,9 @@
 
 import { useMemo } from "react";
 import {
+  AMAZON_LISTING_STAGE_DEFINITIONS,
   CODE_STAGE_DEFINITIONS,
-  COMMERCE_STAGE_DEFINITIONS,
+  COMMERCE_RESEARCH_STAGE_DEFINITIONS,
   MEDIA_STAGE_DEFINITIONS,
   STATUS_META,
 } from "./task-planning/config";
@@ -67,11 +68,13 @@ export default function TaskPlanningPanel({
   className = "",
 }: TaskPlanningPanelProps) {
   const definitions =
-    workflowMode === "commerce"
-      ? COMMERCE_STAGE_DEFINITIONS
-      : workflowMode === "chat"
-        ? CODE_STAGE_DEFINITIONS
-        : MEDIA_STAGE_DEFINITIONS;
+    workflowMode === "commerce-listing"
+      ? AMAZON_LISTING_STAGE_DEFINITIONS
+      : workflowMode === "commerce-research"
+        ? COMMERCE_RESEARCH_STAGE_DEFINITIONS
+        : workflowMode === "chat"
+          ? CODE_STAGE_DEFINITIONS
+          : MEDIA_STAGE_DEFINITIONS;
   const stages = useMemo(
     () =>
       buildPlanningStages(

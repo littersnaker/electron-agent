@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import type { CommerceResearchReport } from "../../commerce/types";
+import type { AmazonListingDemoReport } from "../../commerce/listing/types";
 export type SessionMode = "qa" | "code" | "commerce";
 
 export type StoredMessageAttachment = {
@@ -22,6 +23,7 @@ export type StoredMessage = {
   content: string;
   attachments?: StoredMessageAttachment[];
   commerceReport?: CommerceResearchReport;
+  commerceListing?: AmazonListingDemoReport;
 };
 
 export type WorkspaceProject = {

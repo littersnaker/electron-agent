@@ -1,5 +1,6 @@
 // 模块说明：集中维护 page constants 相关常量。
 import type { CommerceResearchReport } from "../lib/commerce/types";
+import type { AmazonListingDemoReport } from "../lib/commerce/listing/types";
 
 export type AttachmentAssetKind = "image" | "video" | "file";
 
@@ -21,6 +22,8 @@ export type Message = {
   attachments?: MessageAttachment[];
   /** Cross-border Market Intelligence Agent 的结构化市场报告；普通 QA / Code / Media 消息不使用。 */
   commerceReport?: CommerceResearchReport;
+  /** Amazon Listing Demo 的结构化草稿、事实和本地校验结果。 */
+  commerceListing?: AmazonListingDemoReport;
 };
 
 export type AttachedFile = {

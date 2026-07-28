@@ -31,6 +31,11 @@ const CommerceReportCard = dynamic(
   { ssr: false },
 );
 
+const AmazonListingCard = dynamic(
+  () => import("./commerce/AmazonListingCard"),
+  { ssr: false },
+);
+
 function AssistantBadge() {
   return (
     <div
@@ -166,6 +171,7 @@ export default function ChatList({
             (Boolean(message.content) ||
               Boolean(message.attachments?.length) ||
               Boolean(message.commerceReport) ||
+              Boolean(message.commerceListing) ||
               (isLastMessage &&
                 (isStreaming ||
                   toolActivities.length > 0 ||
@@ -291,7 +297,11 @@ export default function ChatList({
                   className="mb-1.5 text-[11px] font-medium tracking-wide"
                   style={{ color: COLORS.textMuted }}
                 >
-                  {message.commerceReport ? "Market Intelligence Agent" : "Agent"}
+                  {message.commerceListing
+                    ? "Amazon Listing Builder"
+                    : message.commerceReport
+                      ? "Market Intelligence Agent"
+                      : "Agent"}
                 </div>
                 <div
                   className="min-w-0 rounded-[18px] border px-4 py-3.5"
@@ -304,6 +314,9 @@ export default function ChatList({
                 >
                   {message.commerceReport && (
                     <CommerceReportCard report={message.commerceReport} />
+                  )}
+                  {message.commerceListing && (
+                    <AmazonListingCard report={message.commerceListing} />
                   )}
                   <MemoizedAssistantMessageRow
                     content={message.content}

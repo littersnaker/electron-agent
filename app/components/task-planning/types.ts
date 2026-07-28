@@ -1,5 +1,6 @@
 // 模块说明：负责 types 用户界面组件。
 import type { ComposerMode } from "../../constants/page-constants";
+import type { CommerceWorkflowMode } from "../../lib/commerce/listing/types";
 import type { AgentLifecycleEventPayload } from "../../types/workspace";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance, AgentKind } from "../AgentPanel";
@@ -11,7 +12,9 @@ export type PlanningStageStatus =
   | "completed"
   | "error";
 
-export type TaskPlanningWorkflowMode = ComposerMode | "commerce";
+export type TaskPlanningWorkflowMode =
+  | ComposerMode
+  | `commerce-${CommerceWorkflowMode}`;
 
 export interface TaskPlanningPanelProps {
   agents: AgentInstance[];
@@ -29,6 +32,8 @@ export interface PlanningStageDefinition {
   description: string;
   agentTypes: AgentKind[];
   activityKeys: string[];
+  /** Commerce 等无 lifecycle 工作流使用的稳定阶段 ID。 */
+  activityStageIds?: string[];
   /** 后端真实 lifecycle role；媒体阶段可留空并继续走旧的前端派生逻辑。 */
   lifecycleRoles?: string[];
 }

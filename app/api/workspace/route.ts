@@ -12,6 +12,7 @@ import type {
   StoredMessageAttachment,
 } from "@/app/lib/server/workspace-store";
 import type { CommerceResearchReport } from "@/app/lib/commerce/types";
+import type { AmazonListingDemoReport } from "@/app/lib/commerce/listing/types";
 
 export const runtime = "nodejs";
 
@@ -117,6 +118,27 @@ function readCommerceReport(value: unknown): CommerceResearchReport | undefined 
   return undefined;
 }
 
+function readCommerceListing(
+  value: unknown,
+): AmazonListingDemoReport | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.version !== 1 ||
+    raw.mode !== "listing-demo" ||
+    typeof raw.query !== "string" ||
+    typeof raw.marketplace !== "string" ||
+    !raw.mockErp ||
+    !raw.draft ||
+    !raw.validation ||
+    !Array.isArray(raw.keywords) ||
+    !Array.isArray(raw.competitors)
+  ) {
+    return undefined;
+  }
+  return raw as unknown as AmazonListingDemoReport;
+}
+
 function readMessages(value: unknown): StoredMessage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
@@ -145,6 +167,10 @@ function readMessages(value: unknown): StoredMessage[] | undefined {
       "commerceReport" in item
         ? readCommerceReport(item.commerceReport)
         : undefined;
+    const commerceListing =
+      "commerceListing" in item
+        ? readCommerceListing(item.commerceListing)
+        : undefined;
 
     return [
       {
@@ -152,6 +178,7 @@ function readMessages(value: unknown): StoredMessage[] | undefined {
         content: item.content,
         attachments: attachments.length ? attachments : undefined,
         commerceReport,
+        commerceListing,
       },
     ];
   });
