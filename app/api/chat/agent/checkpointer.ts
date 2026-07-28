@@ -3,14 +3,14 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { RunnableConfig } from "@langchain/core/runnables";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import {
   BaseCheckpointSaver,
-  Checkpoint,
-  CheckpointListOptions,
-  CheckpointMetadata,
-  CheckpointTuple,
-  PendingWrite,
+  type Checkpoint,
+  type CheckpointListOptions,
+  type CheckpointMetadata,
+  type CheckpointTuple,
+  type PendingWrite,
   TASKS,
   WRITES_IDX_MAP,
   copyCheckpoint,

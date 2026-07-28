@@ -2,10 +2,11 @@
  * 模块职责：代码审查节点与返工判定。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { DEFAULT_REVIEW_PAYLOAD, DEFAULT_VERIFICATION_RESULT, PlanTask } from "../types";
+
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import { DEFAULT_REVIEW_PAYLOAD, DEFAULT_VERIFICATION_RESULT, type PlanTask } from "../types";
 import { ReviewerPromptText } from "../../prompt";
-import { AgentRuntimeState, MAX_REVIEW_RETRIES, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
+import { type AgentRuntimeState, MAX_REVIEW_RETRIES, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
 import { uniqueNumbers } from "./merge-strategies";
 import { formatModifyResults, formatRetryTasks, resolveRetryTaskSlots } from "./planner-normalization";
 import { buildFilePreview } from "./workspace-file-tools";

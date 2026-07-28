@@ -16,6 +16,7 @@ const TASK_WEIGHTS: Record<
   planner: { quality: 0.65, speed: 0.15, cost: 0.2 },
   worker: { quality: 0.55, speed: 0.2, cost: 0.25 },
   reviewer: { quality: 0.7, speed: 0.1, cost: 0.2 },
+  reflection: { quality: 0.72, speed: 0.08, cost: 0.2 },
   final_report: { quality: 0.6, speed: 0.15, cost: 0.25 },
   final_answer: { quality: 0.4, speed: 0.4, cost: 0.2 },
   commerce_intent: { quality: 0.45, speed: 0.4, cost: 0.15 },

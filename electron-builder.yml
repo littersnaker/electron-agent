@@ -1,50 +1,38 @@
-# Agent Workspace Electron 打包配置
-# 强制通过 package.json 脚本的 --config electron-builder.yml 读取本文件。
-
+# Multi-agent Electron production packaging configuration.
+# appId is intentionally retained for upgrade and local user-data compatibility.
 appId: com.agent.workspace
-productName: Agent Workspace
-copyright: Copyright © 2026 white
+productName: Multi-agent
+copyright: Copyright © 2026 Multi-agent Team
 
 electronDownload:
   mirror: https://registry.npmmirror.com/-/binary/electron/
 
 directories:
-  output: out
+  output: release
   buildResources: build
 
-# 只把 Electron 编译产物装入 app.asar。
-# package.json 与生产依赖由 electron-builder 自动包含。
+# Electron main/preload code is stored in app.asar. The Next.js standalone
+# runtime is shipped as an external resource so it can start as a local server.
 files:
   - ".electron/**/*"
-  - "!.next${/*}"
-  - "!.next-electron${/*}"
-  - "!out${/*}"
-  - "!dist/**/*"
-  - "!out-server${/*}"
-  - "!app${/*}"
-  - "!electron${/*}"
-  - "!scripts${/*}"
-  - "!build${/*}"
-  - "!public${/*}"
+  - "package.json"
   - "!**/*.map"
-  - "!**/test${/*}"
-  - "!**/tests${/*}"
-  - "!**/__tests__${/*}"
+  - "!**/test/**/*"
+  - "!**/tests/**/*"
+  - "!**/__tests__/**/*"
   - "!node_modules/.cache/**/*"
 
-# Next.js standalone 服务放在 resources/standalone，不进入 app.asar。
 extraResources:
   - from: out-server/standalone
     to: standalone
     filter:
       - "**/*"
-      - ".env.local"
-      - "**/.env.local"
       - "!**/.pnpm/**"
       - "!**/node_modules/.pnpm/**"
 
 asar: true
 compression: maximum
+removePackageScripts: true
 
 win:
   target:
@@ -52,24 +40,21 @@ win:
       arch:
         - x64
   icon: public/icon.ico
-  artifactName: "${productName} Setup ${version}.${ext}"
+  artifactName: "Multi-agent-${version}-windows-${arch}-setup.${ext}"
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: "Agent Workspace"
-  uninstallDisplayName: "Agent Workspace"
-
+  shortcutName: "Multi-agent"
+  uninstallDisplayName: "Multi-agent"
   installerIcon: public/icon.ico
   uninstallerIcon: public/icon.ico
   installerHeader: build/installerHeader.bmp
   installerSidebar: build/installerSidebar.bmp
   uninstallerSidebar: build/uninstallerSidebar.bmp
-
   deleteAppDataOnUninstall: false
   displayLanguageSelector: false
   installerLanguages:
@@ -82,10 +67,13 @@ mac:
   target:
     - dmg
   icon: public/icon.png
+  artifactName: "Multi-agent-${version}-macos-${arch}.${ext}"
+  category: public.app-category.productivity
 
 linux:
   target:
     - deb
     - AppImage
   icon: public/icon.png
+  artifactName: "Multi-agent-${version}-linux-${arch}.${ext}"
   category: Utility

@@ -3,12 +3,28 @@
  * 模块职责：聊天输入器组件及附件交互。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import type { ChangeEvent } from "react";
+import { useCallback, useRef, useState } from "react";
+import type { ChangeEvent, ClipboardEvent, DragEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
-import { isImageAttachment, isVideoAttachment, resolveAttachmentDataUrl } from "../../constants/page-constants";
 import { COMMERCE_MARKETPLACES } from "../../lib/commerce/marketplaces";
+import {
+  collectClipboardAttachments,
+  collectDroppedAttachments,
+  createFilePickerCandidates,
+} from "../../utilities/attachment-input";
 import ModelSelector from "../ModelSelector";
-import { ChatComposerProps, IMAGE_EDIT_FIDELITY_OPTIONS, MODE_TABS, TYPOGRAPHY_OPTIONS, requiresAttachment, resolveAccept, resolvePlaceholder, resolveSubmitLabel } from "./chat-composer-config";
+import { AttachmentList } from "./attachment-list";
+import {
+  IMAGE_EDIT_FIDELITY_OPTIONS,
+  MODE_TABS,
+  TYPOGRAPHY_OPTIONS,
+  requiresAttachment,
+  resolveAccept,
+  resolvePlaceholder,
+  resolveSubmitLabel,
+} from "./chat-composer-config";
+import type { ChatComposerProps } from "./chat-composer-config";
+
 export function ChatComposer({
   mode,
   commerceMarketplace = "US",
@@ -25,40 +41,47 @@ export function ChatComposer({
   onEnableQualityGuardChange,
   input,
   onInputChange,
-  attachedFile,
+  attachedFiles,
   onRemoveFile,
+  onAddAttachments,
+  attachmentError,
   isParsingFile,
   isStreaming,
   fileInputRef,
-  onFileSelect,
   models,
   selectedModel,
   onSelectModel,
   onSubmit,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
-  const imagePreview = isImageAttachment(attachedFile);
-  const videoPreview = isVideoAttachment(attachedFile);
-  const previewUrl =
-    attachedFile && (imagePreview || videoPreview)
-      ? resolveAttachmentDataUrl(attachedFile)
-      : "";
+  const [isDragActive, setIsDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
+  const attachmentsEnabled = mode !== "commerce";
+  const isMediaComposer = mode === "qa" && composerMode !== "chat";
   const submitDisabled =
     disabled ||
-    (mode === "commerce" ? !input.trim() : !input.trim() && !attachedFile) ||
-    (mode === "qa" &&
-      composerMode !== "chat" &&
+    (mode === "commerce"
+      ? !input.trim()
+      : !input.trim() && attachedFiles.length === 0) ||
+    (isMediaComposer &&
       requiresAttachment(composerMode) &&
-      !attachedFile);
+      attachedFiles.length === 0);
 
-  /**
-   * 在纯文字生成模式上传素材时，自动切换到对应的图生/编辑模式。
-   * 这样用户不会误以为上传的素材参与了生成，交互也更接近 Codex 绘图。
-   */
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const resolveIngestionOptions = useCallback(
+    () => ({
+      strategy: isMediaComposer ? ("replace" as const) : ("append" as const),
+      maxFiles: isMediaComposer ? 1 : 32,
+      maxTotalBytes: isMediaComposer
+        ? 512 * 1024 * 1024
+        : 64 * 1024 * 1024,
+    }),
+    [isMediaComposer],
+  );
 
-    if (file && mode === "qa") {
+  /** 纯文字媒体模式接收到素材后自动切换到对应编辑/图生模式。 */
+  const resolveModeFromFile = useCallback(
+    (file: File | undefined) => {
+      if (!file || mode !== "qa") return;
       if (composerMode === "text-to-image" && file.type.startsWith("image/")) {
         onComposerModeChange("image-edit");
       } else if (composerMode === "text-to-video") {
@@ -68,9 +91,56 @@ export function ChatComposer({
           onComposerModeChange("video-edit");
         }
       }
-    }
+    },
+    [composerMode, mode, onComposerModeChange],
+  );
 
-    onFileSelect(event);
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const candidates = createFilePickerCandidates(event.target.files || []);
+    resolveModeFromFile(candidates[0]?.file);
+    await onAddAttachments(candidates, resolveIngestionOptions());
+    event.target.value = "";
+  };
+
+  const handlePaste = async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachmentsEnabled || disabled) return;
+
+    const candidates = collectClipboardAttachments(event.clipboardData);
+    if (candidates.length === 0) return;
+
+    event.preventDefault();
+    resolveModeFromFile(candidates[0]?.file);
+    await onAddAttachments(candidates, resolveIngestionOptions());
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (
+      !attachmentsEnabled ||
+      disabled ||
+      !Array.from(event.dataTransfer.types).includes("Files")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  };
+
+  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    if (!attachmentsEnabled || disabled) return;
+
+    const candidates = await collectDroppedAttachments(event.dataTransfer);
+    resolveModeFromFile(candidates[0]?.file);
+    await onAddAttachments(candidates, resolveIngestionOptions());
   };
 
   return (
@@ -116,76 +186,12 @@ export function ChatComposer({
         </div>
       )}
 
-      {mode !== "commerce" && attachedFile && (
-        <div
-          className="mb-2 flex items-start gap-3 rounded-[16px] border p-2.5"
-          style={{
-            background: "var(--glass)",
-            borderColor: "var(--border)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <div
-            className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[12px] border"
-            style={{
-              background: "var(--glass-black)",
-              borderColor: "var(--border)",
-            }}
-          >
-            {imagePreview ? (
-              <img
-                src={previewUrl}
-                alt={attachedFile.name}
-                className="h-full w-full object-cover"
-              />
-            ) : videoPreview ? (
-              <video
-                src={previewUrl}
-                className="h-full w-full object-cover"
-                muted
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-[11px] text-[var(--text-tertiary)]">
-                文件
-              </div>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-1 items-start justify-between gap-2 pt-1">
-            <div className="min-w-0">
-              <div
-                className="text-[10px] font-medium uppercase tracking-[0.08em]"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                {composerMode === "chat" ? "附件" : "生成素材"}
-              </div>
-              <div
-                className="mt-1 truncate text-[12px] font-medium"
-                style={{ color: "var(--text-primary)" }}
-                title={attachedFile.name}
-              >
-                {attachedFile.name}
-              </div>
-              <div
-                className="mt-1 text-[10px]"
-                style={{ color: "var(--text-tertiary)" }}
-              >
-                {attachedFile.type || "application/octet-stream"}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onRemoveFile}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[15px] transition-colors hover:bg-[var(--glass-hover)] hover:text-[var(--text-primary)]"
-              style={{ color: "var(--text-tertiary)" }}
-              aria-label="移除附件"
-              title="移除附件"
-            >
-              ×
-            </button>
-          </div>
-        </div>
+      {mode !== "commerce" && (
+        <AttachmentList
+          attachments={attachedFiles}
+          onRemove={onRemoveFile}
+          label={composerMode === "chat" ? "附件" : "生成素材"}
+        />
       )}
 
       {mode !== "commerce" && (
@@ -194,8 +200,15 @@ export function ChatComposer({
           type="file"
           className="hidden"
           accept={resolveAccept(composerMode)}
-          onChange={handleFileChange}
+          multiple={!isMediaComposer}
+          onChange={(event) => void handleFileChange(event)}
         />
+      )}
+
+      {attachmentError && mode !== "commerce" && (
+        <div className="mb-2 rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[9px] text-amber-300">
+          {attachmentError}
+        </div>
       )}
 
       {mode === "qa" &&
@@ -374,19 +387,36 @@ export function ChatComposer({
       )}
 
       <div
-        className="rounded-[22px] border p-2.5 transition-all focus-within:border-[rgba(10,132,255,0.36)]"
+        className="relative rounded-[22px] border p-2.5 transition-all focus-within:border-[rgba(10,132,255,0.36)]"
         style={{
-          background: "var(--composer-bg)",
-          borderColor: "var(--border)",
+          background: isDragActive
+            ? "color-mix(in srgb, var(--composer-bg) 82%, var(--accent-blue) 18%)"
+            : "var(--composer-bg)",
+          borderColor: isDragActive ? "var(--accent-blue)" : "var(--border)",
           boxShadow:
             "var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.07)",
           backdropFilter: "blur(30px) saturate(145%)",
           WebkitBackdropFilter: "blur(30px) saturate(145%)",
         }}
+        onDragEnter={handleDragEnter}
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect =
+            attachmentsEnabled && !disabled ? "copy" : "none";
+        }}
+        onDragLeave={handleDragLeave}
+        onDrop={(event) => void handleDrop(event)}
       >
+        {isDragActive && (
+          <div className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-[18px] border border-dashed border-[var(--accent-blue)] bg-[color-mix(in_srgb,var(--composer-bg)_82%,transparent)] text-[11px] font-semibold text-[var(--accent-blue)] backdrop-blur-sm">
+            松开以添加图片、文件或文件夹
+          </div>
+        )}
         <TextareaAutosize
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
+          onPaste={(event) => void handlePaste(event)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -439,9 +469,11 @@ export function ChatComposer({
                 )}
               </button>
             )}
-            <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
-              Enter 发送 · Shift+Enter 换行
-            </span>
+            {mode !== "commerce" && (
+              <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
+                粘贴图片 / 拖入文件夹 · Enter 发送
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">

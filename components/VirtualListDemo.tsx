@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import type React from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 
 // ==========================================
 // 1. 核心虚拟列表组件

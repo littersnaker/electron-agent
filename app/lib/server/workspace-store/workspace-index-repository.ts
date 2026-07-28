@@ -6,7 +6,7 @@ import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import { assertExistingWorkspaceDirectory } from "../workspace-path";
-import { ProjectRow, getDatabase, now } from "./workspace-database";
+import { type ProjectRow, getDatabase, now } from "./workspace-database";
 export const IGNORED_DIRECTORIES = new Set([
   ".git",
   ".next",
@@ -14,6 +14,8 @@ export const IGNORED_DIRECTORIES = new Set([
   "dist",
   "build",
   "out",
+  "out-server",
+  "release",
   "coverage",
   ".pnpm-store",
 ]);

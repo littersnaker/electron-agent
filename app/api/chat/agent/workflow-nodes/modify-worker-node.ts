@@ -2,13 +2,14 @@
  * 模块职责：修改工作节点的完整执行逻辑。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
+
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { tools } from "../../tools";
-import { InteractiveRequest, ModifyTaskResult, ModifyWorkerInput, WorkerFileChange, WorkerMemory, createDefaultWorkerMemory } from "../types";
+import { type InteractiveRequest, type ModifyTaskResult, type ModifyWorkerInput, type WorkerFileChange, type WorkerMemory, createDefaultWorkerMemory } from "../types";
 import { repairToolCall } from "@/app/lib/agent-runtime/tool-repair";
 import { resolveMcpTools } from "@/app/lib/mcp/client";
 import { ModifyWorkerPromptText } from "../../prompt";
-import { MAX_SIMPLE_WORKER_TOOL_ROUNDS, MAX_WORKER_TOOL_ROUNDS, ModifyWorkerRuntimeState, ToolRuntimeState, WorkerToolRuntime, buildLifecycleStateUpdate, buildTokenUsage, createEmptyTokenUsage, createLifecycleTracker, mergeTokenUsage, normalizeContent } from "./runtime-lifecycle";
+import { MAX_SIMPLE_WORKER_TOOL_ROUNDS, MAX_WORKER_TOOL_ROUNDS, type ModifyWorkerRuntimeState, type ToolRuntimeState, type WorkerToolRuntime, buildLifecycleStateUpdate, buildTokenUsage, createEmptyTokenUsage, createLifecycleTracker, mergeTokenUsage, normalizeContent } from "./runtime-lifecycle";
 import { buildWorkerContinuationMessage, compressWorkerMemory, invokeLlm, shouldCompressWorkerMemory, truncateText } from "./terminal-and-memory";
 import { buildModifyResult } from "./planner-normalization";
 import { executeToolBatch } from "./tool-execution";

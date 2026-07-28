@@ -5,7 +5,7 @@
 import { randomUUID } from "crypto";
 import path from "path";
 import { assertExistingWorkspaceDirectory, normalizeAndValidateWorkspacePath } from "../workspace-path";
-import { ProjectRow, SessionMode, SessionRow, StoredMessage, WorkspaceListOptions, WorkspaceProject, WorkspaceSession, getDatabase, mapProject, mapSession, now } from "./workspace-database";
+import { type ProjectRow, type SessionMode, type SessionRow, type StoredMessage, type WorkspaceListOptions, type WorkspaceProject, type WorkspaceSession, getDatabase, mapProject, mapSession, now } from "./workspace-database";
 /**
  * 按已启用插件裁剪工作区数据。
  *

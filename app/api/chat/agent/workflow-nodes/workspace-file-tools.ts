@@ -5,9 +5,9 @@
 import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
-import { InteractiveRequest, ModifyTaskResult, WorkerFileChange } from "../types";
+import type { InteractiveRequest, ModifyTaskResult, WorkerFileChange } from "../types";
 import { runNormalTerminalCommand, runPtyLikeCommand, truncateText } from "./terminal-and-memory";
-import { AgentRuntimeState, TerminalCommandOutcome, ToolRuntimeState, WorkerToolRuntime, classifyCommandMode, createEmptyTokenUsage, validateTerminalCommand } from "./runtime-lifecycle";
+import { type AgentRuntimeState, type TerminalCommandOutcome, type ToolRuntimeState, type WorkerToolRuntime, classifyCommandMode, createEmptyTokenUsage, validateTerminalCommand } from "./runtime-lifecycle";
 export function normalizeFileKey(filePath: string): string {
   const normalized = path.normalize(filePath).replace(/\\/g, "/").replace(/^\.\//, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -202,7 +202,18 @@ export async function searchCodebase(
       const fullPath = path.join(dir, entry.name);
       if (
         entry.isDirectory() &&
-        [".git", ".next", "node_modules", "dist", "build", "out"].includes(
+        [
+          ".git",
+          ".next",
+          ".next-electron",
+          ".electron",
+          "node_modules",
+          "dist",
+          "build",
+          "out",
+          "out-server",
+          "release",
+        ].includes(
           entry.name,
         )
       ) {

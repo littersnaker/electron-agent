@@ -1,7 +1,8 @@
 // 模块说明：负责 page 页面或应用入口逻辑。
 'use client';
 
-import React, { useState } from 'react';
+import type React from 'react';
+import { useState } from 'react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');

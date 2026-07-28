@@ -4,9 +4,9 @@
  */
 import fs from "fs";
 import path from "path";
-import { DEFAULT_MERGE_RESULT, InteractiveRequest, MergeConflict, MergeResult, ModifyTaskResult, WorkerFileChange } from "../types";
+import { DEFAULT_MERGE_RESULT, type InteractiveRequest, type MergeConflict, type MergeResult, type ModifyTaskResult, type WorkerFileChange } from "../types";
 import { getSafePath, hashContent, normalizeFileKey, readRawFile } from "./workspace-file-tools";
-import { AgentRuntimeState } from "./runtime-lifecycle";
+import type { AgentRuntimeState } from "./runtime-lifecycle";
 export function uniqueNumbers(values: number[]): number[] {
   return Array.from(new Set(values)).sort((left, right) => left - right);
 }

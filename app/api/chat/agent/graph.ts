@@ -25,6 +25,7 @@ import {
   highLevelPlanningAgentNode,
   lintBuildTestNode,
   memoryAgentNode,
+  memoryConsolidationNode,
   mergeContextNode,
   mergePatchNode,
   modifyWorkerNode,
@@ -33,6 +34,7 @@ import {
   retryDispatchNode,
   retryPlannerNode,
   reviewerAgentNode,
+  reflectionAgentNode,
   rulesRepairNode,
   searchAgentNode,
   singleAgentDegradeNode,
@@ -213,6 +215,8 @@ const workflow = new StateGraph(AgentState)
   .addNode("merge_patch", mergePatchNode)
   .addNode("lint_build_test", lintBuildTestNode)
   .addNode("reviewer_agent", reviewerAgentNode)
+  .addNode("reflection_agent", reflectionAgentNode)
+  .addNode("memory_consolidation", memoryConsolidationNode)
   .addNode("final_report", finalReportNode)
   .addNode("agent_evaluation", agentEvaluationNode);
 
@@ -313,17 +317,14 @@ workflow.addConditionalEdges(
 );
 workflow.addEdge("merge_patch", "lint_build_test");
 workflow.addEdge("lint_build_test", "reviewer_agent");
+workflow.addEdge("reviewer_agent", "reflection_agent");
 workflow.addConditionalEdges(
-  "reviewer_agent",
-  (state) => {
-    if (state.reviewDecision === "RETRY") return "retry";
-    if (state.reviewDecision === "FAIL") return "fail";
-    return "pass";
-  },
+  "reflection_agent",
+  (state) =>
+    state.reflectionDecision === "REVISE" ? "revise" : "consolidate",
   {
-    retry: "retry_dispatch",
-    fail: "final_report",
-    pass: "final_report",
+    revise: "retry_dispatch",
+    consolidate: "memory_consolidation",
   },
 );
 workflow.addConditionalEdges(
@@ -331,6 +332,7 @@ workflow.addConditionalEdges(
   dispatchRetryWorkers,
   ["modify_worker", "merge_patch"],
 );
+workflow.addEdge("memory_consolidation", "final_report");
 workflow.addEdge("final_report", "agent_evaluation");
 workflow.addEdge("agent_evaluation", END);
 

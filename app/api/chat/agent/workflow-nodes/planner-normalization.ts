@@ -2,8 +2,9 @@
  * 模块职责：计划归一化、重试状态与修改结果格式化。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { AgentLifecycleEvent, AgentLifecycleSnapshot, InteractiveRequest, ModifyTaskResult, PlannerPayload, PlanTask, WorkerFileChange, WorkerMemory } from "../types";
-import { AgentRuntimeState, MAX_PARALLEL_MODIFIERS, MAX_PLANNER_RETRIES, getLatestUserRequest } from "./runtime-lifecycle";
+
+import type { AgentLifecycleEvent, AgentLifecycleSnapshot, InteractiveRequest, ModifyTaskResult, PlannerPayload, PlanTask, WorkerFileChange, WorkerMemory } from "../types";
+import { type AgentRuntimeState, MAX_PARALLEL_MODIFIERS, MAX_PLANNER_RETRIES, getLatestUserRequest } from "./runtime-lifecycle";
 // 规则修复阶段用这个函数做“保守去重”：
 // 同一个文件只保留给最先命中的任务，后面的任务自动剔除该文件。
 export function normalizePlannerTasks(tasks: PlannerPayload): PlannerPayload {

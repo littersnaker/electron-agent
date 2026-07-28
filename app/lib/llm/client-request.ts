@@ -75,20 +75,30 @@ export function buildLlmRequestHeaders(
 export function buildImageAttachmentPayload(
   attachment: AttachmentLike | null,
 ): LlmRequestAttachment[] | undefined {
-  if (!attachment?.type.startsWith("image/")) return undefined;
-
-  const image = readBinaryData(attachment);
-  if (!image?.data) return undefined;
-
-  return [
-    {
-      name: attachment.name,
-      mimeType: image.mimeType,
-      data: image.data,
-    },
-  ];
+  return attachment ? buildImageAttachmentsPayload([attachment]) : undefined;
 }
 
+
+export function buildImageAttachmentsPayload(
+  attachments: readonly AttachmentLike[],
+): LlmRequestAttachment[] | undefined {
+  const images = attachments.flatMap((attachment) => {
+    if (!attachment.type.startsWith("image/")) return [];
+
+    const image = readBinaryData(attachment);
+    if (!image?.data) return [];
+
+    return [
+      {
+        name: attachment.name,
+        mimeType: image.mimeType,
+        data: image.data,
+      } satisfies LlmRequestAttachment,
+    ];
+  });
+
+  return images.length > 0 ? images : undefined;
+}
 
 /**
  * 图片/视频生成接口使用统一二进制附件结构。

@@ -29,6 +29,7 @@ const TASK_ENV_KEYS: Record<LlmTaskType, string> = {
   planner: "LLM_ROUTE_PLANNER",
   worker: "LLM_ROUTE_WORKER",
   reviewer: "LLM_ROUTE_REVIEWER",
+  reflection: "LLM_ROUTE_REFLECTION",
   final_report: "LLM_ROUTE_FINAL_REPORT",
   final_answer: "LLM_ROUTE_FINAL_ANSWER",
   commerce_intent: "LLM_ROUTE_COMMERCE_INTENT",

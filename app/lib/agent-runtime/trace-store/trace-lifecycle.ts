@@ -3,7 +3,7 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import { randomUUID } from "crypto";
-import { AgentTraceEventStatus, AgentTraceStartInput, DEFAULT_TRACE_MAX_EVENTS_PER_RUN, getDatabase, insertTrace, readPositiveInteger, redactString, sanitizeMetadata, traceStorage, updateTrace } from "./trace-storage";
+import { type AgentTraceEventStatus, type AgentTraceStartInput, DEFAULT_TRACE_MAX_EVENTS_PER_RUN, getDatabase, insertTrace, readPositiveInteger, redactString, sanitizeMetadata, traceStorage, updateTrace } from "./trace-storage";
 /** 读取当前异步调用链的 trace id，节点/工具无需逐层传参。 */
 export function getCurrentAgentTraceId(): string | null {
   return traceStorage.getStore()?.traceId || null;

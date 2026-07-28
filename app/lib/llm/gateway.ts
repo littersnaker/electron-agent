@@ -1,4 +1,6 @@
 // 模块说明：负责 gateway 核心服务与领域逻辑。
+import { manageContextBudget } from "@/app/lib/agent-runtime/context-budget-manager";
+import { recordAgentTraceEvent } from "@/app/lib/agent-runtime/trace-store";
 import {
   normalizeLlmMessages,
   normalizeLlmTools,
@@ -10,13 +12,37 @@ import {
   mergeCapabilities,
 } from "./router/capabilities";
 import { resolveModelRoutes } from "./router/model-router";
-import {
-  LlmProviderError,
-  type LlmChatResponse,
-  type LlmGatewayRequest,
-  type LlmModelRoute,
-  type LlmStreamChunk,
+import { LlmProviderError } from "./types";
+import type {
+  LlmChatResponse,
+  LlmGatewayRequest,
+  LlmModelRoute,
+  LlmStreamChunk,
 } from "./types";
+
+function prepareGatewayPayload(request: LlmGatewayRequest) {
+  const budgetedContext = manageContextBudget({
+    task: request.task,
+    messages: request.messages.map((message) => ({ ...message })),
+    tools: request.tools,
+  });
+  const messages = normalizeLlmMessages(budgetedContext.messages);
+  const tools = normalizeLlmTools(request.tools);
+
+  if (budgetedContext.report.wasCompacted) {
+    recordAgentTraceEvent(
+      "budget",
+      `context_budget:${request.task}`,
+      "info",
+      { ...budgetedContext.report },
+    );
+  }
+
+  return {
+    messages,
+    tools,
+  };
+}
 
 function shouldTryFallback(error: unknown): boolean {
   if (error instanceof LlmProviderError) return error.retryable;
@@ -41,8 +67,7 @@ function buildFallbackError(
 export async function completeWithLlm(
   request: LlmGatewayRequest,
 ): Promise<LlmChatResponse> {
-  const messages = normalizeLlmMessages(request.messages);
-  const tools = normalizeLlmTools(request.tools);
+  const { messages, tools } = prepareGatewayPayload(request);
   const routing = resolveModelRoutes({
     task: request.task,
     preferredModelId: request.preferredModelId,
@@ -87,8 +112,7 @@ export async function completeWithLlm(
 export async function* streamWithLlm(
   request: LlmGatewayRequest,
 ): AsyncIterable<LlmStreamChunk> {
-  const messages = normalizeLlmMessages(request.messages);
-  const tools = normalizeLlmTools(request.tools);
+  const { messages, tools } = prepareGatewayPayload(request);
   const routing = resolveModelRoutes({
     task: request.task,
     preferredModelId: request.preferredModelId,

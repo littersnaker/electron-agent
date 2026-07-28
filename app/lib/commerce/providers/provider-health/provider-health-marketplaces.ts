@@ -4,7 +4,7 @@
  */
 import { createHash } from "crypto";
 import type { AuxiliaryServiceCredentials } from "../../../service-credentials";
-import { CommerceProviderHealthResult, classifyHttpFailure, isRecord, readErrorMessage, requestOrEnv } from "./provider-health-core";
+import { type CommerceProviderHealthResult, classifyHttpFailure, isRecord, readErrorMessage, requestOrEnv } from "./provider-health-core";
 /**
  * Validate TikTok developer credentials.
  *

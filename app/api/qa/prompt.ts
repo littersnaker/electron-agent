@@ -1,5 +1,6 @@
 // 模块说明：负责 prompt 接口及服务端流程。
-import { getCurrentTime } from "@/app/utilities/format-date";
+// 模块说明：负责 prompt 接口及服务端流程。
+import type { getCurrentTime } from "@/app/utilities/format-date";
 
 export const getPrompt = (currentTime: ReturnType<typeof getCurrentTime>) => {
   const runtimeContext = {

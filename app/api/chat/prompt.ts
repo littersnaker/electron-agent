@@ -11,6 +11,7 @@ export const HighLevelPlannerPromptText = renderPrompt("high_level_planner");
 export const PlannerPromptText = renderPrompt("task_planner");
 export const WorkerMemoryPromptText = renderPrompt("worker_memory");
 export const ReviewerPromptText = renderPrompt("reviewer");
+export const ReflectionPromptText = renderPrompt("reflection");
 export const ModifyWorkerPromptText = renderPrompt("modify_worker");
 export const FinalReportAgentPromptText = renderPrompt("final_report_agent");
 export const ReadOnlyPromptText = renderPrompt("read_only");

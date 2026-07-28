@@ -17,6 +17,7 @@ export type LlmTaskType =
   | "planner"
   | "worker"
   | "reviewer"
+  | "reflection"
   | "final_report"
   | "final_answer"
   | "commerce_intent"

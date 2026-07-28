@@ -1,4 +1,4 @@
-# 白雪条 Commerce Agent（v10）
+# Multi-agent Commerce Agent（v10）
 
 ## 1. 产品定位
 

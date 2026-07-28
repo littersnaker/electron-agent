@@ -9,7 +9,7 @@ import type { PlannerValidationStatus } from "../types";
 import { extractSimpleEditFiles } from "../request-classifier";
 import { DEFAULT_PLANNER_PAYLOAD } from "../types";
 import { buildWorkspaceRuntimeInfo, formatWorkspaceContext } from "../workspace-context";
-import { AgentRuntimeState, getLatestUserImageParts } from "./request-routing-context";
+import { type AgentRuntimeState, getLatestUserImageParts } from "./request-routing-context";
 /**
  * 为明确的单文档修改生成确定性单任务计划。
  *

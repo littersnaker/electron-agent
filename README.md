@@ -446,9 +446,9 @@ Build an installer:
 pnpm electron:make
 ```
 
-The build script compiles Electron, builds Next.js in standalone mode, copies `.next-electron/standalone`, static assets, public assets, and optionally `.env.local`, then invokes electron-builder.
+The build script compiles Electron, builds Next.js in standalone mode, copies `.next-electron/standalone`, static assets, and public assets, then invokes electron-builder. Production builds do not copy `.env.local`, so local credentials are not shipped in release artifacts.
 
-> The current source tree still contains several legacy package and installer labels such as `Agent Workspace` and `MyApp`. Documentation and the intended product name are **Multi-agent**. Before publishing binaries, align `package.json`, `electron-builder.yml`, Electron window labels, report footers, app IDs, artifact names, and installer shortcut names.
+Artifacts are written to `release/` and follow the `Multi-agent-<version>-<platform>-<arch>` convention. See [Production artifact conventions](./docs/release-artifacts.md); see [Enterprise packaging and attachment input](./docs/enterprise-packaging-and-attachments.md) for the implementation details. The historical Electron `appId` is retained for upgrade and user-data compatibility.
 
 ## Usage
 
@@ -606,7 +606,7 @@ Recommended ignore list:
 .agent-data/
 .next/
 .electron/
-out/
+release/
 out-server/
 node_modules/
 ```

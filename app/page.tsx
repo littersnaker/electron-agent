@@ -112,7 +112,7 @@ export default function Home() {
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
     selectedModel: selectedChatModel,
-    attachedFile: composer.attachedFile,
+    attachedFiles: composer.attachedFiles,
     isParsingFile: composer.isParsingFile,
     clearAfterSubmit: composer.clearAfterSubmit,
     agents: agentCoordinator,
@@ -126,7 +126,7 @@ export default function Home() {
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
     selectedModel: resolvedMediaModel,
-    attachedFile: composer.attachedFile,
+    attachedFile: composer.attachedFiles[0] || null,
     typographyPolicy,
     imageEditFidelity,
     enableQualityGuard,
@@ -254,7 +254,7 @@ export default function Home() {
   const handleComposerModeChange = (nextMode: ComposerMode) => {
     setComposerMode(nextMode);
     if (nextMode === "text-to-image" || nextMode === "text-to-video") {
-      composer.setAttachedFile(null);
+      composer.setAttachedFiles([]);
       if (composer.fileInputRef.current) {
         composer.fileInputRef.current.value = "";
       }
@@ -407,12 +407,13 @@ export default function Home() {
                     onEnableQualityGuardChange={setEnableQualityGuard}
                     input={composer.input}
                     onInputChange={composer.setInput}
-                    attachedFile={composer.attachedFile}
-                    onRemoveFile={() => composer.setAttachedFile(null)}
+                    attachedFiles={composer.attachedFiles}
+                    onRemoveFile={composer.removeAttachedFile}
+                    onAddAttachments={composer.addAttachments}
+                    attachmentError={composer.attachmentError}
                     isParsingFile={composer.isParsingFile}
                     isStreaming={isBusy}
                     fileInputRef={composer.fileInputRef}
-                    onFileSelect={composer.handleFileSelect}
                     models={availableModels}
                     selectedModel={selectedModel}
                     onSelectModel={handleSelectModel}

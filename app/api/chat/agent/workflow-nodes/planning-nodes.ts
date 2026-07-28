@@ -2,10 +2,12 @@
  * 模块职责：高层规划、任务规划、校验、修复与重试节点。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { DEFAULT_PLANNER_PAYLOAD, HighLevelPlanPayload, PlannerValidationStatus, formatHighLevelPlan, formatPlannerPayload } from "../types";
+
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import { advanceWorkingMemory } from "@/app/lib/agent-runtime/three-layer-memory";
+import { DEFAULT_PLANNER_PAYLOAD, type HighLevelPlanPayload, type PlannerValidationStatus, formatHighLevelPlan, formatPlannerPayload } from "../types";
 import { HighLevelPlannerPromptText, PlannerPromptText } from "../../prompt";
-import { AgentRuntimeState, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
+import { type AgentRuntimeState, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
 import { invokeLlm } from "./terminal-and-memory";
 import { collectDuplicatePlannerFiles, parseHighLevelPlanWithSchema, parsePlannerPayloadWithSchema } from "./planner-parsing";
 import { buildSingleAgentFallbackPlan, getPlannerRetryStatus, normalizePlannerTasks, resolveRetryTaskSlots } from "./planner-normalization";
@@ -267,7 +269,18 @@ export async function singleAgentDegradeNode(
 export async function structuredTaskListNode(
   state: AgentRuntimeState,
 ): Promise<Record<string, unknown>> {
+  const taskIds = (state.plannerOutput || []).map((task) => task.id);
   return {
+    workingMemory: advanceWorkingMemory(state.workingMemory, {
+      phase: "executing",
+      activeTaskIds: taskIds,
+      pendingTaskIds: taskIds,
+      keyFacts: [
+        ...(state.workingMemory?.keyFacts || []),
+        state.plannerValidationMessage || "Planner 已生成可执行任务。",
+      ],
+      iteration: state.reviewIteration || 0,
+    }),
     structuredTaskListSummary: [
       `Planner 状态: ${state.plannerValidationStatus || "pending"}`,
       `Planner 说明: ${state.plannerValidationMessage || "暂无"}`,
@@ -293,7 +306,9 @@ export async function retryDispatchNode(
   const retryTaskSlots =
     state.resumeFromRiskApproval && state.approvalResumeTarget === "worker"
       ? state.retryTaskSlots || []
-      : resolveRetryTaskSlots(state);
+      : (state.retryTaskSlots || []).length
+        ? state.retryTaskSlots
+        : resolveRetryTaskSlots(state);
 
   return {
     retryTaskSlots,

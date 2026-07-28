@@ -4,13 +4,34 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toMessageAttachment } from "../../constants/page-constants";
+import { toMessageAttachments } from "../../constants/page-constants";
 import type { AttachedFile, Message } from "../../constants/page-constants";
 import { buildRetrievedAttachment } from "../../lib/rag/attachment-rag";
-import { buildImageAttachmentPayload, buildLlmRequestHeaders } from "../../lib/llm/client-request";
-import type { AgentLifecycleEventPayload, InteractiveRequest, StreamPacket, TokenInfo, ToolActivity } from "../../types/workspace";
+import {
+  buildImageAttachmentsPayload,
+  buildLlmRequestHeaders,
+} from "../../lib/llm/client-request";
+import type {
+  AgentLifecycleEventPayload,
+  InteractiveRequest,
+  StreamPacket,
+  TokenInfo,
+  ToolActivity,
+} from "../../types/workspace";
 import { inferAgentKind, MAX_CONTEXT_MESSAGES } from "../../utilities/agent-runtime";
-import { SubmitPromptOptions, UseChatStreamOptions, buildRequestUserContent, buildVisibleUserContent, isAgentLifecyclePayload, isInteractiveRequestPayload, readResponseError, validateCodeWorkspace } from "./chat-stream-helpers";
+import {
+  buildRequestUserContent,
+  buildVisibleUserContent,
+  isAgentLifecyclePayload,
+  isInteractiveRequestPayload,
+  readResponseError,
+  validateCodeWorkspace,
+} from "./chat-stream-helpers";
+import type {
+  SubmitPromptOptions,
+  UseChatStreamOptions,
+} from "./chat-stream-helpers";
+
 export function useChatStream({
   activeSession,
   activeProject,
@@ -20,7 +41,7 @@ export function useChatStream({
   persistSession,
   apiKeys,
   selectedModel,
-  attachedFile,
+  attachedFiles,
   isParsingFile,
   clearAfterSubmit,
   agents,
@@ -60,7 +81,7 @@ export function useChatStream({
   const submitPrompt = useCallback(
     async (
       promptText: string,
-      fileOverride: AttachedFile | null = attachedFile,
+      fileOverride: readonly AttachedFile[] = attachedFiles,
       options: SubmitPromptOptions = {},
     ) => {
       if (!activeSession || isStreaming || isParsingFile) return;
@@ -68,10 +89,10 @@ export function useChatStream({
       if (activeSession.mode === "commerce") return;
 
       const prompt = promptText.trim();
-      if (!prompt && !fileOverride) return;
+      if (!prompt && fileOverride.length === 0) return;
 
       const visibleUserContent = buildVisibleUserContent(prompt, fileOverride);
-      const visibleAttachments = toMessageAttachment(fileOverride);
+      const visibleAttachments = toMessageAttachments(fileOverride);
       const suppressVisibleUserMessage =
         options.suppressVisibleUserMessage === true;
       const visibleBaseMessages =
@@ -103,7 +124,7 @@ export function useChatStream({
         const title = suppressVisibleUserMessage
           ? activeSession.title
           : activeSession.title === "新对话"
-            ? prompt.slice(0, 18) || fileOverride?.name || "新对话"
+            ? prompt.slice(0, 18) || fileOverride[0]?.name || "新对话"
             : activeSession.title;
         const failedSession = {
           ...activeSession,
@@ -126,11 +147,10 @@ export function useChatStream({
        * RAG 只在提交瞬间执行一次。
        * 页面输入变化不会反复切片或检索，原始附件也不会被修改。
        */
-      const retrievedFile = buildRetrievedAttachment(fileOverride, prompt);
-      const requestUserContent = buildRequestUserContent(
-        prompt,
-        retrievedFile,
-      );
+      const retrievedFiles = fileOverride.map((attachment) =>
+        buildRetrievedAttachment(attachment, prompt),
+      ).filter((attachment): attachment is AttachedFile => Boolean(attachment));
+      const requestUserContent = buildRequestUserContent(prompt, retrievedFiles);
       const visibleUserMessages: Message[] = suppressVisibleUserMessage
         ? []
         : [
@@ -152,7 +172,7 @@ export function useChatStream({
       const title = suppressVisibleUserMessage
         ? activeSession.title
         : activeSession.title === "新对话"
-          ? prompt.slice(0, 18) || fileOverride?.name || "新对话"
+          ? prompt.slice(0, 18) || fileOverride[0]?.name || "新对话"
           : activeSession.title;
       const optimisticSession = {
         ...activeSession,
@@ -195,7 +215,7 @@ export function useChatStream({
             headers: buildLlmRequestHeaders(apiKeys, selectedModel),
             body: JSON.stringify({
               messages: requestMessages.slice(-MAX_CONTEXT_MESSAGES),
-              attachments: buildImageAttachmentPayload(fileOverride),
+              attachments: buildImageAttachmentsPayload(fileOverride),
               sessionId: activeSession.id,
               workingDir: activeProject?.rootPath || "",
               projectId: activeProject?.id || "",
@@ -441,7 +461,7 @@ export function useChatStream({
       activeSession,
       agents,
       apiKeys,
-      attachedFile,
+      attachedFiles,
       clearAfterSubmit,
       isParsingFile,
       isStreaming,
@@ -474,7 +494,7 @@ export function useChatStream({
         .join(" ");
 
       setInteractiveAnswer("");
-      await submitPrompt(prompt, null, { suppressVisibleUserMessage: true });
+      await submitPrompt(prompt, [], { suppressVisibleUserMessage: true });
     },
     [interactiveAnswer, interactiveRequest, isStreaming, submitPrompt],
   );

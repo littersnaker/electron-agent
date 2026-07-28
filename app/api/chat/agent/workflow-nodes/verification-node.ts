@@ -4,9 +4,9 @@
  */
 import fs from "fs";
 import path from "path";
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { DEFAULT_VERIFICATION_RESULT, VerificationCheckResult, VerificationProfile, VerificationResult } from "../types";
-import { AgentRuntimeState, buildLifecycleStateUpdate, createLifecycleTracker } from "./runtime-lifecycle";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import { DEFAULT_VERIFICATION_RESULT, type VerificationCheckResult, type VerificationProfile, type VerificationResult } from "../types";
+import { type AgentRuntimeState, buildLifecycleStateUpdate, createLifecycleTracker } from "./runtime-lifecycle";
 import { truncateText } from "./terminal-and-memory";
 import { runTerminalCommand } from "./workspace-file-tools";
 // 这个节点负责真实工程校验，而不是模型主观判断。

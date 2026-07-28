@@ -12,6 +12,8 @@ const LIFECYCLE_STATUS_TEXT: Record<string, string> = {
   READY_TO_MERGE: "已准备合并",
   MERGING: "正在合并",
   REVIEWING: "正在审查",
+  REFLECTING: "正在复盘",
+  CONSOLIDATING: "正在沉淀长期记忆",
   VERIFYING: "正在验证",
   BLOCKED: "等待交互",
   COMPLETED: "已完成",
@@ -59,6 +61,8 @@ export function emitGraphUpdateStatus(
     ["merge_patch", "🧷 Merge 已完成冲突检查与统一落盘"],
     ["lint_build_test", "🧪 工程验证已完成"],
     ["reviewer_agent", "🕵️ Reviewer 已完成统一审查"],
+    ["reflection_agent", "🪞 Reflection 已完成质量复盘"],
+    ["memory_consolidation", "🧠 长期记忆沉淀已完成"],
     ["final_report", "✅ Final Report 已生成"],
     ["agent_evaluation", "📊 Agent 在线质量评估已完成"],
   ];

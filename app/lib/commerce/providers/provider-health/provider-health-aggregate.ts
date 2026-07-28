@@ -4,7 +4,7 @@
  */
 import type { AuxiliaryServiceCredentials } from "../../../service-credentials";
 import { describeSecret, getTalorDataEnvironmentToken } from "../talordata-client";
-import { CommerceHealthProviderId, CommerceProviderHealthResult, classifyHttpFailure, clean, isRecord, readErrorMessage, requestOrEnv, testKeepaHealth, testTalorDataHealth } from "./provider-health-core";
+import { type CommerceHealthProviderId, type CommerceProviderHealthResult, classifyHttpFailure, clean, isRecord, readErrorMessage, requestOrEnv, testKeepaHealth, testTalorDataHealth } from "./provider-health-core";
 import { md5Signature, testTemuHealth, testTikTokHealth } from "./provider-health-marketplaces";
 export function formatGmt8Timestamp(date = new Date()): string {
   const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);

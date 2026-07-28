@@ -1,7 +1,5 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
+# Dependencies
+/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -10,52 +8,45 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# Test output
+/coverage/
 
-# next.js
+# Next.js output
 /.next/
+/.next-electron/
 /out/
 
-# production
-/build
+# Electron transient and release output
+/.electron/
+/out-server/
+/release/
+/dist/
 
-# misc
-.DS_Store
+# Local runtime data
+/.agent-data/
+/.agent-mcp.json
+/.trae/
+
+# Environment and credentials
+.env*
 *.pem
 
-# debug
+# IDE / OS
+.DS_Store
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
-.env.local
-.env.development.local
-# Sentry Config File
-.env.sentry-build-plugin
 
-# Electron
-.electron/
-.next-electron/
-.agent-data/
-out/
-out-server/
-.trae/*
-dist/
+# Hosting
+.vercel/
 
-agents/*
-
+# Local generated archives and agent scratch files
 app.zip
-# Agent 本地 Trace / 评估数据库与含密钥的项目 MCP 配置
-.agent-data/
-.agent-mcp.json
+agents/*

@@ -28,6 +28,8 @@ const LIFECYCLE_ROLE_TO_AGENT: Record<string, AgentKind> = {
   modify_worker: "coder",
   merge_agent: "orchestrator",
   reviewer_agent: "reviewer",
+  reflection_agent: "reviewer",
+  memory_consolidation_agent: "orchestrator",
   verification_agent: "terminal",
   final_report_agent: "orchestrator",
 };
@@ -43,7 +45,11 @@ function lifecycleToAgentStatus(
   if (status in terminalStatus) {
     return terminalStatus[status as keyof typeof terminalStatus];
   }
-  if (status === "PLANNING" || status === "REVIEWING") {
+  if (
+    status === "PLANNING" ||
+    status === "REVIEWING" ||
+    status === "REFLECTING"
+  ) {
     return { status: "thinking", progress: 46 };
   }
   if (status === "READY_TO_MERGE") return { status: "running", progress: 88 };

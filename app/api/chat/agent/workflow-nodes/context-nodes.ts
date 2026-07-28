@@ -3,14 +3,42 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import fs from "fs";
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { DEFAULT_HIGH_LEVEL_PLAN, DEFAULT_MERGE_RESULT, DEFAULT_PLANNER_PAYLOAD, DEFAULT_REVIEW_PAYLOAD, DEFAULT_VERIFICATION_RESULT, PlannerValidationStatus } from "../types";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import {
+  DEFAULT_HIGH_LEVEL_PLAN,
+  DEFAULT_MERGE_RESULT,
+  DEFAULT_PLANNER_PAYLOAD,
+  DEFAULT_REVIEW_PAYLOAD,
+  DEFAULT_VERIFICATION_RESULT,
+} from "../types";
+import type { PlannerValidationStatus } from "../types";
 import { searchProjectIndex } from "@/app/lib/server/workspace-store";
 import { readContextCache, writeContextCache } from "@/app/lib/agent-runtime/context-cache";
+import { rankMemories } from "@/app/lib/agent-runtime/memory-ranking";
+import { createEmptyLongTermMemory } from "@/app/lib/agent-runtime/memory-types";
+import { DEFAULT_REFLECTION_PAYLOAD } from "@/app/lib/agent-runtime/reflection-types";
+import {
+  advanceWorkingMemory,
+  buildShortTermMemory,
+  formatThreeLayerMemoryContext,
+  longTermToCandidates,
+  shortTermToCandidates,
+  workingMemoryToCandidates,
+} from "@/app/lib/agent-runtime/three-layer-memory";
+import type { MemoryCandidate } from "@/app/lib/agent-runtime/memory-ranking";
+import {
+  listLongTermMemories,
+  touchLongTermMemories,
+} from "@/app/lib/server/workspace-store/long-term-memory-repository";
 import { recordAgentTraceEvent } from "@/app/lib/agent-runtime/trace-store";
-import { AgentRuntimeState, buildLifecycleStateUpdate, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
+import {
+  buildLifecycleStateUpdate,
+  createLifecycleTracker,
+  getLatestUserRequest,
+} from "./runtime-lifecycle";
+import type { AgentRuntimeState } from "./runtime-lifecycle";
 import { getSafePath, listDirectory, readFileFromLocalDisk, searchCodebase } from "./workspace-file-tools";
-import { toConversationText, truncateText } from "./terminal-and-memory";
+import { truncateText } from "./terminal-and-memory";
 import { extractCandidatePaths } from "./planner-normalization";
 /*
  * Router 是整个图的重置与分流起点。
@@ -30,6 +58,18 @@ export async function routerNode(
     mergedContext: "",
     searchContext: "",
     memoryContext: "",
+    shortTermMemory: buildShortTermMemory(state.messages, 12),
+    workingMemory: advanceWorkingMemory(state.workingMemory, {
+      goal: userRequest,
+      phase: "context",
+      activeTaskIds: [],
+      completedTaskIds: [],
+      pendingTaskIds: [],
+      keyFacts: [],
+      risks: [],
+      iteration: 0,
+    }),
+    longTermMemory: createEmptyLongTermMemory(),
     fileContext: "",
     highLevelPlanRawOutput: "",
     highLevelPlan: DEFAULT_HIGH_LEVEL_PLAN,
@@ -49,6 +89,9 @@ export async function routerNode(
     reviewDecision: "PASS",
     retryTaskSlots: [],
     reviewIteration: 0,
+    reflectionPayload: DEFAULT_REFLECTION_PAYLOAD,
+    reflectionDecision: "ACCEPT",
+    memoryConsolidationSummary: "",
     interactiveRequest: null,
     touchedFiles: [],
     agentLifecycles: {},
@@ -142,8 +185,8 @@ export async function searchAgentNode(
   }
 }
 
-// MemoryAgent 负责把“历史记忆”和“最近几轮上下文”整理出来。
-// 这样 Planner 不会只看当前一句话，而是知道前面做过什么。
+// MemoryAgent 负责统一检索 STM、WM、LTM，再交给 Memory Ranking 选入上下文。
+// 三层记忆各自拥有不同生命周期，不能再把所有历史简单拼成一个长摘要。
 export async function memoryAgentNode(
   state: AgentRuntimeState,
   config?: LangGraphRunnableConfig,
@@ -154,17 +197,100 @@ export async function memoryAgentNode(
     state.reviewIteration || 0,
     config,
   );
-  tracker.transition("EXECUTING", "正在整理长期摘要与近期对话上下文。");
+  tracker.transition("EXECUTING", "正在构建短期、工作与长期三层记忆。");
 
-  const memoryContext = [
-    `长期对话记忆:\n${state.summary || "暂无长期记忆。"}`,
-    `近期会话摘要:\n${
-      toConversationText(state.messages, 8) || "暂无近期上下文。"
-    }`,
-  ].join("\n\n");
-  tracker.transition("COMPLETED", "Memory Agent 已完成上下文整理。");
+  const userRequest = getLatestUserRequest(state);
+  const shortTermMemory = buildShortTermMemory(state.messages, 12);
+  const workingMemory = advanceWorkingMemory(state.workingMemory, {
+    goal: userRequest,
+    phase: "context",
+    iteration: state.reviewIteration || 0,
+  });
+
+  let longTermItems = [] as ReturnType<typeof listLongTermMemories>;
+  try {
+    longTermItems = state.projectId
+      ? listLongTermMemories(state.projectId, 160)
+      : [];
+  } catch (error) {
+    recordAgentTraceEvent("memory", "long_term_memory_read", "error", {
+      projectId: state.projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const longTermMemory = {
+    items: longTermItems,
+    selectedIds: [] as string[],
+    updatedAt: new Date().toISOString(),
+  };
+  const legacySummaryCandidates: MemoryCandidate[] = (state.summary || "")
+    .split(/\n\s*---\s*\n/gu)
+    .map((content, index) => ({
+      id: `legacy-summary-${index}`,
+      content: content.trim(),
+      source: "long_term" as const,
+      importance: 0.7,
+    }))
+    .filter((memory) => memory.content);
+  const candidates = [
+    ...shortTermToCandidates(shortTermMemory),
+    ...workingMemoryToCandidates(workingMemory),
+    ...longTermToCandidates(longTermMemory),
+    ...legacySummaryCandidates,
+  ];
+  const rankedMemories = rankMemories({
+    query: userRequest,
+    candidates,
+    limit: 12,
+    maxTokens: 2_600,
+  });
+  const persistedIds = new Set(longTermItems.map((item) => item.id));
+  const selectedLongTermIds = rankedMemories
+    .filter((memory) => persistedIds.has(memory.id))
+    .map((memory) => memory.id);
+
+  if (state.projectId && selectedLongTermIds.length) {
+    try {
+      touchLongTermMemories(state.projectId, selectedLongTermIds);
+    } catch (error) {
+      recordAgentTraceEvent("memory", "long_term_memory_touch", "error", {
+        projectId: state.projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const memoryContext = formatThreeLayerMemoryContext(rankedMemories);
+  const layerCounts = rankedMemories.reduce<Record<string, number>>(
+    (counts, memory) => ({
+      ...counts,
+      [memory.source]: (counts[memory.source] || 0) + 1,
+    }),
+    {},
+  );
+  recordAgentTraceEvent("memory", "three_layer_memory_ranking", "info", {
+    candidateCount: candidates.length,
+    selectedCount: rankedMemories.length,
+    layerCounts,
+    selected: rankedMemories.map((memory) => ({
+      id: memory.id,
+      source: memory.source,
+      score: Number(memory.score.toFixed(4)),
+    })),
+  });
+  tracker.transition(
+    "COMPLETED",
+    `三层记忆构建完成：STM ${shortTermMemory.items.length} 条、WM ${workingMemoryToCandidates(workingMemory).length} 条、LTM ${longTermItems.length} 条，最终选中 ${rankedMemories.length} 条。`,
+  );
 
   return {
+    shortTermMemory,
+    workingMemory,
+    longTermMemory: {
+      ...longTermMemory,
+      selectedIds: selectedLongTermIds,
+    },
     memoryContext,
     ...buildLifecycleStateUpdate(tracker),
   };

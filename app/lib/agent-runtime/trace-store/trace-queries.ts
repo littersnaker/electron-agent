@@ -2,7 +2,8 @@
  * 模块职责：追踪记录、事件、工具统计和最新评估查询。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { AgentTraceEventRecord, AgentTraceSummary, AgentTraceToolStats, EventRow, TraceRow, getDatabase, mapTrace, parseMetadata } from "./trace-storage";
+
+import { type AgentTraceEventRecord, type AgentTraceSummary, type AgentTraceToolStats, type EventRow, type TraceRow, getDatabase, mapTrace, parseMetadata } from "./trace-storage";
 export function listRecentAgentTraces(limit = 30): AgentTraceSummary[] {
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
   const rows = getDatabase()

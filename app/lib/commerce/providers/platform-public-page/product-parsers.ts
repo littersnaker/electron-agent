@@ -4,7 +4,7 @@
  */
 import { createHash } from "node:crypto";
 import type { CommerceProductSignal } from "../../types";
-import { JsonRecord, PlatformCrawlerDefinition, SupportedPlatformSource } from "./crawler-definitions";
+import type { JsonRecord, PlatformCrawlerDefinition, SupportedPlatformSource } from "./crawler-definitions";
 export function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

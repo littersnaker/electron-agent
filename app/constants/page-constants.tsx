@@ -24,12 +24,20 @@ export type Message = {
 };
 
 export type AttachedFile = {
+  id: string;
   name: string;
   type: string;
   base64: string;
   dataUrl?: string;
   textContent?: string;
   size?: number;
+  lastModified?: number;
+  relativePath?: string;
+  sourceKind?:
+    | "file-picker"
+    | "clipboard"
+    | "drop-file"
+    | "drop-directory";
 };
 
 export type MediaMode =
@@ -125,26 +133,33 @@ export function normalizeAttachedFile(
   };
 }
 
+export function toMessageAttachments(
+  attachments: readonly AttachedFile[],
+): MessageAttachment[] | undefined {
+  if (attachments.length === 0) return undefined;
+
+  return attachments.map((attachment) => {
+    const isImage = isImageAttachment(attachment);
+    const isVideo = isVideoAttachment(attachment);
+    const dataUrl = isImage || isVideo
+      ? resolveAttachmentDataUrl(attachment)
+      : undefined;
+
+    return {
+      name: attachment.relativePath || attachment.name,
+      type: attachment.type,
+      dataUrl: dataUrl || undefined,
+      assetKind: isVideo ? "video" : isImage ? "image" : "file",
+      downloadName: attachment.name,
+    } satisfies MessageAttachment;
+  });
+}
+
+/** @deprecated 单附件调用方请逐步迁移到 toMessageAttachments。 */
 export function toMessageAttachment(
   attachment: AttachedFile | null,
 ): MessageAttachment[] | undefined {
-  if (!attachment) return undefined;
-  if (!isImageAttachment(attachment) && !isVideoAttachment(attachment)) {
-    return undefined;
-  }
-
-  const dataUrl = resolveAttachmentDataUrl(attachment);
-  if (!dataUrl) return undefined;
-
-  return [
-    {
-      name: attachment.name,
-      type: attachment.type,
-      dataUrl,
-      assetKind: isVideoAttachment(attachment) ? "video" : "image",
-      downloadName: attachment.name,
-    },
-  ];
+  return attachment ? toMessageAttachments([attachment]) : undefined;
 }
 
 export type SessionMode = "qa" | "code" | "commerce";

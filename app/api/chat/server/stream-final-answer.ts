@@ -1,5 +1,6 @@
 // 模块说明：负责 stream final answer 接口及服务端流程。
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+// 模块说明：负责 stream final answer 接口及服务端流程。
+import type { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { streamWithLlm } from "@/app/lib/llm/gateway";
 import type { LlmCredentials, LlmMessage } from "@/app/lib/llm/types";
 import { systemPromptText } from "../prompt";

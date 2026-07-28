@@ -3,11 +3,12 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import { createHash } from "crypto";
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
-import { InteractiveRequest, ModifyTaskResult, WorkerFileChange } from "../types";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import type { InteractiveRequest, ModifyTaskResult, WorkerFileChange } from "../types";
 import { invalidateProjectContextCache } from "@/app/lib/agent-runtime/context-cache";
 import { recordAgentTraceEvent } from "@/app/lib/agent-runtime/trace-store";
-import { AgentRuntimeState, buildLifecycleStateUpdate, createLifecycleTracker } from "./runtime-lifecycle";
+import { advanceWorkingMemory } from "@/app/lib/agent-runtime/three-layer-memory";
+import { type AgentRuntimeState, buildLifecycleStateUpdate, createLifecycleTracker } from "./runtime-lifecycle";
 import { mergeParallelWorkerResults } from "./merge-strategies";
 import { formatModifyResults } from "./planner-normalization";
 export const SENSITIVE_WORKSPACE_PATH =
@@ -201,7 +202,29 @@ export async function mergePatchNode(
     tracker.transition("COMPLETED", mergeResult.summary);
   }
 
+  const completedTaskIds = (state.modifyResults || [])
+    .filter((result) => ["done", "satisfied"].includes(result.status))
+    .map((result) => result.taskId);
+  const pendingTaskIds = (state.modifyResults || [])
+    .filter((result) => !["done", "satisfied", "skipped"].includes(result.status))
+    .map((result) => result.taskId);
+
   return {
+    workingMemory: advanceWorkingMemory(state.workingMemory, {
+      phase: mergeResult.status === "success" ? "verifying" : "merging",
+      activeTaskIds: pendingTaskIds,
+      completedTaskIds,
+      pendingTaskIds,
+      keyFacts: [
+        ...(state.workingMemory?.keyFacts || []),
+        mergeResult.summary,
+      ],
+      risks: [
+        ...(state.workingMemory?.risks || []),
+        ...mergeResult.conflicts.map((conflict) => conflict.message),
+      ],
+      iteration: state.reviewIteration || 0,
+    }),
     mergeResult,
     mergedPatchSummary,
     touchedFiles,

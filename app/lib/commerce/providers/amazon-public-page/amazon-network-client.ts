@@ -4,7 +4,7 @@
  */
 import nodeFetch, { type RequestInit as NodeFetchRequestInit } from "node-fetch";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { AmazonPagePayload, AmazonPageResponse, CachedProxyAgent, DEFAULT_CACHE_TTL_MS, DEFAULT_REQUEST_INTERVAL_MS, DEFAULT_REQUEST_TIMEOUT_MS, MAX_HTTP_RETRIES, amazonCrawlerRuntimeState, assertUsableHtml, htmlCache, readBoundedInteger } from "./amazon-page-parser";
+import { type AmazonPagePayload, type AmazonPageResponse, type CachedProxyAgent, DEFAULT_CACHE_TTL_MS, DEFAULT_REQUEST_INTERVAL_MS, DEFAULT_REQUEST_TIMEOUT_MS, MAX_HTTP_RETRIES, amazonCrawlerRuntimeState, assertUsableHtml, htmlCache, readBoundedInteger } from "./amazon-page-parser";
 export function abortError(): Error {
   return new Error("Amazon 爬虫请求已取消。");
 }

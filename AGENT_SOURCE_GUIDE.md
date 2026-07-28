@@ -1210,9 +1210,9 @@ app/lib/commerce/types.ts
 
 1. `workflow-nodes.ts` 仍保留一个旧 `routerNode()` 导出，但当前 `graph.ts` 实际使用的是 `request-routing-nodes.ts` 中的 `requestRouterNode()`。
 2. `app/api/agent/route.ts` 是一个独立的简单 Gemini 示例接口，不是主 Code Agent 入口。
-3. 文档中的项目名已统一为 **Multi-agent**，但源码里仍存在 `Agent Workspace`、`MyApp` 等旧品牌字段。
-4. `electron-builder.yml` 的 Product Name、App ID、快捷方式等仍需要正式重命名。
-5. 打包脚本可以复制 `.env.local` 到 Electron standalone 资源，正式分发前必须评估密钥暴露风险。
+3. 对外项目名、npm 包名、安装包和快捷方式已统一为 **Multi-agent**；数据库文件名、Local Storage Key 与 Electron `appId` 等兼容标识按升级策略保留。
+4. Electron 生产产物统一写入 `release/`，并采用 `Multi-agent-<version>-<platform>-<arch>` 命名；`appId` 保持 `com.agent.workspace` 以兼容已有用户数据。
+5. 打包脚本不会复制 `.env.local` 或 Sentry 构建密钥；生产凭证必须通过运行时环境变量或应用内凭证设置提供。
 6. 当前项目索引是文本 LIKE 搜索，不是向量语义索引；README 中不要误写成已经实现了向量数据库。
 7. `searchCodebase()` 返回候选文件路径，不返回完整命中行；Worker 仍需 `read_file_from_disk`。
 8. 并发 Worker 阶段禁止终端命令，工程验证统一在 Merge 后执行。

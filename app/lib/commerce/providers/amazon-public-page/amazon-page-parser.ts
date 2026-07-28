@@ -2,7 +2,8 @@
  * 模块职责：亚马逊搜索页与详情页 HTML 解析。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { HttpsProxyAgent } from "https-proxy-agent";
+
+import type { HttpsProxyAgent } from "https-proxy-agent";
 import type { CommerceProductSignal } from "../../types";
 export const DEFAULT_MAX_SEARCH_KEYWORDS = 3;
 

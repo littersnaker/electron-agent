@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "智能助手",
+  title: "Multi-agent",
   description: "基于通义千问与 LangGraph 的智能对话助手",
 };
 

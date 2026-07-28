@@ -1,4 +1,6 @@
-# 只核对现有 electron-builder.yml 的 nsis 节点，不要覆盖其他配置。
+# Deprecated compatibility reference.
+# The canonical Multi-agent NSIS configuration is electron-builder.yml.
+# Keep this file only for teams that still run the historical branding check.
 nsis:
   oneClick: false
   perMachine: false

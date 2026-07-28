@@ -1,7 +1,7 @@
 /// <reference types="node" />
-import { execSync } from "child_process";
-import fs from "fs";
-import path from "path";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const rootDir = process.cwd();
 const nextDistDirName = ".next-electron";
@@ -68,22 +68,6 @@ function prepareStandaloneRuntime(): void {
       recursive: true,
     });
   }
-
-  copyEnvironmentFile();
-}
-
-/** 将本机环境变量文件复制到内嵌 Next.js 服务目录。 */
-function copyEnvironmentFile(): void {
-  const sourceEnvLocal = path.join(rootDir, ".env.local");
-  if (!fs.existsSync(sourceEnvLocal)) {
-    console.warn(
-      "未找到项目根目录 .env.local，打包后的应用将依赖系统环境变量。",
-    );
-    return;
-  }
-
-  fs.cpSync(sourceEnvLocal, path.join(outServerDir, ".env.local"));
-  console.log("已复制 .env.local 到 standalone 运行目录。");
 }
 
 try {

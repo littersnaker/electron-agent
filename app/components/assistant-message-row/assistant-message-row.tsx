@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AssistantMessageRowProps, COLORS, ToolActivityPanel, parseThinkingStream } from "./tool-activity-panel";
+import { type AssistantMessageRowProps, COLORS, ToolActivityPanel, parseThinkingStream } from "./tool-activity-panel";
 import { ThinkingSkeleton } from "./thinking-skeleton";
 export function AssistantMessageRow({
   content,

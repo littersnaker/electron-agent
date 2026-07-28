@@ -16,6 +16,7 @@ const TASK_CAPABILITIES: Record<
   planner: ["text", "reasoning", "structured_output"],
   worker: ["text", "coding", "tool_call"],
   reviewer: ["text", "reasoning", "coding", "structured_output"],
+  reflection: ["text", "reasoning", "structured_output"],
   final_report: ["text", "reasoning", "structured_output"],
   final_answer: ["text", "stream"],
   commerce_intent: ["text", "structured_output", "fast"],

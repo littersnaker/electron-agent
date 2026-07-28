@@ -4,7 +4,7 @@
  */
 import type { CommerceProductSignal } from "../../types";
 import type { CommerceProviderSearchInput } from "../types";
-import { DEFAULT_MAX_KEYWORDS, PlatformCrawlerDefinition } from "./crawler-definitions";
+import { DEFAULT_MAX_KEYWORDS, type PlatformCrawlerDefinition } from "./crawler-definitions";
 import { readBoundedInteger } from "./product-parsers";
 import { extractProductsFromAnchors, extractProductsFromJson, mergePlatformProducts } from "./payload-extraction";
 export function resolvePlatformCrawlerKeywords(

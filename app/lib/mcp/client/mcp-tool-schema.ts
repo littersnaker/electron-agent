@@ -3,7 +3,7 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import type { LlmFunctionTool } from "@/app/lib/llm/types";
-import { MCP_TOOL_PREFIX, McpResolvedTool } from "./mcp-configuration";
+import { MCP_TOOL_PREFIX, type McpResolvedTool } from "./mcp-configuration";
 export function toLlmMcpTools(
   resolvedTools: readonly McpResolvedTool[],
 ): LlmFunctionTool[] {

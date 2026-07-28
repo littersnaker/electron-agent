@@ -3,7 +3,7 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import type { CommerceProductSignal } from "../../types";
-import { JsonRecord, MAX_ANCHOR_MATCHES, MAX_JSON_OBJECTS, PlatformCrawlerDefinition } from "./crawler-definitions";
+import { type JsonRecord, MAX_ANCHOR_MATCHES, MAX_JSON_OBJECTS, type PlatformCrawlerDefinition } from "./crawler-definitions";
 import { createStableId, isRecord, matchesProductUrl, normalizeUrl, parsePriceFromText, parseRatingFromText, parseReviewCountFromText, parseSoldSignalFromText, productFromJsonRecord, readHtmlAttribute, stripTags } from "./product-parsers";
 export function collectJsonObjects(value: unknown): JsonRecord[] {
   const objects: JsonRecord[] = [];

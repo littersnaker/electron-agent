@@ -4,7 +4,7 @@
  */
 import { getMediaModelDefinition } from "../catalog";
 import type { MediaGenerateRequest, MediaGenerateResult } from "../types";
-import { AsyncTaskPayload, buildVideoInput } from "./dashscope-upload";
+import { type AsyncTaskPayload, buildVideoInput } from "./dashscope-upload";
 import { VIDEO_ENDPOINT_PATH, generateQwenImage, getApiBase, getQwenApiKey, readJsonResponse } from "./dashscope-image";
 export function extractVideoUrl(payload: AsyncTaskPayload): string | undefined {
   return (

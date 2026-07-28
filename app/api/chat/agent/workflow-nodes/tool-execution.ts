@@ -6,7 +6,7 @@ import { ToolMessage } from "@langchain/core/messages";
 import { searchProjectIndex } from "@/app/lib/server/workspace-store";
 import { startAgentTraceSpan } from "@/app/lib/agent-runtime/trace-store";
 import { callMcpTool, findMcpTool, isMcpToolName, resolveMcpTools, validateMcpToolArguments } from "@/app/lib/mcp/client";
-import { ToolCall, ToolExecutionResult, ToolRuntimeState, createEmptyTokenUsage, mergeTokenUsage, normalizeContent } from "./runtime-lifecycle";
+import { type ToolCall, type ToolExecutionResult, type ToolRuntimeState, createEmptyTokenUsage, mergeTokenUsage, normalizeContent } from "./runtime-lifecycle";
 import { applyFileChange, buildMcpApprovalRequest, createMcpApprovalToken, getDiff, getWorkerDiff, listDirectory, markWorkerFileReady, proposeFileChange, readFileFromLocalDisk, readToolStringArgument, runTerminalCommand, searchCodebase, stageWorkerFileChange } from "./workspace-file-tools";
 import { truncateText } from "./terminal-and-memory";
 /*

@@ -2,6 +2,21 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import { Annotation, messagesStateReducer } from "@langchain/langgraph";
 import {
+  createEmptyLongTermMemory,
+  createEmptyShortTermMemory,
+  createEmptyWorkingMemory,
+} from "@/app/lib/agent-runtime/memory-types";
+import type {
+  LongTermMemorySnapshot,
+  ShortTermMemorySnapshot,
+  WorkingMemorySnapshot,
+} from "@/app/lib/agent-runtime/memory-types";
+import {
+  DEFAULT_REFLECTION_PAYLOAD,
+  type ReflectionDecision,
+  type ReflectionPayload,
+} from "@/app/lib/agent-runtime/reflection-types";
+import {
   DEFAULT_HIGH_LEVEL_PLAN,
   DEFAULT_MERGE_RESULT,
   DEFAULT_PLANNER_PAYLOAD,
@@ -132,6 +147,18 @@ export const AgentState = Annotation.Root({
     reducer: replaceValue,
     default: () => "",
   }),
+  shortTermMemory: Annotation<ShortTermMemorySnapshot>({
+    reducer: replaceValue,
+    default: createEmptyShortTermMemory,
+  }),
+  workingMemory: Annotation<WorkingMemorySnapshot>({
+    reducer: replaceValue,
+    default: createEmptyWorkingMemory,
+  }),
+  longTermMemory: Annotation<LongTermMemorySnapshot>({
+    reducer: replaceValue,
+    default: createEmptyLongTermMemory,
+  }),
   fileContext: Annotation<string>({
     reducer: replaceValue,
     default: () => "",
@@ -234,6 +261,18 @@ export const AgentState = Annotation.Root({
   reviewIteration: Annotation<number>({
     reducer: replaceValue,
     default: () => 0,
+  }),
+  reflectionPayload: Annotation<ReflectionPayload>({
+    reducer: replaceValue,
+    default: () => DEFAULT_REFLECTION_PAYLOAD,
+  }),
+  reflectionDecision: Annotation<ReflectionDecision>({
+    reducer: replaceValue,
+    default: () => "ACCEPT",
+  }),
+  memoryConsolidationSummary: Annotation<string>({
+    reducer: replaceValue,
+    default: () => "",
   }),
   verificationResult: Annotation<VerificationResult>({
     reducer: replaceValue,

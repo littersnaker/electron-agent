@@ -214,6 +214,8 @@ export type AgentRole =
   | "modify_worker"
   | "merge_agent"
   | "reviewer_agent"
+  | "reflection_agent"
+  | "memory_consolidation_agent"
   | "verification_agent"
   | "final_report_agent";
 
@@ -226,6 +228,8 @@ export type AgentLifecycleStatus =
   | "READY_TO_MERGE"
   | "MERGING"
   | "REVIEWING"
+  | "REFLECTING"
+  | "CONSOLIDATING"
   | "VERIFYING"
   | "BLOCKED"
   | "COMPLETED"

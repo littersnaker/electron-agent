@@ -5,7 +5,7 @@
 import nodeFetch, { type RequestInit as NodeFetchRequestInit } from "node-fetch";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { readBoundedInteger, stripTags } from "./product-parsers";
-import { CachedProxyAgent, DEFAULT_CACHE_TTL_MS, DEFAULT_REQUEST_INTERVAL_MS, DEFAULT_REQUEST_TIMEOUT_MS, HtmlCacheEntry, MAX_HTTP_RETRIES, PlatformCrawlerDefinition, PlatformPagePayload, crawlerRequestState, htmlCache, invalidProxyWarnings, proxyAgents } from "./crawler-definitions";
+import { type CachedProxyAgent, DEFAULT_CACHE_TTL_MS, DEFAULT_REQUEST_INTERVAL_MS, DEFAULT_REQUEST_TIMEOUT_MS, type HtmlCacheEntry, MAX_HTTP_RETRIES, type PlatformCrawlerDefinition, type PlatformPagePayload, crawlerRequestState, htmlCache, invalidProxyWarnings, proxyAgents } from "./crawler-definitions";
 export function abortError(): Error {
   const error = new Error("平台爬虫请求已取消。");
   error.name = "AbortError";

@@ -2,12 +2,13 @@
  * 模块职责：工作流运行时类型、生命周期跟踪与基础内容处理。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { BaseMessage, ToolMessage } from "@langchain/core/messages";
+
+import type { BaseMessage, ToolMessage } from "@langchain/core/messages";
 import { z } from "zod";
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { LlmChatResponse } from "@/app/lib/llm/types";
-import { AgentState, ModifyWorkerState } from "../state";
-import { AgentLifecycleEvent, AgentLifecycleSnapshot, AgentLifecycleStatus, AgentRole, CommandExecutionMode, InteractiveRequest, InteractiveResponseMode, WorkerFileChange } from "../types";
+import type { AgentState, ModifyWorkerState } from "../state";
+import type { AgentLifecycleEvent, AgentLifecycleSnapshot, AgentLifecycleStatus, AgentRole, CommandExecutionMode, InteractiveRequest, InteractiveResponseMode, WorkerFileChange } from "../types";
 import { recordAgentTraceEvent } from "@/app/lib/agent-runtime/trace-store";
 import { CliPromptText } from "../../prompt";
 import { invokeLlm } from "./terminal-and-memory";

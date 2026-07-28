@@ -2,12 +2,13 @@
  * 模块职责：最终报告生成与 Agent 运行评估。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { LangGraphRunnableConfig } from "@langchain/langgraph";
+
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { DEFAULT_MERGE_RESULT, DEFAULT_REVIEW_PAYLOAD, DEFAULT_VERIFICATION_RESULT, formatHighLevelPlan, formatPlannerPayload } from "../types";
 import { evaluateAgentRun, formatAgentEvaluation } from "@/app/lib/agent-runtime/evaluation";
 import { recordAgentTraceEvent } from "@/app/lib/agent-runtime/trace-store";
 import { FinalReportAgentPromptText } from "../../prompt";
-import { AgentRuntimeState, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
+import { type AgentRuntimeState, buildLifecycleStateUpdate, buildTokenUsage, createLifecycleTracker, getLatestUserRequest } from "./runtime-lifecycle";
 import { appendSummary, invokeLlm, truncateText } from "./terminal-and-memory";
 import { formatModifyResults } from "./planner-normalization";
 /*
@@ -65,6 +66,22 @@ export async function finalReportNode(
           `Merged Patch:\n${state.mergedPatchSummary || "暂无"}`,
           `Reviewer 结果:\n${JSON.stringify(
             state.reviewPayload || DEFAULT_REVIEW_PAYLOAD,
+            null,
+            2,
+          )}`,
+          `Reflection 结果:
+${JSON.stringify(
+            state.reflectionPayload,
+            null,
+            2,
+          )}`,
+          `Memory Consolidation:
+${
+            state.memoryConsolidationSummary || "本轮未执行长期记忆沉淀"
+          }`,
+          `Working Memory:
+${JSON.stringify(
+            state.workingMemory,
             null,
             2,
           )}`,

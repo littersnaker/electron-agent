@@ -6,7 +6,7 @@ import { getCommerceMarketplace } from "../../marketplaces";
 import type { CommerceDataProviderKind, CommerceProductSignal } from "../../types";
 import type { PlatformConfig } from "../platform-serp";
 import type { CommerceDataProvider, CommerceProviderSearchInput, CommerceProviderSearchResult } from "../types";
-import { DEFAULT_MAX_PAGES_PER_KEYWORD, PLATFORM_CRAWLER_DEFINITIONS, PlatformCrawlerDefinition, SupportedPlatformSource } from "./crawler-definitions";
+import { DEFAULT_MAX_PAGES_PER_KEYWORD, PLATFORM_CRAWLER_DEFINITIONS, type PlatformCrawlerDefinition, type SupportedPlatformSource } from "./crawler-definitions";
 import { isEnabled, readBoundedInteger } from "./product-parsers";
 import { buildPlatformSearchUrl, parsePlatformPage, resolvePlatformCrawlerKeywords } from "./search-url-builder";
 import { extractJsonScriptPayloads, extractProductsFromAnchors, extractProductsFromJson, mergePlatformProducts } from "./payload-extraction";

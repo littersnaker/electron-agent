@@ -1,12 +1,21 @@
 "use client";
 /**
  * 模块职责：聊天输入器类型、模式配置和展示文案。
- * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import type { ChangeEvent, RefObject } from "react";
-import type { AttachedFile, ComposerMode, ImageEditFidelity, MediaMode, SessionMode, TypographyPolicy } from "../../constants/page-constants";
+import type { RefObject } from "react";
+import type {
+  AttachedFile,
+  ComposerMode,
+  ImageEditFidelity,
+  MediaMode,
+  SessionMode,
+  TypographyPolicy,
+} from "../../constants/page-constants";
 import type { ModelOption } from "../../constants/modelList";
 import type { CommerceMarketplaceCode } from "../../lib/commerce/types";
+import type { AttachmentCandidate } from "../../utilities/attachment-input";
+import type { AttachmentIngestionOptions } from "../../hooks/useComposer";
+
 export interface ChatComposerProps {
   mode?: SessionMode;
   commerceMarketplace?: CommerceMarketplaceCode;
@@ -23,12 +32,16 @@ export interface ChatComposerProps {
   onEnableQualityGuardChange: (enabled: boolean) => void;
   input: string;
   onInputChange: (value: string) => void;
-  attachedFile: AttachedFile | null;
-  onRemoveFile: () => void;
+  attachedFiles: readonly AttachedFile[];
+  onRemoveFile: (attachmentId: string) => void;
+  onAddAttachments: (
+    candidates: readonly AttachmentCandidate[],
+    options?: AttachmentIngestionOptions,
+  ) => Promise<void>;
+  attachmentError?: string;
   isParsingFile: boolean;
   isStreaming: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onFileSelect: (event: ChangeEvent<HTMLInputElement>) => void;
   models: readonly ModelOption[];
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
@@ -119,7 +132,7 @@ export function resolveAccept(composerMode: ComposerMode): string {
     case "text-to-video":
       return "image/*,video/*";
     default:
-      return "image/*,application/pdf,text/*";
+      return "*/*";
   }
 }
 
@@ -128,7 +141,7 @@ export function resolvePlaceholder(
   composerMode: ComposerMode,
 ): string {
   if (sessionMode === "code") {
-    return "描述要分析、创建或修改的项目任务…";
+    return "描述要分析、创建或修改的项目任务；可粘贴图片或拖入文件/文件夹…";
   }
   if (sessionMode === "commerce") {
     return "描述一个市场方向，例如：美国宠物饮水机市场有哪些品牌、价格带和机会信号？";
@@ -138,17 +151,17 @@ export function resolvePlaceholder(
     case "text-to-image":
       return "描述要生成的图片，例如：极简电商主图，浅灰背景，产品居中，柔和科技感打光…";
     case "image-edit":
-      return "上传图片并描述修改要求，例如：保留产品不变，把背景改为浅灰摄影棚并增强金属质感…";
+      return "粘贴或拖入图片，再描述修改要求…";
     case "text-to-video":
       return "描述要生成的视频镜头、动作和风格…";
     case "image-to-video":
-      return "上传一张首帧图片，再描述镜头运动和主体动作…";
+      return "拖入一张首帧图片，再描述镜头运动和主体动作…";
     case "reference-to-video":
-      return "上传参考图片，再描述主体在视频中的场景和动作…";
+      return "拖入参考图片，再描述主体在视频中的场景和动作…";
     case "video-edit":
-      return "上传视频并描述风格转换、元素替换或局部编辑要求…";
+      return "拖入视频并描述风格转换、元素替换或局部编辑要求…";
     default:
-      return "输入你的问题…";
+      return "输入问题；支持粘贴图片、拖入图片/文件/文件夹…";
   }
 }
 

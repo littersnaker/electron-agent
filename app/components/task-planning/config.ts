@@ -62,18 +62,24 @@ export const CODE_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
   {
     id: "review",
     title: "质量审查",
-    description: "检查需求覆盖、风险并决定是否返工",
+    description: "执行代码审查与认知复盘，并决定通过、返工或停止",
     agentTypes: ["reviewer"],
-    activityKeys: ["review", "审查"],
-    lifecycleRoles: ["reviewer_agent"],
+    activityKeys: ["review", "reflection", "审查", "复盘"],
+    lifecycleRoles: ["reviewer_agent", "reflection_agent"],
   },
   {
     id: "deliver",
     title: "生成结果",
-    description: "汇总已执行事实并生成最终交付说明",
+    description: "沉淀稳定经验，并汇总已执行事实生成最终交付说明",
     agentTypes: ["orchestrator"],
-    activityKeys: ["final_report", "最终报告", "交付"],
-    lifecycleRoles: ["final_report_agent"],
+    activityKeys: [
+      "memory_consolidation",
+      "final_report",
+      "记忆沉淀",
+      "最终报告",
+      "交付",
+    ],
+    lifecycleRoles: ["memory_consolidation_agent", "final_report_agent"],
   },
 ];
 

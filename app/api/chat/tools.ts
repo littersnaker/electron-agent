@@ -54,7 +54,7 @@ export const tools = [
     function: {
       name: "search_codebase",
       description:
-        "在当前项目工作目录中递归执行不区分大小写的纯文本关键字搜索，用于项目索引未命中、索引不可用或需要从磁盘重新定位文件时使用。当前只扫描 .ts、.tsx、.js、.jsx、.json、.md 文件，跳过 .git、node_modules、.next、dist、build、out，并最多返回 20 个命中文件路径；不会返回命中行或源码片段。找到候选文件后，应继续使用 read_file_from_disk 确认内容。",
+        "在当前项目工作目录中递归执行不区分大小写的纯文本关键字搜索，用于项目索引未命中、索引不可用或需要从磁盘重新定位文件时使用。当前只扫描 .ts、.tsx、.js、.jsx、.json、.md 文件，跳过 .git、node_modules、.next、.next-electron、dist、build、out、out-server、release，并最多返回 20 个命中文件路径；不会返回命中行或源码片段。找到候选文件后，应继续使用 read_file_from_disk 确认内容。",
       parameters: {
         type: "object",
         properties: {

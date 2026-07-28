@@ -2,18 +2,35 @@
  * 模块职责：终端命令执行、工作记忆压缩与大模型调用。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { BaseMessage } from "@langchain/core/messages";
+
+import type { BaseMessage } from "@langchain/core/messages";
 import { execSync } from "child_process";
 import { tools } from "../../tools";
 import { completeWithLlm } from "@/app/lib/llm/gateway";
 import { getRequestLlmCredentials } from "@/app/lib/llm/request-context";
 import type { LlmChatResponse, LlmTaskType } from "@/app/lib/llm/types";
-import { ModifyWorkerInput, PlanTask, WorkerMemory } from "../types";
+import type { ModifyWorkerInput, PlanTask, WorkerMemory } from "../types";
 import { startAgentTraceSpan } from "@/app/lib/agent-runtime/trace-store";
 import { resolveMcpTools, toLlmMcpTools } from "@/app/lib/mcp/client";
 import { getPersistentTerminalSession, resumePersistentTerminalSession, startPersistentTerminalSession } from "../persistent-terminal-session";
 import { WorkerMemoryPromptText } from "../../prompt";
-import { AgentRuntimeState, TerminalCommandOutcome, TokenUsage, WORKER_MEMORY_COMPRESS_EVERY_ROUNDS, WORKER_MEMORY_MAX_CONTEXT_CHARS, buildInteractiveAnswerByLlm, buildTokenUsage, createEmptyTokenUsage, extractInteractiveReplyInstruction, getLatestUserRequest, mergeTokenUsage, normalizeContent, stripThinkContent } from "./runtime-lifecycle";
+import {
+  WORKER_MEMORY_COMPRESS_EVERY_ROUNDS,
+  WORKER_MEMORY_MAX_CONTEXT_CHARS,
+  buildInteractiveAnswerByLlm,
+  buildTokenUsage,
+  createEmptyTokenUsage,
+  extractInteractiveReplyInstruction,
+  getLatestUserRequest,
+  mergeTokenUsage,
+  normalizeContent,
+  stripThinkContent,
+} from "./runtime-lifecycle";
+import type {
+  AgentRuntimeState,
+  TerminalCommandOutcome,
+  TokenUsage,
+} from "./runtime-lifecycle";
 export async function runNormalTerminalCommand(
   command: string,
   workingDir: string,

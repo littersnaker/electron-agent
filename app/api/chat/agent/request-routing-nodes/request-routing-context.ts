@@ -3,13 +3,19 @@
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import type { BaseMessage } from "@langchain/core/messages";
+import {
+  createEmptyLongTermMemory,
+  createEmptyShortTermMemory,
+  createEmptyWorkingMemory,
+} from "@/app/lib/agent-runtime/memory-types";
+import { DEFAULT_REFLECTION_PAYLOAD } from "@/app/lib/agent-runtime/reflection-types";
 import { createHash } from "crypto";
 import path from "path";
 import { normalizeLlmMessages } from "@/app/lib/llm/normalizers";
 import type { LlmContentPart } from "@/app/lib/llm/types";
 import type { InteractiveRequest, InteractiveResponseMode, PlannerValidationStatus } from "../types";
 import { classifyAgentRequest } from "../request-classifier";
-import { AgentState } from "../state";
+import type { AgentState } from "../state";
 import { DEFAULT_HIGH_LEVEL_PLAN, DEFAULT_MERGE_RESULT, DEFAULT_PLANNER_PAYLOAD, DEFAULT_REVIEW_PAYLOAD, DEFAULT_VERIFICATION_RESULT } from "../types";
 import { buildWorkspaceRuntimeInfo } from "../workspace-context";
 export type AgentRuntimeState = typeof AgentState.State;
@@ -192,6 +198,9 @@ export function buildFreshRunState(
     mergedContext: "",
     searchContext: "",
     memoryContext: "",
+    shortTermMemory: createEmptyShortTermMemory(),
+    workingMemory: createEmptyWorkingMemory(currentUserRequest),
+    longTermMemory: createEmptyLongTermMemory(),
     fileContext: "",
     highLevelPlanRawOutput: "",
     highLevelPlan: DEFAULT_HIGH_LEVEL_PLAN,
@@ -211,6 +220,9 @@ export function buildFreshRunState(
     reviewDecision: "PASS",
     retryTaskSlots: [],
     reviewIteration: 0,
+    reflectionPayload: DEFAULT_REFLECTION_PAYLOAD,
+    reflectionDecision: "ACCEPT",
+    memoryConsolidationSummary: "",
     interactiveRequest: null,
     approvedMissingFiles,
     approvedRiskActions: [],

@@ -2,7 +2,8 @@
  * 模块职责：高层计划与任务计划的结构化解析和校验。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { DEFAULT_HIGH_LEVEL_PLAN, DEFAULT_PLANNER_PAYLOAD, DEFAULT_REVIEW_PAYLOAD, HighLevelPlanPayload, PlannerPayload, ReviewPayload } from "../types";
+
+import { DEFAULT_HIGH_LEVEL_PLAN, DEFAULT_PLANNER_PAYLOAD, DEFAULT_REVIEW_PAYLOAD, type HighLevelPlanPayload, type PlannerPayload, type ReviewPayload } from "../types";
 import { MAX_PARALLEL_MODIFIERS, highLevelPlanSchema, plannerPayloadSchema } from "./runtime-lifecycle";
 // Planner 经常会在 JSON 外面夹带解释文字。
 // 这里会尽量从整段文本里捞出第一个数组，给后续 schema 校验使用。

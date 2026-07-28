@@ -2,7 +2,7 @@
  * 模块职责：MCP JSON-RPC 通信、初始化与工具目录解析。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { DEFAULT_CATALOG_TTL_MS, DEFAULT_TIMEOUT_MS, JsonRpcResponse, MCP_PROTOCOL_VERSION, McpListToolsResult, McpResolvedTool, McpRuntimeSession, McpServerConfig, buildLlmToolName, buildServerRuntimeKey, catalogs, getSession, loadMcpServerConfigs, readPositiveInteger } from "./mcp-configuration";
+import { DEFAULT_CATALOG_TTL_MS, DEFAULT_TIMEOUT_MS, type JsonRpcResponse, MCP_PROTOCOL_VERSION, type McpListToolsResult, type McpResolvedTool, type McpRuntimeSession, type McpServerConfig, buildLlmToolName, buildServerRuntimeKey, catalogs, getSession, loadMcpServerConfigs, readPositiveInteger } from "./mcp-configuration";
 export function parseSseJson<TResult>(
   body: string,
   expectedId: string | number | undefined,

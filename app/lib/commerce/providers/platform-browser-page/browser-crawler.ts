@@ -5,7 +5,7 @@
 import { type BrowserContext } from "playwright-core";
 import type { CommerceProductSignal } from "../../types";
 import { assertPlatformPageUsable, mergePlatformProducts, parsePlatformPage, type PlatformCrawlerDefinition } from "../platform-public-page";
-import { BrowserPageResult, DEFAULT_MAX_JSON_BYTES, DEFAULT_MAX_JSON_RESPONSES, DEFAULT_NAVIGATION_TIMEOUT_MS, DEFAULT_SCROLL_STEPS, DEFAULT_SETTLE_TIME_MS, collectProductsFromResponse, isInterestingJsonResponse, readBoundedInteger, scrollForLazyContent } from "./browser-runtime";
+import { type BrowserPageResult, DEFAULT_MAX_JSON_BYTES, DEFAULT_MAX_JSON_RESPONSES, DEFAULT_NAVIGATION_TIMEOUT_MS, DEFAULT_SCROLL_STEPS, DEFAULT_SETTLE_TIME_MS, collectProductsFromResponse, isInterestingJsonResponse, readBoundedInteger, scrollForLazyContent } from "./browser-runtime";
 export async function crawlBrowserPage(
   context: BrowserContext,
   searchUrl: URL,

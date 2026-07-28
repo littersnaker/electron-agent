@@ -4,7 +4,7 @@
  */
 import fs from "fs";
 import { extractExistingFileMutationTargets } from "../request-classifier";
-import { AgentRuntimeState, buildFileCreateConfirmation, buildFreshRunState, extractInteractiveReplyInstruction, getLatestUserRequest, isCreateApproval, isRiskApproval, resolveWorkspaceFilePath } from "./request-routing-context";
+import { type AgentRuntimeState, buildFileCreateConfirmation, buildFreshRunState, extractInteractiveReplyInstruction, getLatestUserRequest, isCreateApproval, isRiskApproval, resolveWorkspaceFilePath } from "./request-routing-context";
 /**
  * V6 Router：重置本轮瞬态状态，并处理缺失文件确认卡片的恢复逻辑。
  *

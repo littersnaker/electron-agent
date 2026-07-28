@@ -138,6 +138,21 @@ export function getDatabase(): DatabaseSync {
       UNIQUE(project_id, memory_key)
     );
 
+    -- V12：项目级长期记忆。短期记忆和工作记忆不进入该表。
+    CREATE TABLE IF NOT EXISTS agent_long_term_memory (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      content_hash TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      importance REAL NOT NULL DEFAULT 0.5,
+      access_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_accessed_at TEXT,
+      UNIQUE(project_id, content_hash)
+    );
+
     CREATE TABLE IF NOT EXISTS file_index (
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       file_path TEXT NOT NULL,
@@ -170,6 +185,8 @@ export function getDatabase(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_sessions_project_updated ON sessions(project_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_symbols_project_name ON symbol_index(project_id, symbol_name);
     CREATE INDEX IF NOT EXISTS idx_code_content_project_path ON code_content(project_id, file_path);
+    CREATE INDEX IF NOT EXISTS idx_agent_memory_project_updated
+      ON agent_long_term_memory(project_id, updated_at DESC);
   `);
   ensureSessionModeSchema(database);
   // 迁移重建 sessions 表时旧索引会随 legacy 表删除，因此这里再次确保索引存在。

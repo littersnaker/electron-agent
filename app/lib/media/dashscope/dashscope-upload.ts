@@ -4,7 +4,7 @@
  */
 import { Buffer } from "node:buffer";
 import type { MediaAttachmentInput, MediaGenerateRequest } from "../types";
-import { DashScopeErrorPayload, UploadPolicyPayload, getUploadApiBase, readJsonResponse, toDataUrl } from "./dashscope-image";
+import { type DashScopeErrorPayload, type UploadPolicyPayload, getUploadApiBase, readJsonResponse, toDataUrl } from "./dashscope-image";
 export function normalizeUploadFileName(value: string): string {
   const sanitized = value
     .replace(/[\\/]/gu, "_")

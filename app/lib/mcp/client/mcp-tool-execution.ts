@@ -2,7 +2,7 @@
  * 模块职责：MCP 工具调用、内容格式化与缓存清理。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { McpCallToolResult, McpResolvedTool, McpToolCallOutcome, catalogs, getSession, loadMcpServerConfigs } from "./mcp-configuration";
+import { type McpCallToolResult, type McpResolvedTool, type McpToolCallOutcome, catalogs, getSession, loadMcpServerConfigs } from "./mcp-configuration";
 import { ensureInitialized, postJsonRpc } from "./mcp-protocol";
 export function formatMcpContent(result: McpCallToolResult): string {
   const textItems = (result.content || []).flatMap((item) => {
