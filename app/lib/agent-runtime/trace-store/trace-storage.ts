@@ -9,7 +9,7 @@ import path from "path";
 import { DatabaseSync } from "node:sqlite";
 export type AgentTraceStatus = "running" | "completed" | "failed" | "paused";
 
-export type AgentTraceEventStatus = "started" | "completed" | "failed" | "info";
+export type AgentTraceEventStatus = "started" | "completed" | "failed" | "info" | 'error';
 
 export interface AgentTraceStartInput {
   sessionId: string;
