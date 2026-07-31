@@ -9,9 +9,23 @@ import type {
   PlanningSummary,
 } from "./types";
 
-function matchesActivity(activity: ToolActivity, keys: string[]): boolean {
+function matchesActivity(
+  activity: ToolActivity,
+  definition: PlanningStageDefinition,
+): boolean {
+  // Commerce 进度事件携带稳定 stageId 时优先精确匹配，不再依赖中文文案猜测。
+  if (
+    activity.stageId &&
+    definition.activityStageIds?.includes(activity.stageId)
+  ) {
+    return true;
+  }
+
+  // 旧会话、媒体任务和 Code Agent 继续使用兼容性的文案关键字匹配。
   const normalized = activity.label.toLocaleLowerCase();
-  return keys.some((key) => normalized.includes(key.toLocaleLowerCase()));
+  return definition.activityKeys.some((key) =>
+    normalized.includes(key.toLocaleLowerCase()),
+  );
 }
 
 function resolveDirectStatus(
@@ -23,7 +37,7 @@ function resolveDirectStatus(
     definition.agentTypes.includes(agent.type),
   );
   const relatedActivities = activities.filter((activity) =>
-    matchesActivity(activity, definition.activityKeys),
+    matchesActivity(activity, definition),
   );
 
   if (
@@ -202,7 +216,7 @@ function buildLifecycleStages(
             : 0,
       detail,
       activityCount: activities.filter((activity) =>
-        matchesActivity(activity, definition.activityKeys),
+        matchesActivity(activity, definition),
       ).length,
       iteration,
     };
@@ -237,9 +251,9 @@ function resolveDetail(
   agentStatus?: string,
 ): string {
   const latestActivity = [...activities]
-    .filter((activity) => matchesActivity(activity, definition.activityKeys))
+    .filter((activity) => matchesActivity(activity, definition))
     .sort((left, right) => right.startedAt - left.startedAt)[0];
-  if (latestActivity) return latestActivity.label;
+  if (latestActivity) return latestActivity.detail || latestActivity.label;
 
   const activeTask = agents
     .filter((agent) => definition.agentTypes.includes(agent.type))
@@ -289,7 +303,7 @@ export function buildPlanningStages(
       agentStatus,
     ),
     activityCount: activities.filter((activity) =>
-      matchesActivity(activity, definition.activityKeys),
+      matchesActivity(activity, definition),
     ).length,
     iteration: 0,
   }));

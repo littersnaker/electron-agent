@@ -269,6 +269,10 @@ export type CommerceResearchStage =
   | "normalize"
   | "analyze"
   | "strategy"
+  | "erp"
+  | "keywords"
+  | "draft"
+  | "validate"
   | "done";
 
 export interface CommerceProgressEvent {

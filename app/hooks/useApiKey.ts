@@ -6,6 +6,7 @@ import {
   LLM_PROVIDER_CATALOG,
   LLM_PROVIDER_IDS,
 } from "../lib/llm/registry/providers";
+import { apiFetch } from "../lib/api-client";
 import type { LlmCredentials } from "../lib/llm/types";
 import {
   COMMERCE_STORAGE_KEYS,
@@ -120,7 +121,7 @@ export function useApiKey() {
 
     const loadStatus = async () => {
       try {
-        const response = await fetch("/api/commerce/data-source/status", {
+        const response = await apiFetch("/api/commerce/data-source/status", {
           method: "GET",
           cache: "no-store",
         });

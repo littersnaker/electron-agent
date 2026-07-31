@@ -13,12 +13,15 @@ import type {
 } from "../../constants/page-constants";
 import type { ModelOption } from "../../constants/modelList";
 import type { CommerceMarketplaceCode } from "../../lib/commerce/types";
+import type { CommerceWorkflowMode } from "../../lib/commerce/listing/types";
 import type { AttachmentCandidate } from "../../utilities/attachment-input";
 import type { AttachmentIngestionOptions } from "../../hooks/useComposer";
 
 export interface ChatComposerProps {
   mode?: SessionMode;
   commerceMarketplace?: CommerceMarketplaceCode;
+  commerceWorkflowMode?: CommerceWorkflowMode;
+  onCommerceWorkflowModeChange?: (mode: CommerceWorkflowMode) => void;
   onCommerceMarketplaceChange?: (marketplace: CommerceMarketplaceCode) => void;
   commerceDataSourceState?: "environment" | "local" | "none";
   onOpenServiceSettings?: () => void;
@@ -139,12 +142,15 @@ export function resolveAccept(composerMode: ComposerMode): string {
 export function resolvePlaceholder(
   sessionMode: SessionMode | undefined,
   composerMode: ComposerMode,
+  commerceWorkflowMode: CommerceWorkflowMode = "research",
 ): string {
   if (sessionMode === "code") {
     return "描述要分析、创建或修改的项目任务；可粘贴图片或拖入文件/文件夹…";
   }
   if (sessionMode === "commerce") {
-    return "描述一个市场方向，例如：美国宠物饮水机市场有哪些品牌、价格带和机会信号？";
+    return commerceWorkflowMode === "listing"
+      ? "描述商品，例如：品牌 DemoBrand，桌面夹式扶手，黑色软垫，适用于办公桌；其他字段由模拟 ERP 补齐…"
+      : "描述一个市场方向，例如：美国宠物饮水机市场有哪些品牌、价格带和机会信号？";
   }
 
   switch (composerMode) {
@@ -168,7 +174,10 @@ export function resolvePlaceholder(
 export function resolveSubmitLabel(
   sessionMode: SessionMode | undefined,
   composerMode: ComposerMode,
+  commerceWorkflowMode: CommerceWorkflowMode = "research",
 ): string {
-  if (sessionMode === "commerce") return "开始研究";
+  if (sessionMode === "commerce") {
+    return commerceWorkflowMode === "listing" ? "生成 Listing" : "开始研究";
+  }
   return composerMode === "chat" ? "发送" : "开始生成";
 }

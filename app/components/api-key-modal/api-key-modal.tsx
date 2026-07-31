@@ -11,6 +11,7 @@ import {
   buildCommerceCredentialHeaders,
   type AuxiliaryServiceCredentials,
 } from "../../lib/service-credentials";
+import { apiFetch } from "../../lib/api-client";
 import {
   AppleButton,
   AppleModalCloseButton,
@@ -52,7 +53,7 @@ export function ApiKeyModal({
 
     const loadEnvironmentStatus = async () => {
       try {
-        const response = await fetch("/api/commerce/data-source/status", {
+        const response = await apiFetch("/api/commerce/data-source/status", {
           method: "GET",
           cache: "no-store",
         });
@@ -105,7 +106,7 @@ export function ApiKeyModal({
     }));
 
     try {
-      const response = await fetch("/api/commerce/data-source/status", {
+      const response = await apiFetch("/api/commerce/data-source/status", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

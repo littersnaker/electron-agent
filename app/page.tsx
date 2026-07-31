@@ -2,10 +2,12 @@
 /* eslint-disable react-hooks/immutability */
 "use client";
 
-import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import AgentPanel from "./components/AgentPanel";
+import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
+import TaskPlanningPanel from "./components/TaskPlanningPanel";
+import PluginCenter from "./components/plugins/PluginCenter";
 import ApiKeyModal from "./components/ApiKeyModal";
 import ChatComposer from "./components/ChatComposer";
 import ChatList from "./components/ChatList";
@@ -37,18 +39,6 @@ import { AUTO_MODEL_ID } from "./lib/llm/model-catalog";
 import { DEFAULT_MEDIA_MODEL_ID } from "./lib/media/catalog";
 import type { CommerceMarketplaceCode } from "./lib/commerce/types";
 import type { BuiltinPluginId } from "./lib/plugins/types";
-
-// 插件专属 UI 使用动态分包；核心 QA 首屏不会同步加载这些面板。
-const TaskPlanningPanel = dynamic(() => import("./components/TaskPlanningPanel"), {
-  ssr: false,
-});
-const InteractiveRequestPanel = dynamic(
-  () => import("./components/InteractiveRequestPanel"),
-  { ssr: false },
-);
-const PluginCenter = dynamic(() => import("./components/plugins/PluginCenter"), {
-  ssr: false,
-});
 
 /**
  * Multi-agent 工作台页面入口。
@@ -394,6 +384,8 @@ export default function Home() {
                   <ChatComposer
                     mode={workspace.activeSession?.mode}
                     commerceMarketplace={commerceMarketplace}
+                    commerceWorkflowMode={commerce.workflowMode}
+                    onCommerceWorkflowModeChange={commerce.setWorkflowMode}
                     onCommerceMarketplaceChange={setCommerceMarketplace}
                     commerceDataSourceState={apiKey.commerceDataSourceState}
                     onOpenServiceSettings={apiKey.openKeyModal}
@@ -435,7 +427,7 @@ export default function Home() {
                   isStreaming={isBusy}
                   workflowMode={
                     workspace.activeSession?.mode === "commerce"
-                      ? "commerce"
+                      ? `commerce-${commerce.workflowMode}`
                       : effectiveComposerMode
                   }
                 />
@@ -450,31 +442,6 @@ export default function Home() {
         </section>
       </div>
 
-      <style jsx global>{`
-        * {
-          scrollbar-width: thin;
-          scrollbar-color: var(--scrollbar-thumb) transparent;
-        }
-        *::-webkit-scrollbar { width: 8px; height: 8px; }
-        *::-webkit-scrollbar-track { background: transparent; }
-        *::-webkit-scrollbar-thumb {
-          background: var(--scrollbar-thumb);
-          border: 2px solid transparent;
-          background-clip: padding-box;
-          border-radius: 999px;
-        }
-        body {
-          margin: 0;
-          background: var(--app-bg);
-          transition: background-color 300ms var(--ease-apple);
-        }
-        button, input, textarea { font: inherit; }
-        .theme-transition {
-          transition:
-            background 300ms var(--ease-apple),
-            color 260ms var(--ease-apple);
-        }
-      `}</style>
     </main>
   );
 }

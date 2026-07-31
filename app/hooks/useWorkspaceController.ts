@@ -9,6 +9,7 @@ import type {
   SessionMode,
   WorkspaceProject,
 } from "../constants/page-constants";
+import { apiFetch } from "../lib/api-client";
 import type { WorkspaceResponse } from "../types/workspace";
 import { buildWelcomeMessages } from "../utilities/agent-runtime";
 
@@ -18,7 +19,7 @@ async function requestCreateSession(
   project?: WorkspaceProject,
 ): Promise<ChatSession> {
   const initialMessages = buildWelcomeMessages(mode, project);
-  const response = await fetch("/api/workspace", {
+  const response = await apiFetch("/api/workspace", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -66,7 +67,7 @@ export function useWorkspaceController(
     if (options.includeCode) params.set("code", "1");
     if (options.includeCommerce) params.set("commerce", "1");
     const query = params.toString();
-    const response = await fetch(`/api/workspace${query ? `?${query}` : ""}`, {
+    const response = await apiFetch(`/api/workspace${query ? `?${query}` : ""}`, {
       cache: "no-store",
     });
     if (!response.ok) throw new Error("无法读取本地工作区数据");
@@ -137,7 +138,7 @@ export function useWorkspaceController(
       nextMessages: Message[],
       title = session.title,
     ) => {
-      await fetch("/api/workspace", {
+      await apiFetch("/api/workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -170,7 +171,7 @@ export function useWorkspaceController(
       event.stopPropagation();
       const remaining = sessions.filter((session) => session.id !== id);
 
-      await fetch("/api/workspace", {
+      await apiFetch("/api/workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "deleteSession", id }),
@@ -206,7 +207,7 @@ export function useWorkspaceController(
       );
 
       try {
-        const response = await fetch(`/api/projects/${projectId}/index`, {
+        const response = await apiFetch(`/api/projects/${projectId}/index`, {
           method: "POST",
         });
         if (!response.ok) throw new Error("索引失败");
@@ -230,7 +231,7 @@ export function useWorkspaceController(
       const rootPath = await window.electronAPI?.selectFolder?.();
       if (!rootPath) return null;
 
-      const response = await fetch("/api/workspace", {
+      const response = await apiFetch("/api/workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "createProject", rootPath }),

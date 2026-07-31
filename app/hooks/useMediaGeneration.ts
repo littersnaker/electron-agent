@@ -11,6 +11,7 @@ import type {
   Message,
   TypographyPolicy,
 } from "../constants/page-constants";
+import { apiFetch } from "../lib/api-client";
 import { toMessageAttachment } from "../constants/page-constants";
 import {
   buildLlmRequestHeaders,
@@ -310,7 +311,7 @@ export function useMediaGeneration({
       abortRef.current = controller;
 
       try {
-        const response = await fetch("/api/media/generate", {
+        const response = await apiFetch("/api/media/generate", {
           method: "POST",
           headers: buildLlmRequestHeaders(apiKeys, selectedModel),
           body: JSON.stringify({

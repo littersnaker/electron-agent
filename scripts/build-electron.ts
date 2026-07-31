@@ -1,93 +1,77 @@
-/// <reference types="node" />
-import { execSync } from "node:child_process";
+/**
+ * 模块职责：准备 Electron 生产安装包所需的 React、Electron 和 Python 三类产物。
+ */
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const rootDir = process.cwd();
-const nextDistDirName = ".next-electron";
-const nextDistDir = path.join(rootDir, nextDistDirName);
-const standaloneSource = path.join(nextDistDir, "standalone");
-const staticSource = path.join(nextDistDir, "static");
-const outServerRoot = path.join(rootDir, "out-server");
-const outServerDir = path.join(outServerRoot, "standalone");
+const rootDirectory = process.cwd();
 
-/** 执行项目命令，并把子进程输出同步到当前终端。 */
+/**
+ * 在项目根目录执行 shell 命令，并实时显示输出。
+ */
 function runCommand(command: string): void {
-  execSync(command, {
+  execSync(command, { cwd: rootDirectory, stdio: "inherit", env: process.env });
+}
+
+/**
+ * 查找构建后端时使用的 Python 解释器。
+ */
+function resolvePythonExecutable(): string {
+  const configured = process.env.PYTHON_EXECUTABLE?.trim();
+  if (configured) return configured;
+  const candidates = [
+    path.join(rootDirectory, ".venv", "Scripts", "python.exe"),
+    path.join(rootDirectory, ".venv", "bin", "python"),
+    process.platform === "win32" ? "python" : "python3",
+  ];
+  return candidates.find((candidate) =>
+    candidate.includes(path.sep) ? fs.existsSync(candidate) : true,
+  )!;
+}
+
+/**
+ * 执行 Python 后端打包脚本。
+ */
+function buildPythonBackend(): void {
+  execFileSync(resolvePythonExecutable(), ["scripts/build-python-backend.py"], {
+    cwd: rootDirectory,
     stdio: "inherit",
-    cwd: rootDir,
     env: process.env,
   });
 }
 
-/** 校验 Next.js standalone 构建产物是否完整。 */
-function assertStandaloneBuild(): void {
-  const serverEntry = path.join(standaloneSource, "server.js");
-
-  if (!fs.existsSync(standaloneSource)) {
-    throw new Error(
-      `${nextDistDirName}/standalone 目录不存在，请确认 next.config.ts 同时配置了 output: "standalone" 和 distDir: "${nextDistDirName}"。`,
-    );
+/**
+ * 检查生产打包依赖的关键文件。
+ */
+function assertBuildOutputs(): void {
+  const required = [
+    path.join(rootDirectory, "dist", "index.html"),
+    path.join(rootDirectory, ".electron", "main.js"),
+    path.join(rootDirectory, ".electron", "preload.js"),
+  ];
+  const backendFiles = fs.existsSync(path.join(rootDirectory, "python-dist"))
+    ? fs.readdirSync(path.join(rootDirectory, "python-dist"))
+    : [];
+  if (!backendFiles.some((name) => name.startsWith("multi-agent-backend"))) {
+    required.push(path.join(rootDirectory, "python-dist", "multi-agent-backend"));
   }
-
-  if (!fs.existsSync(serverEntry)) {
-    throw new Error(
-      `${nextDistDirName}/standalone/server.js 不存在，Next.js standalone 构建不完整。`,
-    );
-  }
-
-  if (!fs.existsSync(staticSource)) {
-    throw new Error(
-      `${nextDistDirName}/static 目录不存在，Next.js 静态资源构建不完整。`,
-    );
-  }
+  const missing = required.filter((file) => !fs.existsSync(file));
+  if (missing.length) throw new Error(`构建产物缺失：\n${missing.join("\n")}`);
 }
 
-/** 将 standalone、静态资源和 public 整理到 Electron 资源目录。 */
-function prepareStandaloneRuntime(): void {
-  fs.rmSync(outServerRoot, { recursive: true, force: true });
-  fs.mkdirSync(outServerDir, { recursive: true });
-
-  fs.cpSync(standaloneSource, outServerDir, {
-    recursive: true,
-    dereference: true,
-  });
-
-  // server.js 会按照自定义 distDir 查找静态资源。
-  const destinationStatic = path.join(
-    outServerDir,
-    nextDistDirName,
-    "static",
-  );
-  fs.mkdirSync(destinationStatic, { recursive: true });
-  fs.cpSync(staticSource, destinationStatic, { recursive: true });
-
-  const sourcePublic = path.join(rootDir, "public");
-  if (fs.existsSync(sourcePublic)) {
-    fs.cpSync(sourcePublic, path.join(outServerDir, "public"), {
-      recursive: true,
-    });
-  }
-}
-
-try {
-  console.log("=== Step 1: 编译 Electron 主进程 TypeScript ===");
+/**
+ * 按顺序构建三层运行时。
+ */
+function main(): void {
+  console.log("=== 1/3 编译 Electron 主进程 ===");
   runCommand("pnpm electron:compile");
-
-  console.log(
-    "\n=== Step 2: 构建 Next.js 前端项目 (.next-electron / Standalone) ===",
-  );
-  runCommand("pnpm run build");
-
-  console.log("\n=== Step 3: 校验并整理 Next.js 生产服务文件 ===");
-  assertStandaloneBuild();
-  prepareStandaloneRuntime();
-
-  console.log("\n✅ Electron 打包资源准备完成。");
-  console.log(
-    "后续 electron-builder 会由 package.json 脚本显式读取 electron-builder.yml。",
-  );
-} catch (error) {
-  console.error("\n❌ 构建资源准备过程中发生错误:", error);
-  process.exit(1);
+  console.log("=== 2/3 构建 Vite React 前端 ===");
+  runCommand("pnpm build");
+  console.log("=== 3/3 构建 PyInstaller FastAPI 后端 ===");
+  buildPythonBackend();
+  assertBuildOutputs();
+  console.log("Electron 打包资源准备完成。 ");
 }
+
+main();

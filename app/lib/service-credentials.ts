@@ -55,7 +55,7 @@ export const COMMERCE_STORAGE_KEYS = {
 export const SERPAPI_STORAGE_KEY = COMMERCE_STORAGE_KEYS.legacySerpApi;
 
 /**
- * Request headers used only between the local Electron renderer and the local Next.js server.
+ * Request headers used only between the local Electron renderer and the local FastAPI server.
  * The server still prefers environment variables where a packaged default exists.
  */
 export const COMMERCE_REQUEST_HEADERS = {

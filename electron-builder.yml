@@ -1,5 +1,3 @@
-# Multi-agent Electron production packaging configuration.
-# appId is intentionally retained for upgrade and local user-data compatibility.
 appId: com.agent.workspace
 productName: Multi-agent
 copyright: Copyright © 2026 Multi-agent Team
@@ -11,24 +9,24 @@ directories:
   output: release
   buildResources: build
 
-# Electron main/preload code is stored in app.asar. The Next.js standalone
-# runtime is shipped as an external resource so it can start as a local server.
 files:
   - ".electron/**/*"
   - "package.json"
   - "!**/*.map"
-  - "!**/test/**/*"
-  - "!**/tests/**/*"
-  - "!**/__tests__/**/*"
-  - "!node_modules/.cache/**/*"
 
 extraResources:
-  - from: out-server/standalone
-    to: standalone
+  - from: dist
+    to: frontend
     filter:
       - "**/*"
-      - "!**/.pnpm/**"
-      - "!**/node_modules/.pnpm/**"
+  - from: python-dist
+    to: backend
+    filter:
+      - "multi-agent-backend*"
+  - from: public/icon.ico
+    to: icon.ico
+  - from: public/icon.png
+    to: icon.png
 
 asar: true
 compression: maximum
@@ -37,8 +35,7 @@ removePackageScripts: true
 win:
   target:
     - target: nsis
-      arch:
-        - x64
+      arch: [x64]
   icon: public/icon.ico
   artifactName: "Multi-agent-${version}-windows-${arch}-setup.${ext}"
 
@@ -57,23 +54,19 @@ nsis:
   uninstallerSidebar: build/uninstallerSidebar.bmp
   deleteAppDataOnUninstall: false
   displayLanguageSelector: false
-  installerLanguages:
-    - zh_CN
+  installerLanguages: [zh_CN]
   language: 2052
   runAfterFinish: true
   include: build/installer.nsh
 
 mac:
-  target:
-    - dmg
+  target: [dmg]
   icon: public/icon.png
   artifactName: "Multi-agent-${version}-macos-${arch}.${ext}"
   category: public.app-category.productivity
 
 linux:
-  target:
-    - deb
-    - AppImage
+  target: [deb, AppImage]
   icon: public/icon.png
   artifactName: "Multi-agent-${version}-linux-${arch}.${ext}"
   category: Utility
