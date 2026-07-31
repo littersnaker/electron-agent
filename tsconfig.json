@@ -1,27 +1,29 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
     "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
+      "DOM",
+      "DOM.Iterable",
+      "ES2022"
     ],
-    "allowJs": true,
+    "allowJs": false,
     "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
     "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "noEmit": true,
     "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
+    "types": [
+      "vite/client",
+      "node"
     ],
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
@@ -29,25 +31,18 @@
     }
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts",
-    ".next-electron/types/**/*.ts",
-    ".next-electron/dev/types/**/*.ts"
+    "main.tsx",
+    "vite.config.ts",
+    "vite-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "app/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",
-    "electron/**/*",
-    "scripts/**/*",
-    ".electron/**/*",
-    "forge.config.ts",
-    "out-server", // ✨ 必须加上：忽略我们的预处理目录
-    ".electron", // ✨ 建议加上：忽略你的 electron 源码目录（如果有的话）
-    "out", // 兼容旧构建输出
+    ".electron",
+    "dist",
     "release",
-    "dist"
+    "python-dist"
   ]
 }

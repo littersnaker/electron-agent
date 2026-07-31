@@ -63,12 +63,12 @@ export default function PluginCenter({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center px-4 py-10">
+    <div className="fixed inset-0 z-200 flex items-center justify-center px-4 py-10">
       <button
         type="button"
         aria-label="关闭插件中心"
         onClick={onClose}
-        className="absolute inset-0 cursor-default"
+        className="absolute inset-0 cursor-pointer"
         style={{
           background: "rgba(7, 8, 12, 0.34)",
           backdropFilter: "blur(20px) saturate(125%)",
@@ -80,7 +80,7 @@ export default function PluginCenter({
         role="dialog"
         aria-modal="true"
         aria-labelledby="plugin-center-title"
-        className="relative w-full max-w-[580px] overflow-hidden rounded-[28px] border"
+        className="relative w-full max-w-145 overflow-hidden rounded-[28px] border"
         style={{
           background:
             "linear-gradient(180deg, color-mix(in srgb, var(--glass-solid) 98%, transparent), color-mix(in srgb, var(--glass-strong) 96%, transparent))",
@@ -95,11 +95,11 @@ export default function PluginCenter({
           <div>
             <h2
               id="plugin-center-title"
-              className="text-[18px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]"
+              className="text-[18px] font-semibold tracking-tight text-(--text-primary)"
             >
               功能插件
             </h2>
-            <p className="mt-1 max-w-[440px] text-[12px] leading-5 text-[var(--text-tertiary)]">
+            <p className="mt-1 max-w-110 text-[12px] leading-5 text-(--text-tertiary)">
               只开启会使用的 Agent。关闭后的能力不会出现在工作区入口中。
             </p>
           </div>

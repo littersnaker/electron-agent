@@ -20,6 +20,7 @@ declare global {
   interface Window {
     electronAPI?: {
       platform: string;
+      backendBaseUrl: string;
       selectFolder: () => Promise<string | null>;
       exportCommerceReportPdf: (
         payload: CommercePdfPayload,

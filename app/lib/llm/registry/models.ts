@@ -288,6 +288,27 @@ export const LLM_MODEL_CATALOG: readonly LlmModelDefinition[] = [
     speed: 74,
     costEfficiency: 84,
   },
+  {
+    id: "kimi:kimi-k2.6",
+    provider: "kimi",
+    model: "kimi-k2.6",
+    name: "Kimi K2.6",
+    description: "长上下文、多模态和复杂任务",
+    capabilities: [
+      "text",
+      "vision",
+      "stream",
+      "tool_call",
+      "reasoning",
+      "coding",
+      "long_context",
+      "structured_output",
+    ],
+    recommendedTasks: ALL_TEXT_TASKS,
+    quality: 89,
+    speed: 74,
+    costEfficiency: 84,
+  },
 ];
 
 export function getModelDefinition(

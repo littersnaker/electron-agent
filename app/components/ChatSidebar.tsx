@@ -127,7 +127,7 @@ function SessionItem({
     <button
       type="button"
       onClick={() => switchSession(session.id)}
-      className="group flex w-full items-center gap-2 rounded-[11px] px-2.5 py-2 text-left transition-all duration-150"
+      className="group flex w-full items-center gap-2 rounded-[11px] px-2.5 py-2 text-left transition-all duration-150 cursor-pointer"
       style={{
         color: active ? COLORS.text : COLORS.textMuted,
         background: active ? COLORS.materialHover : "transparent",
@@ -255,7 +255,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             type="button"
             onClick={props.onOpenPluginCenter}
             disabled={props.isStreaming}
-            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-40"
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-40 cursor-pointer"
             style={{
               background: COLORS.material,
               borderColor: COLORS.border,
@@ -269,7 +269,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             type="button"
             onClick={props.addProject}
             disabled={props.isStreaming || !props.codePluginEnabled}
-            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-35"
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-35 cursor-pointer"
             style={{
               background: COLORS.material,
               borderColor: COLORS.border,

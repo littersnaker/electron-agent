@@ -92,7 +92,7 @@ export function AppleModalCloseButton({
       type="button"
       aria-label={ariaLabel}
       onClick={onClick}
-      className="group inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-all duration-200 hover:brightness-[0.98] active:scale-[0.96]"
+      className="group inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-all duration-200 hover:brightness-[0.98] active:scale-[0.96] cursor-pointer"
       style={{
         background:
           "linear-gradient(180deg, color-mix(in srgb, var(--glass-active) 86%, white 14%), var(--glass))",
@@ -128,7 +128,7 @@ export function AppleSwitch({
       aria-label={ariaLabel}
       disabled={disabled}
       onClick={onChange}
-      className="relative inline-flex h-[30px] w-[50px] shrink-0 rounded-full p-[2px] transition-all duration-300 active:scale-[0.98] disabled:opacity-45"
+      className="relative inline-flex h-[30px] w-[50px] shrink-0 rounded-full p-[2px] transition-all duration-300 active:scale-[0.98] disabled:opacity-45 cursor-pointer"
       style={{
         background: checked
           ? "linear-gradient(180deg, #39a5ff 0%, #0a84ff 100%)"

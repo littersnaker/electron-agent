@@ -11,6 +11,7 @@ import {
   buildImageAttachmentsPayload,
   buildLlmRequestHeaders,
 } from "../../lib/llm/client-request";
+import { apiFetch } from "../../lib/api-client";
 import type {
   AgentLifecycleEventPayload,
   InteractiveRequest,
@@ -31,7 +32,6 @@ import type {
   SubmitPromptOptions,
   UseChatStreamOptions,
 } from "./chat-stream-helpers";
-
 export function useChatStream({
   activeSession,
   activeProject,
@@ -60,14 +60,11 @@ export function useChatStream({
   const finalTextRef = useRef("");
   /** 一旦收到真实 lifecycle，就不再用 STATUS/TOOL_STATUS 文案反推 Agent。 */
   const hasLifecycleRef = useRef(false);
-
   // Effect 只负责组件卸载清理，不在 Effect 中同步 setState。
   useEffect(() => () => abortRef.current?.abort(), []);
-
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
-
   const resetTransient = useCallback(() => {
     setToolActivities([]);
     setAgentStatus("");
@@ -77,7 +74,6 @@ export function useChatStream({
     setInteractiveAnswer("");
     hasLifecycleRef.current = false;
   }, []);
-
   const submitPrompt = useCallback(
     async (
       promptText: string,
@@ -87,10 +83,8 @@ export function useChatStream({
       if (!activeSession || isStreaming || isParsingFile) return;
       // Commerce 会话必须走独立 /api/commerce/research，禁止意外落入 QA Route。
       if (activeSession.mode === "commerce") return;
-
       const prompt = promptText.trim();
       if (!prompt && fileOverride.length === 0) return;
-
       const visibleUserContent = buildVisibleUserContent(prompt, fileOverride);
       const visibleAttachments = toMessageAttachments(fileOverride);
       const suppressVisibleUserMessage =
@@ -105,7 +99,6 @@ export function useChatStream({
         activeSession,
         activeProject,
       );
-
       if (workspaceError) {
         const visibleErrorUserMessage: Message[] = suppressVisibleUserMessage
           ? []
@@ -131,7 +124,6 @@ export function useChatStream({
           title,
           messages: errorHistory,
         };
-
         setMessages(errorHistory);
         setSessions((current) =>
           current.map((session) =>
@@ -142,7 +134,6 @@ export function useChatStream({
         clearAfterSubmit();
         return;
       }
-
       /**
        * RAG 只在提交瞬间执行一次。
        * 页面输入变化不会反复切片或检索，原始附件也不会被修改。
@@ -179,7 +170,6 @@ export function useChatStream({
         title,
         messages: visibleHistory,
       };
-
       setSessions((current) =>
         current.map((session) =>
           session.id === activeSession.id ? optimisticSession : session,
@@ -188,7 +178,6 @@ export function useChatStream({
       setMessages(visibleHistory);
       void persistSession(activeSession, visibleHistory, title);
       clearAfterSubmit();
-
       setIsStreaming(true);
       setToolActivities([]);
       agents.beginRun();
@@ -201,14 +190,12 @@ export function useChatStream({
       setAgentLifecycleEvents([]);
       hasLifecycleRef.current = false;
       setInteractiveAnswer("");
-
       let nextInteractiveRequest: InteractiveRequest | null = null;
       finalTextRef.current = "";
       const abortController = new AbortController();
       abortRef.current = abortController;
-
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           activeSession.mode === "code" ? "/api/chat" : "/api/qa",
           {
             method: "POST",
@@ -223,30 +210,23 @@ export function useChatStream({
             signal: abortController.signal,
           },
         );
-
         if (!response.ok || !response.body) {
           throw new Error(await readResponseError(response));
         }
-
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || "";
-
           for (const line of lines) {
             if (!line.startsWith("data:")) continue;
-
             try {
               const packet = JSON.parse(line.slice(5).trim()) as StreamPacket;
               const streamContent = packet.content;
-
               if (packet.type === "TEXT" && typeof streamContent === "string") {
                 finalTextRef.current += streamContent;
                 setAgentStatus("");
@@ -257,7 +237,6 @@ export function useChatStream({
                 ]);
                 continue;
               }
-
               if (
                 packet.type === "TOOL_STATUS" &&
                 typeof streamContent === "string"
@@ -294,7 +273,6 @@ export function useChatStream({
                 });
                 continue;
               }
-
               if (
                 packet.type === "STATUS" &&
                 typeof streamContent === "string" &&
@@ -309,7 +287,6 @@ export function useChatStream({
                 }
                 continue;
               }
-
               if (
                 packet.type === "AGENT_LIFECYCLE" &&
                 isAgentLifecyclePayload(packet.payload)

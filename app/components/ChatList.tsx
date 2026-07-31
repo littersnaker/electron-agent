@@ -2,12 +2,13 @@
 "use client";
 
 /* eslint-disable react-hooks/exhaustive-deps */
-import dynamic from "next/dynamic";
 import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 import type { Message } from "../constants/page-constants";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
+import AmazonListingCard from "./commerce/AmazonListingCard";
+import CommerceReportCard from "./commerce/CommerceReportCard";
 
 interface ChatListProps {
   messages: Message[];
@@ -24,17 +25,6 @@ const COLORS = {
 };
 
 const MemoizedAssistantMessageRow = memo(AssistantMessageRow);
-
-// Commerce 报告卡片只在该插件真正产生报告时才下载对应客户端 chunk。
-const CommerceReportCard = dynamic(
-  () => import("./commerce/CommerceReportCard"),
-  { ssr: false },
-);
-
-const AmazonListingCard = dynamic(
-  () => import("./commerce/AmazonListingCard"),
-  { ssr: false },
-);
 
 function AssistantBadge() {
   return (
@@ -63,7 +53,7 @@ function AssistantBadge() {
   );
 }
 
-export default function ChatList({
+function ChatList({
   messages,
   isStreaming,
   toolActivities = [],
@@ -358,3 +348,9 @@ export default function ChatList({
     </div>
   );
 }
+
+/**
+ * 缓存聊天列表，主题切换时不重新执行大型消息树和图片节点的 React 渲染。
+ * 颜色仍通过 CSS 变量即时更新，因此不会影响深浅色显示。
+ */
+export default memo(ChatList);

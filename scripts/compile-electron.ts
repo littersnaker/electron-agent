@@ -1,40 +1,38 @@
 /**
- * Compile Electron TypeScript files to JavaScript.
- * Outputs to .electron/ directory.
+ * 模块职责：使用 esbuild 把 Electron TypeScript 主进程代码编译为 CommonJS。
  */
 import { build } from "esbuild";
-import path from "path";
-import fs from "fs";
+import fs from "node:fs";
+import path from "node:path";
 
-const rootDir = path.resolve(__dirname, "..");
-const outDir = path.join(rootDir, ".electron");
+const rootDirectory = path.resolve(__dirname, "..");
+const outputDirectory = path.join(rootDirectory, ".electron");
 
-async function compile() {
-  // Ensure output directory exists
-  if (!fs.existsSync(outDir)) {
-    fs.mkdirSync(outDir, { recursive: true });
-  }
-
-  console.log("Compiling Electron TypeScript files...");
+/**
+ * 创建输出目录并编译 main/preload 两个 Electron 入口。
+ */
+async function compileElectron(): Promise<void> {
+  fs.mkdirSync(outputDirectory, { recursive: true });
+  console.log("正在编译 Electron TypeScript...");
 
   await build({
     entryPoints: [
-      path.join(rootDir, "electron", "main.ts"),
-      path.join(rootDir, "electron", "preload.ts"),
+      path.join(rootDirectory, "electron", "main.ts"),
+      path.join(rootDirectory, "electron", "preload.ts"),
     ],
     bundle: true,
-    outdir: outDir,
+    outdir: outputDirectory,
     platform: "node",
     target: "node20",
     format: "cjs",
-    external: ["electron", "electron-squirrel-startup", "electron-is-dev", "electron-updater"],
+    external: ["electron"],
     logLevel: "info",
   });
 
-  console.log("Electron TypeScript compiled successfully!");
+  console.log("Electron TypeScript 编译完成。 ");
 }
 
-compile().catch((err) => {
-  console.error("Failed to compile Electron TypeScript:", err);
+compileElectron().catch((error: unknown) => {
+  console.error("Electron 编译失败：", error);
   process.exit(1);
 });

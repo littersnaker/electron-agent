@@ -7,6 +7,7 @@ import type {
   ChatSession,
   Message,
 } from "../constants/page-constants";
+import { apiFetch } from "../lib/api-client";
 import type {
   CommerceMarketplaceCode,
   CommerceProgressEvent,
@@ -199,7 +200,7 @@ export function useCommerceResearch({
           workflowMode === "listing"
             ? "/api/commerce/listing"
             : "/api/commerce/research";
-        const response = await fetch(endpoint, {
+        const response = await apiFetch(endpoint, {
           method: "POST",
           headers,
           body: JSON.stringify({
