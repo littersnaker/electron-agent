@@ -86,10 +86,14 @@ export function getThemeVariables(theme: ThemeMode): ThemeVariables {
 export function resolveInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
 
+  const electronTheme = window.electronAPI?.initialTheme;
+  if (electronTheme === "dark" || electronTheme === "light") {
+    return electronTheme;
+  }
+
   const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (saved === "dark" || saved === "light") return saved;
 
-  // 新安装和从旧版本升级时统一从浅色启动，用户主动切换后再持久化选择。
   return "light";
 }
 
@@ -100,12 +104,9 @@ export function persistTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
 
-  const electronWindow = window as typeof window & {
-    electronAPI?: {
-      setTheme?: (nextTheme: ThemeMode) => void;
-    };
-  };
-
-  // 同步 Electron 原生标题栏覆盖层。普通浏览器环境中这段会自动跳过。
-  electronWindow.electronAPI?.setTheme?.(theme);
+  // 同步 Electron 原生主题、启动缓存和 SQLite。普通浏览器会自动跳过。
+  const electronRequest = window.electronAPI?.setTheme(theme);
+  void electronRequest?.catch((error: unknown) => {
+    console.warn("Electron 主题持久化失败", error);
+  });
 }

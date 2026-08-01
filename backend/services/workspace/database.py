@@ -83,6 +83,12 @@ CREATE TABLE IF NOT EXISTS trace_events (
     created_at TEXT NOT NULL,
     FOREIGN KEY(trace_id) REFERENCES traces(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS app_preferences (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 

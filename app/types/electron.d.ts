@@ -21,11 +21,12 @@ declare global {
     electronAPI?: {
       platform: string;
       backendBaseUrl: string;
+      initialTheme: ElectronAppTheme;
       selectFolder: () => Promise<string | null>;
       exportCommerceReportPdf: (
         payload: CommercePdfPayload,
       ) => Promise<{ canceled: boolean; filePath?: string }>;
-      setTheme: (theme: ElectronAppTheme) => void;
+      setTheme: (theme: ElectronAppTheme) => Promise<ElectronAppTheme>;
       versions: {
         node: string;
         chrome: string;

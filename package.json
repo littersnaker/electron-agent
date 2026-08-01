@@ -6,14 +6,14 @@
   "author": "Multi-agent Team",
   "description": "Electron + React + FastAPI desktop AI agent workspace",
   "scripts": {
-    "dev": "concurrently -k -n REACT,ELECTRON -c auto \"pnpm frontend:dev\" \"wait-on tcp:127.0.0.1:5173 && pnpm electron:dev\"",
+    "dev": "concurrently -k -n REACT,ELECTRON -c auto \"pnpm frontend:dev\" \"wait-on tcp:127.0.0.1:5173 && pnpm electron:launch\"",
     "frontend:dev": "vite",
     "backend:dev": "python -m backend.main",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "electron:typecheck": "tsc --project electron/tsconfig.json --noEmit",
     "electron:compile": "pnpm electron:typecheck && tsx scripts/compile-electron.ts",
-    "electron:dev": "pnpm electron:compile && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "electron:dev": "pnpm dev",
     "backend:check": "python -m compileall -q backend scripts/build-python-backend.py",
     "backend:test": "python -m pytest backend/tests -q",
     "backend:build": "python scripts/build-python-backend.py",
@@ -26,7 +26,8 @@
     "electron:make:win": "pnpm release:clean && pnpm electron:prepare && pnpm electron:prepare-icons && pnpm exec electron-builder --win --x64 --config electron-builder.yml",
     "electron:make:mac": "pnpm release:clean && pnpm electron:prepare && pnpm electron:prepare-icons && pnpm exec electron-builder --mac --config electron-builder.yml",
     "electron:make:linux": "pnpm release:clean && pnpm electron:prepare && pnpm electron:prepare-icons && pnpm exec electron-builder --linux --x64 --config electron-builder.yml",
-    "source:check": "python scripts/check-source-rules.py"
+    "source:check": "python scripts/check-source-rules.py",
+    "electron:launch": "pnpm electron:compile && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron ."
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",

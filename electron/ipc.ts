@@ -1,5 +1,5 @@
 /**
- * 模块职责：注册窗口控制、目录选择和电商报告 PDF 导出 IPC。
+ * 模块职责：注册窗口控制、主题持久化、目录选择和电商报告 PDF 导出 IPC。
  */
 import {
   BrowserWindow,
@@ -14,22 +14,32 @@ import {
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  isAppTheme,
+  writeCachedTheme,
+  writeThemeToBackend,
+} from "./app-preferences";
 
 interface CommercePdfPayload {
   html: string;
   suggestedFileName: string;
 }
 
-/**
- * 根据 IPC 事件找到发送消息的 BrowserWindow。
- */
-function senderWindow(event: IpcMainEvent | IpcMainInvokeEvent): BrowserWindow | null {
+let activeBackendBaseUrl = "";
+
+/** 保存当前 FastAPI 地址，供主题 IPC 同步写入 SQLite。 */
+export function setApplicationBackendBaseUrl(baseUrl: string): void {
+  activeBackendBaseUrl = baseUrl.trim().replace(/\/+$/u, "");
+}
+
+/** 根据 IPC 事件找到发送消息的 BrowserWindow。 */
+function senderWindow(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+): BrowserWindow | null {
   return BrowserWindow.fromWebContents(event.sender);
 }
 
-/**
- * 判断前端传来的 PDF 参数是否完整且大小合理。
- */
+/** 判断前端传来的 PDF 参数是否完整且大小合理。 */
 function isCommercePdfPayload(value: unknown): value is CommercePdfPayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Partial<CommercePdfPayload>;
@@ -42,9 +52,7 @@ function isCommercePdfPayload(value: unknown): value is CommercePdfPayload {
   );
 }
 
-/**
- * 使用隐藏窗口把打印 HTML 转换成 PDF 文件。
- */
+/** 使用隐藏窗口把打印 HTML 转换成 PDF 文件。 */
 async function exportCommercePdf(
   parent: BrowserWindow | null,
   payload: CommercePdfPayload,
@@ -65,7 +73,10 @@ async function exportCommercePdf(
     os.tmpdir(),
     `multi-agent-commerce-${Date.now()}.html`,
   );
-  const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  const printWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: true },
+  });
   try {
     await fs.writeFile(temporaryFile, payload.html, "utf8");
     await printWindow.loadFile(temporaryFile);
@@ -82,17 +93,34 @@ async function exportCommercePdf(
   }
 }
 
-/**
- * 注册网页层允许调用的全部 IPC 通道。
- */
+/** 同步 Electron 原生主题、启动缓存和 SQLite 偏好表。 */
+async function persistApplicationTheme(theme: unknown): Promise<string> {
+  if (!isAppTheme(theme)) throw new Error("不支持的主题值");
+
+  nativeTheme.themeSource = theme;
+  writeCachedTheme(theme);
+  if (activeBackendBaseUrl) {
+    try {
+      await writeThemeToBackend(activeBackendBaseUrl, theme);
+    } catch (error) {
+      console.warn("[Electron] 主题已缓存，但写入 SQLite 失败", error);
+    }
+  }
+  return theme;
+}
+
+/** 注册网页层允许调用的全部 IPC 通道。 */
 export function registerApplicationIpc(): void {
   ipcMain.on("window:minimize", (event) => senderWindow(event)?.minimize());
   ipcMain.on("window:close", (event) => senderWindow(event)?.close());
-  ipcMain.on("window:setTheme", (_event, theme: unknown) => {
-    if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
-  });
+  ipcMain.handle("window:setTheme", (_event, theme: unknown) =>
+    persistApplicationTheme(theme),
+  );
 
-  ipcMain.handle("window:isMaximized", (event) => senderWindow(event)?.isMaximized() ?? false);
+  ipcMain.handle(
+    "window:isMaximized",
+    (event) => senderWindow(event)?.isMaximized() ?? false,
+  );
   ipcMain.handle("window:toggleMaximize", (event) => {
     const window = senderWindow(event);
     if (!window) return false;

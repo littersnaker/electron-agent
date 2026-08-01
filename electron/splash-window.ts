@@ -1,18 +1,22 @@
 /**
- * 模块职责：在 FastAPI 启动期间显示独立加载窗口，并更新启动进度。
+ * 模块职责：在 FastAPI 启动期间显示独立加载窗口，并更新主题与启动进度。
  */
-import { BrowserWindow, nativeTheme } from "electron";
+import { BrowserWindow } from "electron";
+import type { AppTheme } from "./app-preferences";
 import type { BackendStartupProgress } from "./backend-process";
 
-/**
- * 根据系统当前深浅色偏好生成加载页 HTML。
- *
- * 加载页不依赖 React、Vite 或 FastAPI，因此 Electron 启动后可以立即显示，
- * 避免用户在 Python 服务初始化期间只看到空白桌面。
- */
-function buildStartupHtml(): string {
-  const dark = nativeTheme.shouldUseDarkColors;
-  const colors = dark
+interface StartupColors {
+  panel: string;
+  border: string;
+  text: string;
+  muted: string;
+  track: string;
+  glow: string;
+}
+
+/** 返回加载页的主题颜色。 */
+function resolveStartupColors(theme: AppTheme): StartupColors {
+  return theme === "dark"
     ? {
         panel: "rgba(24,24,28,.96)",
         border: "rgba(255,255,255,.11)",
@@ -29,32 +33,42 @@ function buildStartupHtml(): string {
         track: "rgba(15,23,42,.08)",
         glow: "rgba(10,132,255,.2)",
       };
+}
+
+/** 根据上一次应用主题生成不依赖 React、Vite 或 FastAPI 的加载页。 */
+function buildStartupHtml(theme: AppTheme): string {
+  const colors = resolveStartupColors(theme);
+  const themeMap = JSON.stringify({
+    dark: resolveStartupColors("dark"),
+    light: resolveStartupColors("light"),
+  });
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" style="color-scheme:${theme}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
+  :root{--panel:${colors.panel};--border:${colors.border};--text:${colors.text};--muted:${colors.muted};--track:${colors.track};--glow:${colors.glow}}
   *{box-sizing:border-box}
   html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;user-select:none}
   body{display:grid;place-items:center;padding:10px}
-  .card{position:relative;width:100%;height:100%;overflow:hidden;border:1px solid ${colors.border};border-radius:24px;background:${colors.panel};box-shadow:0 28px 80px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.1);-webkit-app-region:drag}
-  .glow{position:absolute;inset:-40% -20% auto 28%;height:90%;background:radial-gradient(circle,${colors.glow},transparent 67%);filter:blur(6px);pointer-events:none}
+  .card{position:relative;width:100%;height:100%;overflow:hidden;border:1px solid var(--border);border-radius:24px;background:var(--panel);box-shadow:0 28px 80px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.1);-webkit-app-region:drag;transition:background .18s ease,border-color .18s ease}
+  .glow{position:absolute;inset:-40% -20% auto 28%;height:90%;background:radial-gradient(circle,var(--glow),transparent 67%);filter:blur(6px);pointer-events:none}
   .content{position:relative;display:flex;height:100%;flex-direction:column;align-items:center;justify-content:center;padding:34px 42px 30px;text-align:center}
-  .logo{position:relative;display:grid;width:68px;height:68px;place-items:center;margin-bottom:18px;border:1px solid ${colors.border};border-radius:21px;background:linear-gradient(145deg,rgba(10,132,255,.18),rgba(191,90,242,.12));box-shadow:0 18px 42px ${colors.glow},inset 0 1px 0 rgba(255,255,255,.18)}
+  .logo{position:relative;display:grid;width:68px;height:68px;place-items:center;margin-bottom:18px;border:1px solid var(--border);border-radius:21px;background:linear-gradient(145deg,rgba(10,132,255,.18),rgba(191,90,242,.12));box-shadow:0 18px 42px var(--glow),inset 0 1px 0 rgba(255,255,255,.18)}
   .orbit{position:absolute;inset:13px;border:2px solid rgba(10,132,255,.24);border-top-color:#0a84ff;border-radius:50%;animation:spin 1.4s linear infinite}
   .orbit.secondary{inset:20px;border-color:rgba(191,90,242,.2);border-right-color:#bf5af2;animation-direction:reverse;animation-duration:1.9s}
   .spark{width:13px;height:13px;transform:rotate(45deg);border-radius:3px;background:linear-gradient(135deg,#61a8ff,#c77dff);box-shadow:0 0 18px rgba(97,168,255,.65)}
-  h1{min-height:26px;margin:0;color:${colors.text};font-size:18px;font-weight:650;letter-spacing:-.02em}
-  p{min-height:36px;max-width:340px;margin:8px 0 22px;color:${colors.muted};font-size:12px;line-height:1.55}
-  .progress{width:100%;height:6px;overflow:hidden;border-radius:999px;background:${colors.track};box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
+  h1{min-height:26px;margin:0;color:var(--text);font-size:18px;font-weight:650;letter-spacing:-.02em}
+  p{min-height:36px;max-width:340px;margin:8px 0 22px;color:var(--muted);font-size:12px;line-height:1.55}
+  .progress{width:100%;height:6px;overflow:hidden;border-radius:999px;background:var(--track);box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
   .bar{width:12%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0a84ff,#5aa8ff,#bf5af2);box-shadow:0 0 16px rgba(10,132,255,.36);transition:width 380ms cubic-bezier(.2,.8,.2,1)}
-  .footer{display:flex;width:100%;justify-content:space-between;margin-top:12px;color:${colors.muted};font-size:10px;letter-spacing:.02em}
+  .footer{display:flex;width:100%;justify-content:space-between;margin-top:12px;color:var(--muted);font-size:10px;letter-spacing:.02em}
   .dots span{display:inline-block;animation:dots 1.2s ease-in-out infinite}.dots span:nth-child(2){animation-delay:.16s}.dots span:nth-child(3){animation-delay:.32s}
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes dots{0%,70%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-2px)}}
-  @media (prefers-reduced-motion:reduce){.orbit,.dots span{animation:none}.bar{transition:none}}
+  @media (prefers-reduced-motion:reduce){.orbit,.dots span{animation:none}.bar,.card{transition:none}}
 </style>
 </head>
 <body>
@@ -69,28 +83,34 @@ function buildStartupHtml(): string {
     </div>
   </section>
 <script>
-  window.__setStartupState = function(state){
-    document.getElementById('startup-title').textContent = state.title || '正在启动 Multi-agent';
-    document.getElementById('startup-detail').textContent = state.detail || '正在初始化本地服务…';
-    var value = Math.max(0.08, Math.min(1, Number(state.progress) || 0.08));
-    document.getElementById('startup-bar').style.width = (value * 100).toFixed(1) + '%';
+  var startupThemes=${themeMap};
+  window.__setStartupTheme=function(theme){
+    var colors=startupThemes[theme]||startupThemes.light;
+    document.documentElement.style.colorScheme=theme==='dark'?'dark':'light';
+    Object.keys(colors).forEach(function(key){document.documentElement.style.setProperty('--'+key,colors[key]);});
+  };
+  window.__setStartupState=function(state){
+    document.getElementById('startup-title').textContent=state.title||'正在启动 Multi-agent';
+    document.getElementById('startup-detail').textContent=state.detail||'正在初始化本地服务…';
+    var value=Math.max(.08,Math.min(1,Number(state.progress)||.08));
+    document.getElementById('startup-bar').style.width=(value*100).toFixed(1)+'%';
   };
 </script>
 </body>
 </html>`;
 }
 
-/**
- * 创建并立即显示启动加载窗口。
- */
-export async function createStartupWindow(): Promise<BrowserWindow> {
+/** 创建并立即显示启动加载窗口。 */
+export async function createStartupWindow(
+  theme: AppTheme,
+): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 460,
     height: 310,
     frame: false,
     transparent: true,
     resizable: false,
-    accentColor:false,
+    accentColor: false,
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
@@ -107,15 +127,13 @@ export async function createStartupWindow(): Promise<BrowserWindow> {
   });
 
   await window.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(buildStartupHtml())}`,
+    `data:text/html;charset=utf-8,${encodeURIComponent(buildStartupHtml(theme))}`,
   );
   if (!window.isDestroyed()) window.show();
   return window;
 }
 
-/**
- * 把 FastAPI 启动阶段同步到加载页文字和进度条。
- */
+/** 把 FastAPI 启动阶段同步到加载页文字和进度条。 */
 export function updateStartupWindow(
   window: BrowserWindow | null,
   progress: BackendStartupProgress,
@@ -128,9 +146,19 @@ export function updateStartupWindow(
     .catch((error) => console.warn("[Electron] 加载页进度更新失败", error));
 }
 
-/**
- * 安全关闭启动加载窗口。
- */
+/** SQLite 主题迁移完成后立即更新仍在显示的加载页。 */
+export function updateStartupWindowTheme(
+  window: BrowserWindow | null,
+  theme: AppTheme,
+): void {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+
+  void window.webContents
+    .executeJavaScript(`window.__setStartupTheme?.(${JSON.stringify(theme)})`, true)
+    .catch((error) => console.warn("[Electron] 加载页主题更新失败", error));
+}
+
+/** 安全关闭启动加载窗口。 */
 export function closeStartupWindow(window: BrowserWindow | null): void {
   if (window && !window.isDestroyed()) window.destroy();
 }

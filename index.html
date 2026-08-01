@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <script>
+      (() => {
+        const key = "AGENT_WORKSPACE_THEME_LIGHT_DEFAULT_V2";
+        const electronTheme = window.electronAPI?.initialTheme;
+        if (electronTheme === "dark" || electronTheme === "light") {
+          window.localStorage.setItem(key, electronTheme);
+        }
+        const storedTheme = window.localStorage.getItem(key);
+        const theme =
+          electronTheme === "dark" || electronTheme === "light"
+            ? electronTheme
+            : storedTheme === "dark"
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <title>Multi-agent Desktop</title>
   </head>
   <body>

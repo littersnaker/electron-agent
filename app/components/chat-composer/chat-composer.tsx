@@ -3,14 +3,15 @@
  * 模块职责：聊天输入器组件及附件交互。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { useCallback, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent } from "react";
+import { useCallback, useRef } from "react";
+import type { ChangeEvent, ClipboardEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   collectClipboardAttachments,
   collectDroppedAttachments,
   createFilePickerCandidates,
 } from "../../utilities/attachment-input";
+import { useComposerDrop } from "../../hooks/use-composer-drop";
 import ModelSelector from "../ModelSelector";
 import { CommerceControls } from "./commerce-controls";
 import { AttachmentList } from "./attachment-list";
@@ -56,8 +57,7 @@ export function ChatComposer({
   onSubmit,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
-  const [isDragActive, setIsDragActive] = useState(false);
-  const dragDepthRef = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentsEnabled = mode !== "commerce";
   const isMediaComposer = mode === "qa" && composerMode !== "chat";
   const submitDisabled =
@@ -115,35 +115,23 @@ export function ChatComposer({
     await onAddAttachments(candidates, resolveIngestionOptions());
   };
 
-  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    if (
-      !attachmentsEnabled ||
-      disabled ||
-      !Array.from(event.dataTransfer.types).includes("Files")
-    ) {
-      return;
-    }
-    event.preventDefault();
-    dragDepthRef.current += 1;
-    setIsDragActive(true);
-  };
+  const handleDroppedFiles = useCallback(
+    async (dataTransfer: DataTransfer): Promise<void> => {
+      const candidates = await collectDroppedAttachments(dataTransfer);
+      resolveModeFromFile(candidates[0]?.file);
+      await onAddAttachments(candidates, resolveIngestionOptions());
+    },
+    [onAddAttachments, resolveIngestionOptions, resolveModeFromFile],
+  );
 
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setIsDragActive(false);
-  };
-
-  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    dragDepthRef.current = 0;
-    setIsDragActive(false);
-    if (!attachmentsEnabled || disabled) return;
-
-    const candidates = await collectDroppedAttachments(event.dataTransfer);
-    resolveModeFromFile(candidates[0]?.file);
-    await onAddAttachments(candidates, resolveIngestionOptions());
-  };
+  const { activeDropKind, isDragActive, dropHandlers } = useComposerDrop({
+    input,
+    disabled,
+    allowFiles: attachmentsEnabled,
+    textareaRef,
+    onInputChange,
+    onFileDrop: handleDroppedFiles,
+  });
 
   return (
     <>
@@ -337,22 +325,20 @@ export function ChatComposer({
           backdropFilter: "blur(30px) saturate(145%)",
           WebkitBackdropFilter: "blur(30px) saturate(145%)",
         }}
-        onDragEnter={handleDragEnter}
-        onDragOver={(event) => {
-          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect =
-            attachmentsEnabled && !disabled ? "copy" : "none";
-        }}
-        onDragLeave={handleDragLeave}
-        onDrop={(event) => void handleDrop(event)}
+        onDragEnter={dropHandlers.onDragEnter}
+        onDragOver={dropHandlers.onDragOver}
+        onDragLeave={dropHandlers.onDragLeave}
+        onDrop={(event) => void dropHandlers.onDrop(event)}
       >
         {isDragActive && (
           <div className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-[18px] border border-dashed border-[var(--accent-blue)] bg-[color-mix(in_srgb,var(--composer-bg)_82%,transparent)] text-[11px] font-semibold text-[var(--accent-blue)] backdrop-blur-sm">
-            松开以添加图片、文件或文件夹
+            {activeDropKind === "text"
+              ? "松开以插入文字"
+              : "松开以添加图片、文件或文件夹"}
           </div>
         )}
         <TextareaAutosize
+          ref={textareaRef}
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onPaste={(event) => void handlePaste(event)}
@@ -410,7 +396,7 @@ export function ChatComposer({
             )}
             {mode !== "commerce" && (
               <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
-                粘贴图片 / 拖入文件夹 · Enter 发送
+                粘贴图片 / 拖入文件夹 / 选中文字后拖入 · Enter 发送
               </span>
             )}
           </div>

@@ -76,6 +76,17 @@ def test_fastapi_workspace_and_commerce(tmp_path: Path, monkeypatch) -> None:
         assert health.status_code == 200
         assert health.json()["ok"] is True
 
+        initial_theme = client.get("/api/preferences/theme")
+        assert initial_theme.status_code == 200
+        assert initial_theme.json()["theme"] is None
+
+        saved_theme = client.put(
+            "/api/preferences/theme", json={"theme": "dark"}
+        )
+        assert saved_theme.status_code == 200
+        assert saved_theme.json()["theme"] == "dark"
+        assert client.get("/api/preferences/theme").json()["theme"] == "dark"
+
         created = client.post(
             "/api/workspace",
             json={"action": "createProject", "rootPath": str(project_root)},
