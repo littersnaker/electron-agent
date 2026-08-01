@@ -18,7 +18,7 @@
     "backend:check": "python -m compileall -q backend scripts/build-python-backend.py scripts/embed_builtin_credentials.py scripts/sync_model_catalog.py scripts/show_model_routes.py scripts/clean_dev_runtime.py",
     "backend:test": "python -m pytest backend/tests -q",
     "backend:build": "python scripts/build-python-backend.py",
-    "verify": "pnpm models:sync && pnpm source:check && pnpm typecheck && pnpm electron:typecheck && pnpm backend:check && pnpm backend:test && pnpm build",
+    "verify": "pnpm models:sync && pnpm source:check && pnpm planning:test && pnpm typecheck && pnpm electron:typecheck && pnpm backend:check && pnpm backend:test && pnpm build",
     "electron:prepare": "tsx scripts/build-electron.ts",
     "electron:prepare-icons": "tsx scripts/prepare-electron-icons.ts",
     "release:clean": "tsx scripts/clean-release.ts",
@@ -33,7 +33,8 @@
     "models:sync": "python scripts/sync_model_catalog.py",
     "models:watch": "python scripts/sync_model_catalog.py --watch",
     "electron:watch": "cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 BACKEND_DEV_URL=http://127.0.0.1:3100 ELECTRON_DEV_STRICT=1 tsx scripts/dev-electron.ts",
-    "models:list": "python scripts/show_model_routes.py"
+    "models:list": "python scripts/show_model_routes.py",
+    "planning:test": "tsx scripts/task-planning-progress.test.ts"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",

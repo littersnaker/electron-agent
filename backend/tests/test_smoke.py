@@ -87,10 +87,17 @@ def test_fastapi_workspace_and_commerce(tmp_path: Path, monkeypatch) -> None:
     (project_root / "hello.py").write_text("def hello():\n    return 'world'\n", "utf-8")
 
     with TestClient(app) as client:
+        live = client.get("/api/health/live")
+        assert live.status_code == 200
+        assert live.json() == {
+            "ok": True,
+            "service": "multi-agent-fastapi",
+        }
+
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["ok"] is True
-        assert health.json()["version"] == 2
+        assert health.json()["version"] == 3
         assert health.json()["runtime"] == "source"
         assert health.json()["sourceRoot"] == str(Path(__file__).resolve().parents[2])
         assert "no-store" in health.headers["cache-control"]

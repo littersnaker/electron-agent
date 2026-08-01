@@ -50,12 +50,18 @@ function assertBuildOutputs(): void {
     path.join(rootDirectory, ".electron", "main.js"),
     path.join(rootDirectory, ".electron", "preload.js"),
   ];
-  const backendFiles = fs.existsSync(path.join(rootDirectory, "python-dist"))
-    ? fs.readdirSync(path.join(rootDirectory, "python-dist"))
-    : [];
-  if (!backendFiles.some((name) => name.startsWith("multi-agent-backend"))) {
-    required.push(path.join(rootDirectory, "python-dist", "multi-agent-backend"));
-  }
+  const backendDirectory = path.join(
+    rootDirectory,
+    "python-dist",
+    "multi-agent-backend",
+  );
+  const backendExecutable = path.join(
+    backendDirectory,
+    process.platform === "win32"
+      ? "multi-agent-backend.exe"
+      : "multi-agent-backend",
+  );
+  required.push(backendExecutable, path.join(backendDirectory, "_internal"));
   const missing = required.filter((file) => !fs.existsSync(file));
   if (missing.length) throw new Error(`构建产物缺失：\n${missing.join("\n")}`);
 }

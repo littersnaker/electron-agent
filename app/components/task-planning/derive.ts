@@ -228,7 +228,7 @@ function resolveProgress(
   definition: PlanningStageDefinition,
   agents: AgentInstance[],
 ): number {
-  if (status === "completed" || status === "error") return 100;
+  if (["completed", "skipped", "error"].includes(status)) return 100;
   if (status === "idle" || status === "queued") return 0;
 
   const relatedProgress = agents
@@ -265,6 +265,65 @@ function resolveDetail(
 }
 
 /**
+ * 判断当前一轮任务是否已经真正结束。
+ *
+ * 这里不能只看 isStreaming：交互确认弹窗出现时 SSE 已结束，但 Agent 仍处于
+ * running 状态，流程并没有完成。只有存在本轮执行痕迹、没有运行中节点且没有
+ * 错误时，才把未触发阶段收束为 skipped。
+ */
+function isSuccessfulTerminalRun(
+  agents: AgentInstance[],
+  activities: ToolActivity[],
+  lifecycleEvents: AgentLifecycleEventPayload[],
+  isStreaming: boolean,
+): boolean {
+  if (isStreaming) return false;
+
+  const hasRunEvidence =
+    agents.some((agent) => ["completed", "error"].includes(agent.status)) ||
+    activities.length > 0 ||
+    lifecycleEvents.length > 0;
+  const hasRunningWork =
+    agents.some((agent) => ["running", "thinking"].includes(agent.status)) ||
+    activities.some((activity) => activity.status === "running");
+  const hasFailure =
+    agents.some((agent) => agent.status === "error") ||
+    activities.some((activity) => activity.status === "error") ||
+    lifecycleEvents.some((event) => event.status === "FAILED");
+
+  return hasRunEvidence && !hasRunningWork && !hasFailure;
+}
+
+/**
+ * 成功结束后，把本轮没有触发的可选阶段标记为“已跳过”。
+ *
+ * 普通问答通常只需要 Orchestrator，不会运行代码修改、工程验证等阶段。旧逻辑
+ * 仍把这些阶段保留为 queued/idle，最终只显示 3/8（38%）。使用 skipped 后，
+ * 既能保持“这些步骤没有执行”的事实，也能让整轮任务正确收束到 100%。
+ */
+function finalizeSuccessfulStages(
+  stages: PlanningStageView[],
+  agents: AgentInstance[],
+  activities: ToolActivity[],
+  lifecycleEvents: AgentLifecycleEventPayload[],
+  isStreaming: boolean,
+): PlanningStageView[] {
+  if (!isSuccessfulTerminalRun(agents, activities, lifecycleEvents, isStreaming)) {
+    return stages;
+  }
+
+  return stages.map((stage) => {
+    if (stage.status === "completed") return stage;
+    return {
+      ...stage,
+      status: "skipped" as const,
+      progress: 100,
+      detail: `本轮未触发“${stage.title}”，任务结束时已自动跳过`,
+    };
+  });
+}
+
+/**
  * 根据指定阶段定义派生任务规划视图。
  *
  * Code Agent 优先消费后端 AGENT_LIFECYCLE；只有旧后端或媒体任务没有 lifecycle
@@ -284,14 +343,21 @@ export function buildPlanningStages(
     lifecycleEvents,
     isStreaming,
   );
-  if (lifecycleStages) return lifecycleStages;
+  if (lifecycleStages) {
+    return finalizeSuccessfulStages(
+      lifecycleStages,
+      agents,
+      activities,
+      lifecycleEvents,
+      isStreaming,
+    );
+  }
 
   const directStatuses = definitions.map((definition) =>
     resolveDirectStatus(definition, agents, activities),
   );
   const statuses = normalizeFallbackStatuses(directStatuses, isStreaming);
-
-  return definitions.map((definition, index) => ({
+  const fallbackStages = definitions.map((definition, index) => ({
     ...definition,
     status: statuses[index],
     progress: resolveProgress(statuses[index], definition, agents),
@@ -307,6 +373,14 @@ export function buildPlanningStages(
     ).length,
     iteration: 0,
   }));
+
+  return finalizeSuccessfulStages(
+    fallbackStages,
+    agents,
+    activities,
+    lifecycleEvents,
+    isStreaming,
+  );
 }
 
 export function buildPlanningSummary(
@@ -314,7 +388,10 @@ export function buildPlanningSummary(
 ): PlanningSummary {
   return {
     active: stages.find((stage) => stage.status === "active"),
-    completed: stages.filter((stage) => stage.status === "completed").length,
+    completed: stages.filter((stage) =>
+      ["completed", "skipped"].includes(stage.status),
+    ).length,
+    skipped: stages.filter((stage) => stage.status === "skipped").length,
     failed: stages.some((stage) => stage.status === "error"),
     overallProgress: Math.round(
       stages.reduce((total, stage) => total + stage.progress, 0) /

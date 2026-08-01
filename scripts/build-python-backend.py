@@ -1,9 +1,14 @@
-"""使用 PyInstaller 构建可由 Electron 启动的单文件 FastAPI 后端。"""
+"""使用 PyInstaller 构建可由 Electron 启动的 onedir FastAPI 后端。
+
+onedir 不需要在每次启动时先解压全部 Python 依赖，Windows 安装版的冷启动通常
+明显快于 onefile，也更不容易被实时安全扫描拖到启动超时。
+"""
 
 from __future__ import annotations
 
 import importlib.util
 import shutil
+import sys
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -32,7 +37,9 @@ def _pyinstaller_arguments() -> list[str]:
     arguments = [
         str(ROOT / "backend" / "main.py"),
         "--name=multi-agent-backend",
-        "--onefile",
+        "--onedir",
+        "--contents-directory=_internal",
+        "--noupx",
         "--clean",
         "--noconfirm",
         f"--paths={ROOT}",
@@ -67,10 +74,14 @@ def main() -> None:
 
     clean_previous_build()
     build_executable()
-    candidates = list(OUTPUT_DIRECTORY.glob("multi-agent-backend*"))
-    if not candidates:
-        raise SystemExit("PyInstaller 没有生成后端可执行文件")
-    print(f"Python 后端构建完成：{candidates[0]}")
+    bundle_directory = OUTPUT_DIRECTORY / "multi-agent-backend"
+    executable_name = (
+        "multi-agent-backend.exe" if sys.platform == "win32" else "multi-agent-backend"
+    )
+    executable = bundle_directory / executable_name
+    if not executable.is_file():
+        raise SystemExit(f"PyInstaller 没有生成 onedir 后端：{executable}")
+    print(f"Python onedir 后端构建完成：{executable}")
 
 
 if __name__ == "__main__":

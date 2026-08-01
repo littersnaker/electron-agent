@@ -19,10 +19,12 @@ extraResources:
     to: frontend
     filter:
       - "**/*"
-  - from: python-dist
+  # 复制 PyInstaller onedir 的全部内容。安装后可执行文件位于
+  # resources/backend/multi-agent-backend(.exe)，依赖位于同级 _internal。
+  - from: python-dist/multi-agent-backend
     to: backend
     filter:
-      - "multi-agent-backend*"
+      - "**/*"
   - from: public/icon.ico
     to: icon.ico
   - from: public/icon.png

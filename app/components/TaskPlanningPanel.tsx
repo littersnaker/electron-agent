@@ -33,6 +33,19 @@ function StageIcon({ status }: { status: PlanningStageStatus }) {
     );
   }
 
+  if (status === "skipped") {
+    return (
+      <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none">
+        <path
+          d="M6 10h8"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
   if (status === "error") {
     return (
       <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none">
@@ -152,7 +165,9 @@ export default function TaskPlanningPanel({
                   : summary.active
                     ? `正在执行：${summary.active.title}`
                     : summary.completed === stages.length
-                      ? "全部阶段已完成"
+                      ? summary.skipped > 0
+                        ? `本轮已结束，跳过 ${summary.skipped} 个无需执行阶段`
+                        : "全部阶段已完成"
                       : "等待新的项目任务"}
               </p>
             </div>
