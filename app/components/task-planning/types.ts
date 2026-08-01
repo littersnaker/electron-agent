@@ -1,7 +1,10 @@
 // 模块说明：负责 types 用户界面组件。
 import type { ComposerMode } from "../../constants/page-constants";
 import type { CommerceWorkflowMode } from "../../lib/commerce/listing/types";
-import type { AgentLifecycleEventPayload } from "../../types/workspace";
+import type {
+  AgentLifecycleEventPayload,
+  WorkListSnapshotPayload,
+} from "../../types/workspace";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance, AgentKind } from "../AgentPanel";
 
@@ -21,6 +24,7 @@ export interface TaskPlanningPanelProps {
   agents: AgentInstance[];
   toolActivities?: ToolActivity[];
   lifecycleEvents?: AgentLifecycleEventPayload[];
+  workListSnapshot?: WorkListSnapshotPayload | null;
   agentStatus?: string;
   isStreaming: boolean;
   workflowMode: TaskPlanningWorkflowMode;

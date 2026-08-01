@@ -42,7 +42,7 @@ export function buildWelcomeMessages(
       role: "assistant",
       content:
         mode === "code"
-          ? `已进入 ${project?.name || "项目"} 的 Code Agent。代码索引可用于快速定位文件、符号和相关实现。`
+          ? `已进入 ${project?.name || "项目"} 的 Code Agent。可选择建议、自动编辑或全自动模式；自动模式会持续读取、修改并验证项目，而不是只生成步骤文档。`
           : mode === "commerce"
             ? "已进入 Cross-border Market Intelligence Agent。告诉我一个大概品类或市场问题，我会用公开 SERP / Shopping 做核心研究，并把 Amazon、Keepa 等平台数据作为可选增强。"
             : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",

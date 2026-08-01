@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from backend.services.workspace.database import open_database
+from backend.services.workspace.search_terms import extract_search_terms
 from backend.services.workspace.repository import (
     resolve_project_root,
     update_project_index_state,
@@ -155,10 +155,9 @@ async def index_project(project_id: str) -> dict[str, object]:
 
 
 def _query_terms(query: str) -> list[str]:
-    """从用户问题中提取用于代码搜索的关键词。"""
+    """兼容旧调用名称，统一使用中英文搜索词提取器。"""
 
-    terms = re.findall(r"[A-Za-z_][A-Za-z0-9_./-]{2,}|[\u4e00-\u9fff]{2,}", query)
-    return list(dict.fromkeys(term.lower() for term in terms))[:12]
+    return extract_search_terms(query)
 
 
 async def search_project_index(

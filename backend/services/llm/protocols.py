@@ -82,7 +82,7 @@ class LlmProtocolClient:
         endpoint: str,
         api_key: str,
         messages: list[LlmMessage],
-        temperature: float,
+        temperature: float | None,
     ) -> AsyncIterator[LlmChunk]:
         """调用 OpenAI 兼容 ``chat/completions`` 流式接口。
 
@@ -90,12 +90,15 @@ class LlmProtocolClient:
         实现支持范围不同；只发送所有供应商都接受的最小参数集合。
         """
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": model.model,
             "messages": [self._to_openai_message(item) for item in messages],
             "stream": True,
-            "temperature": temperature,
         }
+        # Kimi K2.5/K2.6 等模型会按思考模式限制 temperature。传入不兼容值会
+        # 直接返回 HTTP 400，因此允许网关用 None 表示“交给供应商默认值”。
+        if temperature is not None:
+            payload["temperature"] = temperature
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

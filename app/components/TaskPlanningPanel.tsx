@@ -12,6 +12,7 @@ import {
 import {
   buildPlanningStages,
   buildPlanningSummary,
+  buildWorkListProgress,
 } from "./task-planning/derive";
 import type {
   PlanningStageStatus,
@@ -75,6 +76,7 @@ export default function TaskPlanningPanel({
   agents,
   toolActivities = [],
   lifecycleEvents = [],
+  workListSnapshot = null,
   agentStatus,
   isStreaming,
   workflowMode,
@@ -108,6 +110,37 @@ export default function TaskPlanningPanel({
     ],
   );
   const summary = useMemo(() => buildPlanningSummary(stages), [stages]);
+  const workProgress = useMemo(
+    () => buildWorkListProgress(workListSnapshot),
+    [workListSnapshot],
+  );
+  const hasWorkList = Boolean(workProgress);
+  const workFinished = workProgress?.finished || 0;
+  const displayProgress = workProgress
+    ? workProgress.overallProgress
+    : summary.overallProgress;
+  const displayFailed = workProgress
+    ? workProgress.failed > 0
+    : summary.failed;
+  const statusText = hasWorkList
+    ? workProgress?.failed
+      ? `${workProgress.failed} 个 Work 失败，Planner 正在重规划`
+      : workProgress?.runningItems.length
+        ? workProgress.runningItems.length > 1
+          ? `并行执行 ${workProgress.runningItems.length} 个 Work：${workProgress.activeWorkIds.join(", ")}`
+          : workProgress.running?.title || "正在执行 WorkList"
+        : workFinished === workProgress?.total
+          ? "全部 Work 已完成"
+          : workListSnapshot?.reason || "等待执行 WorkList"
+    : summary.failed
+      ? "流程存在异常，请检查当前阶段"
+      : summary.active
+        ? `正在执行：${summary.active.title}`
+        : summary.completed === stages.length
+          ? summary.skipped > 0
+            ? `本轮已结束，跳过 ${summary.skipped} 个无需执行阶段`
+            : "全部阶段已完成"
+          : "等待新的项目任务";
 
   return (
     <section
@@ -160,15 +193,7 @@ export default function TaskPlanningPanel({
                 className="mt-0.5 truncate text-[10px]"
                 style={{ color: "var(--text-tertiary)" }}
               >
-                {summary.failed
-                  ? "流程存在异常，请检查当前阶段"
-                  : summary.active
-                    ? `正在执行：${summary.active.title}`
-                    : summary.completed === stages.length
-                      ? summary.skipped > 0
-                        ? `本轮已结束，跳过 ${summary.skipped} 个无需执行阶段`
-                        : "全部阶段已完成"
-                      : "等待新的项目任务"}
+                {statusText}
               </p>
             </div>
           </div>
@@ -176,13 +201,13 @@ export default function TaskPlanningPanel({
           <span
             className="shrink-0 rounded-full px-2 py-1 font-mono text-[9px] tabular-nums"
             style={{
-              color: summary.failed ? "var(--accent-red)" : "#64b5ff",
-              background: summary.failed
+              color: displayFailed ? "var(--accent-red)" : "#64b5ff",
+              background: displayFailed
                 ? "rgba(255,69,58,0.11)"
                 : "rgba(10,132,255,0.12)",
             }}
           >
-            {summary.overallProgress}%
+            {displayProgress}%
           </span>
         </div>
 
@@ -194,8 +219,8 @@ export default function TaskPlanningPanel({
             <span
               className="block h-full rounded-full transition-[width] duration-500"
               style={{
-                width: `${summary.overallProgress}%`,
-                background: summary.failed
+                width: `${displayProgress}%`,
+                background: displayFailed
                   ? "var(--accent-red)"
                   : "linear-gradient(90deg, #0a84ff, #bf5af2)",
               }}
@@ -205,7 +230,9 @@ export default function TaskPlanningPanel({
             className="text-[9px] tabular-nums"
             style={{ color: "var(--text-tertiary)" }}
           >
-            {summary.completed}/{stages.length} 阶段
+            {hasWorkList
+              ? `${workFinished}/${workProgress?.total || 0} Work`
+              : `${summary.completed}/${stages.length} 阶段`}
           </span>
         </div>
       </header>
@@ -216,6 +243,54 @@ export default function TaskPlanningPanel({
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        {hasWorkList && workListSnapshot && (
+          <div
+            className="mb-3 space-y-1.5 rounded-[14px] border p-2"
+            style={{ borderColor: "var(--border)", background: "var(--glass)" }}
+          >
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[9px] font-semibold" style={{ color: "var(--text-secondary)" }}>
+                WorkList · revision {workListSnapshot.revision}
+              </span>
+              <span className="text-[8px]" style={{ color: "var(--text-tertiary)" }}>
+                成功 {workListSnapshot.succeeded} · 失败 {workListSnapshot.failed}
+                {workListSnapshot.scheduler?.maxParallel
+                  ? ` · 并行 ${workListSnapshot.scheduler.maxParallel}`
+                  : ""}
+              </span>
+            </div>
+            {workListSnapshot.items.map((item) => {
+              const failed = item.status === "failed";
+              const completed = ["succeeded", "skipped"].includes(item.status);
+              return (
+                <div key={item.id} className="flex items-center gap-2 rounded-[9px] px-2 py-1.5">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{
+                      background: failed
+                        ? "var(--accent-red)"
+                        : completed
+                          ? "var(--accent-green)"
+                          : item.status === "running"
+                            ? "#64b5ff"
+                            : "var(--text-quaternary)",
+                    }}
+                  />
+                  <span className="shrink-0 font-mono text-[8px]" style={{ color: "var(--text-tertiary)" }}>
+                    {item.id}
+                    {typeof item.priority === "number" ? `·P${item.priority}` : ""}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: "var(--text-secondary)" }}>
+                    {item.title}
+                  </span>
+                  <span className="shrink-0 text-[8px]" style={{ color: failed ? "var(--accent-red)" : "var(--text-tertiary)" }}>
+                    {item.status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="relative space-y-1.5">
           <span
             className="pointer-events-none absolute bottom-5 left-[18px] top-5 w-px"

@@ -167,6 +167,8 @@ export function toMessageAttachment(
 
 export type SessionMode = "qa" | "code" | "commerce";
 
+export type CodeAgentExecutionMode = "suggest" | "auto_edit" | "full_auto";
+
 export type ChatSession = {
   id: string;
   title: string;

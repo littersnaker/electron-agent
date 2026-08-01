@@ -5,6 +5,7 @@
 import type { RefObject } from "react";
 import type {
   AttachedFile,
+  CodeAgentExecutionMode,
   ComposerMode,
   ImageEditFidelity,
   MediaMode,
@@ -49,6 +50,8 @@ export interface ChatComposerProps {
   models: readonly ModelOption[];
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
+  codeAgentMode?: CodeAgentExecutionMode;
+  onCodeAgentModeChange?: (mode: CodeAgentExecutionMode) => void;
   onCreateCustomModel?: (input: CustomModelInput) => Promise<void>;
   onUpdateCustomModel?: (modelId: string, input: CustomModelInput) => Promise<void>;
   onDeleteCustomModel?: (modelId: string) => Promise<void>;

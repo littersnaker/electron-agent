@@ -58,14 +58,11 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _validate_proposal(root: Path, raw: dict[str, Any], usage: LlmUsage, model_name: str) -> ChangeProposal:
-    """校验模型提案中的路径、文件数量和文本大小。"""
+    """校验模型提案中的路径与文本大小；不再设置 8 文件硬限制。"""
 
     raw_files = raw.get("files")
     if not isinstance(raw_files, list) or not raw_files:
         raise ValueError("模型没有给出任何文件修改")
-    if len(raw_files) > 8:
-        raise ValueError("单次最多允许修改 8 个文件，请把任务拆小后重试")
-
     files: list[ProposedFile] = []
     seen: set[str] = set()
     for item in raw_files:
@@ -110,7 +107,7 @@ async def generate_proposal(
     system = """你是谨慎的代码修改 Agent。请根据用户需求和文件上下文返回 JSON，禁止 Markdown 解释。
 JSON 结构必须是：
 {"summary":"修改摘要","files":[{"path":"相对项目根目录的路径","content":"修改后的完整文件内容","reason":"原因"}]}
-规则：只修改完成任务必需的文件；不要输出二进制文件；不要使用绝对路径；保留现有功能；每个手写代码文件尽量少于 500 行。"""
+规则：只修改完成任务必需的文件；文件总数不设 8 个硬限制；不要输出二进制文件；不要使用绝对路径；保留现有功能；每个手写代码文件尽量少于 500 行。"""
     prompt = f"用户需求：\n{user_request}\n\n项目上下文：\n{context_text}"
     text, usage, model = await GATEWAY.complete(
         preferred_model_id=preferred_model_id,

@@ -23,6 +23,8 @@ class MediaGenerateBody(FlexibleModel):
     """前端图片或视频生成请求。"""
 
     model_id: str = Field(alias="modelId")
+    session_id: str = Field(default="", alias="sessionId")
+    checkpoint_id: str = Field(default="", alias="checkpointId")
     mode: MediaMode
     prompt: str
     typography_policy: str = Field(default="avoid-generated-text", alias="typographyPolicy")

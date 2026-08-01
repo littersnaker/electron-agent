@@ -311,6 +311,7 @@ class LlmGateway:
         """依次尝试供应商区域端点；收到内容后绝不切换端点。"""
 
         endpoints = self._provider_endpoints(provider, endpoint_override)
+        request_temperature = self._request_temperature(provider, model, temperature)
         last_error: ProviderRequestError | None = None
         for index, endpoint in enumerate(endpoints):
             emitted = False
@@ -320,7 +321,7 @@ class LlmGateway:
                     endpoint=endpoint,
                     api_key=api_key,
                     messages=messages,
-                    temperature=temperature,
+                    temperature=request_temperature,
                 ):
                     emitted = True
                     yield chunk
@@ -349,6 +350,29 @@ class LlmGateway:
             f"{provider.name} 未配置可用接口地址",
             scope="provider",
         )
+
+
+    def _request_temperature(
+        self,
+        provider: ProviderDefinition,
+        model: ModelDefinition,
+        requested: float,
+    ) -> float | None:
+        """按供应商模型约束决定是否发送 temperature。
+
+        Kimi K2.5/K2.6 的思考模式固定为 1.0，非思考模式固定为 0.6。应用
+        当前没有显式发送 thinking，因此最稳妥的兼容方式是省略 temperature，
+        让平台使用该模型的合法默认值。其他模型保持业务层传入值。
+        """
+
+        model_name = model.model.strip().lower()
+        if provider.id == "kimi" and (
+            model_name.startswith("kimi-k2.6")
+            or model_name.startswith("kimi-k2.5")
+            or model_name.startswith("kimi-k2-thinking")
+        ):
+            return None
+        return max(0.0, min(float(requested), 1.0 if provider.id == "kimi" else 2.0))
 
     def _provider_endpoints(
         self,

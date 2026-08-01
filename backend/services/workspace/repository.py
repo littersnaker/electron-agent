@@ -184,6 +184,10 @@ async def delete_session(session_id: str) -> None:
     """删除指定会话。"""
 
     async with open_database() as connection:
+        await connection.execute(
+            "DELETE FROM agent_checkpoints WHERE session_id = ?",
+            (session_id,),
+        )
         await connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 

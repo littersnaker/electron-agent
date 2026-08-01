@@ -34,6 +34,14 @@ export const CODE_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
     ],
   },
   {
+    id: "prompt",
+    title: "优化任务提示词",
+    description: "补全目标、约束、验收标准和禁止事项，同时保留用户原始参数",
+    agentTypes: ["planner"],
+    activityKeys: ["prompt_optimizer", "提示词优化", "任务规格"],
+    lifecycleRoles: ["prompt_optimizer"],
+  },
+  {
     id: "plan",
     title: "制定计划",
     description: "生成执行计划；轻量任务会直接生成单文件计划",

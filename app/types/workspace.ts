@@ -98,6 +98,50 @@ export interface AgentLifecycleEventPayload {
   createdAt: string;
 }
 
+
+export type WorkItemStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface WorkListItemPayload {
+  id: string;
+  title: string;
+  objective: string;
+  acceptanceCriteria: string[];
+  dependencies: string[];
+  priority?: number;
+  targetFiles?: string[];
+  serialGroup?: string;
+  status: WorkItemStatus;
+  attempts: number;
+  summary: string;
+  error: string;
+  changedFiles: string[];
+  commands: string[];
+}
+
+/** Code Agent 后端提供的 WorkList 唯一真实快照。 */
+export interface WorkListSnapshotPayload {
+  revision: number;
+  reason: string;
+  total: number;
+  pending: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  overallProgress: number;
+  scheduler?: {
+    mode: "dependency_graph" | string;
+    maxParallel: number;
+    activeWorkIds: string[];
+  };
+  items: WorkListItemPayload[];
+}
+
 export type StreamPacketType =
   | "TEXT"
   | "STATUS"
@@ -105,6 +149,7 @@ export type StreamPacketType =
   | "USAGE"
   | "INTERACTIVE_REQUEST"
   | "AGENT_LIFECYCLE"
+  | "WORKLIST_UPDATE"
   | "COMMERCE_PROGRESS"
   | "COMMERCE_REPORT"
   | "COMMERCE_LISTING"
@@ -120,6 +165,7 @@ export interface StreamPacket {
   payload?:
     | InteractiveRequest
     | AgentLifecycleEventPayload
+    | WorkListSnapshotPayload
     | CommerceProgressEvent
     | CommerceResearchReport
     | AmazonListingDemoReport;

@@ -18,11 +18,19 @@ import { createRunAgents, normalizeAgentKind } from "../../utilities/agent-runti
 import type { AgentStateSetter } from "./types";
 
 const LIFECYCLE_ROLE_TO_AGENT: Record<string, AgentKind> = {
+  orchestrator: "orchestrator",
+  search: "researcher",
+  planner: "planner",
+  worker: "coder",
+  merge: "orchestrator",
+  reviewer: "reviewer",
+  terminal: "terminal",
   router: "orchestrator",
   search_agent: "researcher",
   memory_agent: "researcher",
   file_agent: "researcher",
   context_merge: "orchestrator",
+  prompt_optimizer: "planner",
   high_level_planner: "planner",
   task_planner: "planner",
   modify_worker: "coder",
@@ -37,23 +45,26 @@ const LIFECYCLE_ROLE_TO_AGENT: Record<string, AgentKind> = {
 function lifecycleToAgentStatus(
   status: string,
 ): { status: AgentStatus; progress: number } {
+  const normalized = status.toUpperCase();
   const terminalStatus = {
     COMPLETED: { status: "completed", progress: 100 },
     FAILED: { status: "error", progress: 100 },
+    ERROR: { status: "error", progress: 100 },
     CREATED: { status: "queued", progress: 0 },
+    QUEUED: { status: "queued", progress: 0 },
   } as const;
-  if (status in terminalStatus) {
-    return terminalStatus[status as keyof typeof terminalStatus];
+  if (normalized in terminalStatus) {
+    return terminalStatus[normalized as keyof typeof terminalStatus];
   }
   if (
-    status === "PLANNING" ||
-    status === "REVIEWING" ||
-    status === "REFLECTING"
+    normalized === "PLANNING" ||
+    normalized === "REVIEWING" ||
+    normalized === "REFLECTING"
   ) {
     return { status: "thinking", progress: 46 };
   }
-  if (status === "READY_TO_MERGE") return { status: "running", progress: 88 };
-  if (status === "BLOCKED") return { status: "running", progress: 72 };
+  if (normalized === "READY_TO_MERGE") return { status: "running", progress: 88 };
+  if (normalized === "BLOCKED") return { status: "running", progress: 72 };
   return { status: "running", progress: 58 };
 }
 

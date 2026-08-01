@@ -6,6 +6,7 @@ import path from "node:path";
 import { getStableDataPath } from "./data-paths";
 
 export type AppTheme = "dark" | "light";
+export type CodeAgentMode = "suggest" | "auto_edit" | "full_auto";
 export const DEFAULT_APP_THEME: AppTheme = "light";
 
 /** Renderer 可以读写的非敏感界面偏好。 */
@@ -13,6 +14,7 @@ export interface AppUiPreferences {
   selectedChatModel?: string;
   selectedMediaModel?: string;
   builtinPlugins?: Record<string, boolean>;
+  codeAgentMode?: CodeAgentMode;
 }
 
 interface PreferenceFile extends AppUiPreferences {
@@ -85,6 +87,13 @@ function normalizeUiPreferences(input: unknown): AppUiPreferences {
     source.selectedMediaModel.length <= MAX_MODEL_ID_LENGTH
   ) {
     result.selectedMediaModel = source.selectedMediaModel;
+  }
+  if (
+    source.codeAgentMode === "suggest" ||
+    source.codeAgentMode === "auto_edit" ||
+    source.codeAgentMode === "full_auto"
+  ) {
+    result.codeAgentMode = source.codeAgentMode;
   }
   if (
     source.builtinPlugins &&

@@ -102,6 +102,25 @@ CREATE TABLE IF NOT EXISTS custom_models (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS agent_checkpoints (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    agent_kind TEXT NOT NULL,
+    route TEXT NOT NULL,
+    status TEXT NOT NULL,
+    resumable INTEGER NOT NULL DEFAULT 1,
+    request_json TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session_updated
+ON agent_checkpoints(session_id, updated_at DESC);
 """
 
 

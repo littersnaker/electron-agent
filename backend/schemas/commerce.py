@@ -16,6 +16,8 @@ class CommerceRequest(FlexibleModel):
     """市场研究或 Listing Demo 请求。"""
 
     query: str
+    session_id: str = Field(default="", alias="sessionId")
+    checkpoint_id: str = Field(default="", alias="checkpointId")
     marketplace: MarketplaceCode = "US"
     sample_size: int = Field(default=24, alias="sampleSize", ge=1, le=100)
     messages: list[FrontendMessage] = Field(default_factory=list)
