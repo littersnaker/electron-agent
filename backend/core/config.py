@@ -27,6 +27,26 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _desktop_app_data_root() -> Path:
+    """按操作系统返回与 Electron app.getPath("appData") 对应的目录。"""
+
+    if sys.platform == "win32":
+        base = os.getenv("APPDATA", "").strip()
+        return Path(base).expanduser() if base else Path.home() / "AppData" / "Roaming"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    configured = os.getenv("XDG_CONFIG_HOME", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".config"
+
+
+def _default_data_directory() -> Path:
+    """开发桌面模式复用安装版数据，其余独立 Python 运行仍使用项目目录。"""
+
+    if os.getenv("MULTI_AGENT_DESKTOP_DEV", "") == "1":
+        return _desktop_app_data_root() / "Multi-agent" / "python-data"
+    return _project_root() / ".local-data"
+
+
 def _load_environment_file() -> Path | None:
     """按优先级加载本地环境变量文件，并返回实际加载的路径。
 
@@ -80,7 +100,7 @@ def get_settings() -> Settings:
 
     environment_file = _load_environment_file()
     data_dir = Path(
-        os.getenv("AGENT_DATA_DIR", str(_project_root() / ".local-data"))
+        os.getenv("AGENT_DATA_DIR", str(_default_data_directory()))
     ).expanduser().resolve()
     frontend_raw = os.getenv("FRONTEND_DIR", "").strip()
     frontend_dir = Path(frontend_raw).expanduser().resolve() if frontend_raw else None

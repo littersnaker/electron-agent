@@ -21,7 +21,9 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import api_router
 from backend.core.config import get_settings
-from backend.core.logging import configure_logging
+from backend.core.logging import configure_console_encoding, configure_logging
+from backend.core.timezones import PACIFIC_TIMEZONE, timezone_source
+from backend.services.llm.custom_models import initialize_custom_models
 from backend.services.llm.gateway import GATEWAY
 from backend.services.workspace.database import initialize_database
 
@@ -35,7 +37,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     configure_logging()
     await initialize_database()
-    LOGGER.info("FastAPI 后端已完成数据库初始化")
+    await initialize_custom_models()
+    LOGGER.info("FastAPI 后端已完成数据库和自定义模型初始化")
+    LOGGER.info("时区支持来源：%s", timezone_source(PACIFIC_TIMEZONE))
     try:
         yield
     finally:
@@ -134,19 +138,34 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument("--host", default=settings.host)
     parser.add_argument("--port", type=int, default=settings.port)
     parser.add_argument("--log-level", default=settings.log_level.lower())
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="开发模式监听 Python 源码并自动重启 FastAPI worker",
+    )
+    parser.add_argument(
+        "--reload-dir",
+        action="append",
+        default=[],
+        help="开发模式需要监听的目录，可重复传入",
+    )
     return parser.parse_args()
 
 
 def run() -> None:
     """使用 Uvicorn 启动 FastAPI 服务。"""
 
+    # 必须在 Uvicorn 创建热重载父进程前设置 UTF-8，否则 Windows 管道会把中文日志解码成乱码。
+    configure_console_encoding()
     arguments = _parse_arguments()
+    application = "backend.main:app" if arguments.reload else app
     uvicorn.run(
-        app,
+        application,
         host=arguments.host,
         port=arguments.port,
         log_level=arguments.log_level,
-        reload=False,
+        reload=arguments.reload,
+        reload_dirs=arguments.reload_dir or None,
     )
 
 

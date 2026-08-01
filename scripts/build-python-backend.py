@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 from pathlib import Path
 
 import PyInstaller.__main__
+
+from embed_builtin_credentials import embed_builtin_credentials
+from sync_model_catalog import sync_model_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,30 +26,40 @@ def clean_previous_build() -> None:
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
 
-def build_executable() -> None:
-    """调用 PyInstaller 生成当前操作系统可运行的后端可执行文件。"""
+def _pyinstaller_arguments() -> list[str]:
+    """生成 PyInstaller 参数，并在已安装 tzdata 时显式收集时区文件。"""
 
-    PyInstaller.__main__.run(
-        [
-            str(ROOT / "backend" / "main.py"),
-            "--name=multi-agent-backend",
-            "--onefile",
-            "--clean",
-            "--noconfirm",
-            f"--paths={ROOT}",
-            f"--distpath={OUTPUT_DIRECTORY}",
-            f"--workpath={WORK_DIRECTORY}",
-            f"--specpath={SPEC_DIRECTORY}",
-            "--collect-all=uvicorn",
-            "--collect-all=fastapi",
-            "--collect-all=pydantic",
-            "--hidden-import=uvicorn.logging",
-            "--hidden-import=uvicorn.loops.auto",
-            "--hidden-import=uvicorn.protocols.http.auto",
-            "--hidden-import=uvicorn.protocols.websockets.auto",
-            "--hidden-import=uvicorn.lifespan.on",
-        ]
-    )
+    arguments = [
+        str(ROOT / "backend" / "main.py"),
+        "--name=multi-agent-backend",
+        "--onefile",
+        "--clean",
+        "--noconfirm",
+        f"--paths={ROOT}",
+        f"--distpath={OUTPUT_DIRECTORY}",
+        f"--workpath={WORK_DIRECTORY}",
+        f"--specpath={SPEC_DIRECTORY}",
+        "--collect-all=uvicorn",
+        "--collect-all=fastapi",
+        "--collect-all=pydantic",
+        "--hidden-import=uvicorn.logging",
+        "--hidden-import=uvicorn.loops.auto",
+        "--hidden-import=uvicorn.protocols.http.auto",
+        "--hidden-import=uvicorn.protocols.websockets.auto",
+        "--hidden-import=uvicorn.lifespan.on",
+        "--hidden-import=backend.core._builtin_credentials_generated",
+    ]
+    if importlib.util.find_spec("tzdata") is not None:
+        arguments.extend(["--collect-data=tzdata", "--hidden-import=tzdata"])
+    return arguments
+
+
+def build_executable() -> None:
+    """嵌入百炼兜底后，调用 PyInstaller 生成后端可执行文件。"""
+
+    sync_model_catalog()
+    embed_builtin_credentials()
+    PyInstaller.__main__.run(_pyinstaller_arguments())
 
 
 def main() -> None:

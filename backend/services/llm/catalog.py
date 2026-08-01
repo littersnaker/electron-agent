@@ -1,28 +1,42 @@
-"""LLM 供应商与模型注册表。"""
+"""LLM 供应商与模型注册表。
+
+供应商地址仍在本文件中维护；聊天模型列表由 ``config/chat-models.json`` 生成。
+开发时保存 JSON 后，models watcher 会同时刷新 Python 与 TypeScript 注册表。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
+
+from backend.services.llm.catalog_generated import (
+    DEFAULT_MODEL_ID,
+    MODEL_CATALOG_DATA,
+    MODEL_ID_ALIASES,
+)
+
 
 ProviderId = Literal["qwen", "openai", "gemini", "deepseek", "glm", "kimi"]
+Protocol = Literal["openai-compatible", "gemini"]
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderDefinition:
-    """描述一个模型供应商的鉴权方式和默认地址。"""
+    """描述一个模型供应商的鉴权方式和默认接口地址。"""
 
     id: ProviderId
     name: str
     environment_key: str
     request_header: str
-    protocol: Literal["openai-compatible", "gemini"]
+    protocol: Protocol
     default_endpoint: str | None = None
+    fallback_endpoints: tuple[str, ...] = ()
+    endpoint_environment_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ModelDefinition:
-    """描述前端模型 ID 与厂商真实模型名的对应关系。"""
+    """描述逻辑 ID、厂商真实模型名和 Auto Router 属性。"""
 
     id: str
     provider: ProviderId
@@ -31,6 +45,12 @@ class ModelDefinition:
     description: str
     capabilities: tuple[str, ...]
     chat_compatible: bool = True
+    auto_select: bool = True
+    fallback_select: bool = False
+    auto_priority: int = 100
+    # 自定义模型可单独指定完整 Base URL；内置模型保持 None。
+    base_url: str | None = None
+    is_custom: bool = False
 
 
 PROVIDERS: tuple[ProviderDefinition, ...] = (
@@ -41,6 +61,11 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         "x-llm-key-qwen",
         "openai-compatible",
         "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        (
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions",
+        ),
+        "DASHSCOPE_BASE_URL",
     ),
     ProviderDefinition(
         "openai",
@@ -49,6 +74,7 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         "x-llm-key-openai",
         "openai-compatible",
         "https://api.openai.com/v1/chat/completions",
+        endpoint_environment_key="OPENAI_BASE_URL",
     ),
     ProviderDefinition(
         "gemini",
@@ -64,6 +90,7 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         "x-llm-key-deepseek",
         "openai-compatible",
         "https://api.deepseek.com/chat/completions",
+        endpoint_environment_key="DEEPSEEK_BASE_URL",
     ),
     ProviderDefinition(
         "glm",
@@ -72,6 +99,7 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         "x-llm-key-glm",
         "openai-compatible",
         "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        endpoint_environment_key="GLM_BASE_URL",
     ),
     ProviderDefinition(
         "kimi",
@@ -80,142 +108,32 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         "x-llm-key-kimi",
         "openai-compatible",
         "https://api.moonshot.cn/v1/chat/completions",
+        endpoint_environment_key="KIMI_BASE_URL",
     ),
 )
 
-DEFAULT_MODEL_ID = "qwen:qwen3.7-max"
 AUTO_MODEL_ID = "auto"
-TEXT_CAPABILITIES = (
-    "text",
-    "stream",
-    "tool_call",
-    "reasoning",
-    "coding",
-    "long_context",
-    "structured_output",
-)
 
-MODELS: tuple[ModelDefinition, ...] = (
-    ModelDefinition(
-        DEFAULT_MODEL_ID,
-        "qwen",
-        "qwen3.7-max",
-        "Qwen 3.7 Max",
-        "默认代码与复杂任务模型",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "Qwen 3.7 Max Preview",
-        "qwen",
-        "7-max-27-max-2026-06-08",
-        "Qwen 3.7 Max Preview",
-        "复杂任务预览模型",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "百炼 GLM-5.2",
-        "qwen",
-        "glm-5.2",
-        "百炼 GLM-5.2",
-        "百炼托管的 GLM 模型",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "百炼 K2.7 Code",
-        "qwen",
-        "kimi-k2.7-code",
-        "百炼 K2.7 Code",
-        "百炼托管的代码模型",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "百炼 V4 Pro",
-        "qwen",
-        "deepseek-v4-pro",
-        "百炼 V4 Pro",
-        "百炼托管的复杂推理模型",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "qwen:qwen3.7-plus",
-        "qwen",
-        "qwen3.7-plus-2026-05-26",
-        "Qwen 3.7 Plus",
-        "快速问答与常规代码任务",
-        TEXT_CAPABILITIES + ("fast",),
-    ),
-    ModelDefinition(
-        "qwen:qwen-image-2.0-pro-2026-06-22",
-        "qwen",
-        "qwen-image-2.0-pro-2026-06-22",
-        "Qwen VL Max",
-        "界面截图与图片理解",
-        ("text", "vision", "stream", "reasoning", "long_context"),
-    ),
-    ModelDefinition(
-        "openai:gpt-5.1",
-        "openai",
-        "gpt-5.1",
-        "OpenAI GPT-5.1",
-        "规划、审查、代码和多模态任务",
-        TEXT_CAPABILITIES + ("vision",),
-    ),
-    ModelDefinition(
-        "gemini:gemini-3.6-flash",
-        "gemini",
-        "gemini-3.6-flash",
-        "Gemini 3.6 Flash",
-        "快速长上下文和多模态分析",
-        TEXT_CAPABILITIES + ("vision", "fast"),
-    ),
-    ModelDefinition(
-        "deepseek:deepseek-v4-pro",
-        "deepseek",
-        "deepseek-v4-pro",
-        "DeepSeek V4 Pro",
-        "复杂推理、代码修改和审查",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "deepseek:deepseek-v4-flash",
-        "deepseek",
-        "deepseek-v4-flash",
-        "DeepSeek V4 Flash",
-        "低成本快速代码与分析任务",
-        TEXT_CAPABILITIES + ("fast",),
-    ),
-    ModelDefinition(
-        "glm:glm-4.7",
-        "glm",
-        "glm-4.7",
-        "GLM 4.7",
-        "中文代码、推理和长上下文任务",
-        TEXT_CAPABILITIES,
-    ),
-    ModelDefinition(
-        "glm:glm-4.6v",
-        "glm",
-        "glm-4.6v",
-        "GLM 4.6V",
-        "视觉编程和图文任务",
-        TEXT_CAPABILITIES + ("vision",),
-    ),
-    ModelDefinition(
-        "kimi:kimi-k2.5",
-        "kimi",
-        "kimi-k3",
-        "Kimi K3",
-        "长上下文、多模态和复杂任务",
-        TEXT_CAPABILITIES + ("vision",),
-    ),
-    ModelDefinition(
-        "kimi:kimi-k2.6",
-        "kimi",
-        "kimi-k2.6",
-        "Kimi K2.6",
-        "长上下文、多模态和复杂任务",
-        TEXT_CAPABILITIES + ("vision",),
-    ),
+
+def _create_model(raw: dict[str, object]) -> ModelDefinition:
+    """把生成文件中的普通字典转换成类型明确的模型对象。"""
+
+    return ModelDefinition(
+        id=str(raw["id"]),
+        provider=cast(ProviderId, raw["provider"]),
+        model=str(raw["model"]),
+        name=str(raw["name"]),
+        description=str(raw["description"]),
+        capabilities=tuple(str(item) for item in cast(list[object], raw["capabilities"])),
+        chat_compatible=bool(raw.get("chatCompatible", True)),
+        auto_select=bool(raw.get("autoSelect", True)),
+        fallback_select=bool(raw.get("fallbackSelect", False)),
+        auto_priority=int(cast(int, raw.get("autoPriority", 100))),
+    )
+
+
+MODELS: tuple[ModelDefinition, ...] = tuple(
+    _create_model(raw) for raw in MODEL_CATALOG_DATA
 )
 
 
@@ -229,21 +147,47 @@ def get_provider(provider_id: ProviderId) -> ProviderDefinition:
 
 
 def get_model(model_id_or_name: str | None) -> ModelDefinition | None:
-    """按前端模型 ID 或厂商模型名查找模型。"""
+    """按逻辑 ID、旧版别名或厂商真实模型名查找模型。"""
 
     value = (model_id_or_name or "").strip()
     if not value or value == AUTO_MODEL_ID:
         return None
+    normalized = MODEL_ID_ALIASES.get(value, value)
     for model in MODELS:
-        if model.id == value or model.model == value:
+        if model.id == normalized or model.model == normalized:
             return model
     return None
 
 
-def default_model_for_provider(provider_id: ProviderId) -> ModelDefinition:
-    """返回指定供应商的第一个可聊天模型。"""
+def models_for_provider(provider_id: ProviderId) -> tuple[ModelDefinition, ...]:
+    """返回指定供应商的全部聊天模型。"""
 
-    for model in MODELS:
-        if model.provider == provider_id and model.chat_compatible:
-            return model
-    raise ValueError(f"供应商 {provider_id} 没有可聊天模型")
+    return tuple(
+        model
+        for model in MODELS
+        if model.provider == provider_id and model.chat_compatible
+    )
+
+
+def auto_models_for_provider(provider_id: ProviderId) -> tuple[ModelDefinition, ...]:
+    """返回允许供应商级自动验证和降级的模型，按优先级排序。"""
+
+    return tuple(
+        sorted(
+            (
+                model
+                for model in models_for_provider(provider_id)
+                if model.auto_select or model.fallback_select
+            ),
+            key=lambda model: model.auto_priority,
+        )
+    )
+
+
+def default_model_for_provider(provider_id: ProviderId) -> ModelDefinition:
+    """返回指定供应商优先级最高的自动候选模型。"""
+
+    candidates = auto_models_for_provider(provider_id)
+    if candidates:
+        return candidates[0]
+    raise ValueError(f"供应商 {provider_id} 没有可自动选择的聊天模型")

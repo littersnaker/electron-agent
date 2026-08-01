@@ -3,13 +3,15 @@
  * 模块职责：模型与电商数据源配置定义、状态和展示辅助函数。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import type { LlmCredentials } from "../../lib/llm/types";
+import type { LlmCredentials, LlmEndpointOverrides } from "../../lib/llm/types";
 import { type AuxiliaryServiceCredentials } from "../../lib/service-credentials";
 export interface Props {
   initialKeys: LlmCredentials;
+  initialEndpoints: LlmEndpointOverrides;
   initialServiceKeys: AuxiliaryServiceCredentials;
   onSave: (
     keys: LlmCredentials,
+    endpoints: LlmEndpointOverrides,
     serviceKeys: AuxiliaryServiceCredentials,
   ) => void;
   onClose: () => void;

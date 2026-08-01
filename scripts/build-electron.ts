@@ -64,11 +64,13 @@ function assertBuildOutputs(): void {
  * 按顺序构建三层运行时。
  */
 function main(): void {
-  console.log("=== 1/3 编译 Electron 主进程 ===");
+  console.log("=== 1/4 同步单一模型配置 ===");
+  runCommand("pnpm models:sync");
+  console.log("=== 2/4 编译 Electron 主进程 ===");
   runCommand("pnpm electron:compile");
-  console.log("=== 2/3 构建 Vite React 前端 ===");
+  console.log("=== 3/4 构建 Vite React 前端 ===");
   runCommand("pnpm build");
-  console.log("=== 3/3 构建 PyInstaller FastAPI 后端 ===");
+  console.log("=== 4/4 构建 PyInstaller FastAPI 后端 ===");
   buildPythonBackend();
   assertBuildOutputs();
   console.log("Electron 打包资源准备完成。 ");

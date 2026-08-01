@@ -19,6 +19,10 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    // 开发页面禁止磁盘缓存；源码变化由 Vite HMR 直接推送。
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+    },
   },
   build: {
     outDir: "dist",

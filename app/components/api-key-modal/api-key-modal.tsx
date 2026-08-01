@@ -6,7 +6,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { LLM_PROVIDER_CATALOG } from "../../lib/llm/registry/providers";
-import type { LlmCredentials, LlmProviderId } from "../../lib/llm/types";
+import type {
+  LlmCredentials,
+  LlmEndpointOverrides,
+  LlmProviderId,
+} from "../../lib/llm/types";
 import {
   buildCommerceCredentialHeaders,
   type AuxiliaryServiceCredentials,
@@ -16,6 +20,7 @@ import {
   AppleButton,
   AppleModalCloseButton,
 } from "../ui/AppleModalControls";
+import { LlmProviderSettings } from "./llm-provider-settings";
 import {
   COLORS,
   type EnvironmentStatusResponse,
@@ -32,11 +37,14 @@ import {
 } from "./provider-settings";
 export function ApiKeyModal({
   initialKeys,
+  initialEndpoints,
   initialServiceKeys,
   onSave,
   onClose,
 }: Props) {
   const [keys, setKeys] = useState<LlmCredentials>(initialKeys);
+  const [endpoints, setEndpoints] =
+    useState<LlmEndpointOverrides>(initialEndpoints);
   const [serviceKeys, setServiceKeys] =
     useState<AuxiliaryServiceCredentials>(initialServiceKeys);
   const [visibleFields, setVisibleFields] = useState<ReadonlySet<string>>(
@@ -73,6 +81,10 @@ export function ApiKeyModal({
 
   const updateKey = (provider: LlmProviderId, value: string) => {
     setKeys((current) => ({ ...current, [provider]: value }));
+  };
+
+  const updateEndpoint = (provider: LlmProviderId, value: string) => {
+    setEndpoints((current) => ({ ...current, [provider]: value }));
   };
 
   const updateServiceKey = (
@@ -170,6 +182,12 @@ export function ApiKeyModal({
       if (value) normalized[provider.id] = value;
     }
 
+    const normalizedEndpoints: LlmEndpointOverrides = {};
+    for (const provider of LLM_PROVIDER_CATALOG) {
+      const value = endpoints[provider.id]?.trim();
+      if (value) normalizedEndpoints[provider.id] = value;
+    }
+
     const normalizedServices: AuxiliaryServiceCredentials = {};
     for (const provider of PROVIDERS) {
       for (const field of provider.fields) {
@@ -177,7 +195,7 @@ export function ApiKeyModal({
         if (value) Object.assign(normalizedServices, { [field.key]: value });
       }
     }
-    onSave(normalized, normalizedServices);
+    onSave(normalized, normalizedEndpoints, normalizedServices);
   };
 
   const configuredCount = useMemo(
@@ -240,58 +258,14 @@ export function ApiKeyModal({
         </header>
 
         <div className="max-h-[65vh] space-y-5 overflow-y-auto px-6 pb-5">
-          <section>
-            <div className="mb-3 text-[11px] font-semibold text-[var(--text-primary)]">
-              模型服务
-            </div>
-            <div className="space-y-3">
-              {LLM_PROVIDER_CATALOG.map((provider) => {
-                const visible = visibleFields.has(provider.id);
-                return (
-                  <label key={provider.id} className="block">
-                    <span
-                      className="mb-1.5 flex items-center justify-between text-[11px] font-medium"
-                      style={{ color: COLORS.textMuted }}
-                    >
-                      <span>{provider.name}</span>
-                      <span style={{ color: COLORS.textSubtle }}>
-                        {provider.environmentKey}
-                      </span>
-                    </span>
-                    <div
-                      className="flex h-11 items-center rounded-[12px] border px-3"
-                      style={{
-                        background: "var(--glass-black)",
-                        borderColor: COLORS.border,
-                      }}
-                    >
-                      <input
-                        type={visible ? "text" : "password"}
-                        autoComplete="off"
-                        className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
-                        style={{ color: COLORS.text }}
-                        placeholder={provider.placeholder}
-                        value={keys[provider.id] || ""}
-                        onChange={(event) =>
-                          updateKey(provider.id, event.target.value)
-                        }
-                      />
-                      <AppleButton
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => toggleVisibility(provider.id)}
-                        className="ml-2"
-                        style={{ color: COLORS.textSubtle }}
-                      >
-                        {visible ? "隐藏" : "显示"}
-                      </AppleButton>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-          </section>
+          <LlmProviderSettings
+            keys={keys}
+            endpoints={endpoints}
+            visibleFields={visibleFields}
+            updateKey={updateKey}
+            updateEndpoint={updateEndpoint}
+            toggleVisibility={toggleVisibility}
+          />
 
           <section>
             <div className="mb-3 flex items-center justify-between gap-3">

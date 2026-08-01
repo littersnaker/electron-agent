@@ -20,6 +20,11 @@ import {
   type AppTheme,
 } from "./app-preferences";
 import { startBackend, stopBackend } from "./backend-process";
+import { migrateLegacyApplicationData } from "./data-paths";
+import {
+  clearDevelopmentRendererCache,
+  configureDevelopmentProcess,
+} from "./development-runtime";
 import { registerApplicationIpc, setApplicationBackendBaseUrl } from "./ipc";
 import {
   closeStartupWindow,
@@ -28,6 +33,8 @@ import {
   updateStartupWindowTheme,
 } from "./splash-window";
 import { createMainWindow, loadMainWindow, showStartupError } from "./window";
+
+configureDevelopmentProcess();
 
 let mainWindow: BrowserWindow | null = null;
 let startupWindow: BrowserWindow | null = null;
@@ -130,6 +137,9 @@ function createTray(): void {
 /** 启动桌面应用的全部运行时组件。 */
 async function bootstrap(): Promise<void> {
   Menu.setApplicationMenu(null);
+  await clearDevelopmentRendererCache();
+  // 必须先迁移，再读取主题和启动后端，确保所有组件使用同一份旧数据。
+  migrateLegacyApplicationData();
   if (!ipcRegistered) {
     registerApplicationIpc();
     ipcRegistered = true;
@@ -153,7 +163,7 @@ async function bootstrap(): Promise<void> {
     updateStartupWindowTheme(startupWindow, activeTheme);
     updateStartupWindow(startupWindow, {
       title: "本地服务已就绪",
-      detail: "正在定位 Vite 页面或 FastAPI 静态前端…",
+      detail: "正在加载最新 Vite 热更新页面…",
       progress: 0.97,
     });
 

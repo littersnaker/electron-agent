@@ -54,6 +54,9 @@ export function ChatComposer({
   models,
   selectedModel,
   onSelectModel,
+  onCreateCustomModel,
+  onUpdateCustomModel,
+  onDeleteCustomModel,
   onSubmit,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
@@ -405,6 +408,9 @@ export function ChatComposer({
               models={models}
               selectedModel={selectedModel}
               onSelect={onSelectModel}
+              onCreateCustomModel={onCreateCustomModel}
+              onUpdateCustomModel={onUpdateCustomModel}
+              onDeleteCustomModel={onDeleteCustomModel}
             />
             <button
               type="button"

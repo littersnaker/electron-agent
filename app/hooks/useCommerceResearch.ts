@@ -22,7 +22,7 @@ import {
   getCommerceProgressTitle,
 } from "../lib/commerce/progress-stages";
 import { buildLlmRequestHeaders } from "../lib/llm/client-request";
-import type { LlmCredentials } from "../lib/llm/types";
+import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
 import {
   buildCommerceCredentialHeaders,
   type AuxiliaryServiceCredentials,
@@ -41,6 +41,7 @@ interface UseCommerceResearchOptions {
     title?: string,
   ) => Promise<void>;
   apiKeys: LlmCredentials;
+  endpointOverrides: LlmEndpointOverrides;
   serviceKeys: AuxiliaryServiceCredentials;
   selectedModel: string;
   marketplace: CommerceMarketplaceCode;
@@ -111,6 +112,7 @@ export function useCommerceResearch({
   setSessions,
   persistSession,
   apiKeys,
+  endpointOverrides,
   serviceKeys,
   selectedModel,
   marketplace,
@@ -192,7 +194,7 @@ export function useCommerceResearch({
 
       try {
         const headers = {
-          ...buildLlmRequestHeaders(apiKeys, selectedModel),
+          ...buildLlmRequestHeaders(apiKeys, selectedModel, endpointOverrides),
           ...buildCommerceCredentialHeaders(serviceKeys),
         };
 
@@ -424,6 +426,7 @@ export function useCommerceResearch({
       agents,
       apiKeys,
       clearAfterSubmit,
+      endpointOverrides,
       isResearching,
       marketplace,
       messages,

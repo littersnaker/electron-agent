@@ -5,12 +5,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from backend.core.config import get_settings
+from backend.api.models import ModelProbeRequest, _resolve_probe_models
 from backend.main import app
 from backend.services.agent.classifier import classify_request
 from backend.services.commerce.analytics import calculate_metrics, resolve_category
+from backend.services.llm.availability import AVAILABILITY
+from backend.services.llm.catalog import get_model, get_provider
+from backend.services.llm import credentials as credentials_module
+from backend.services.llm.credentials import LlmCredentials, resolve_credentials
+from backend.services.llm.gateway import GATEWAY, LlmGateway
+from backend.services.llm.protocols import ProviderRequestError
+from backend.services.llm.types import ImagePart, LlmChunk, LlmMessage
 
 
 def _read_sse_packets(raw_text: str) -> list[dict[str, object]]:
@@ -21,6 +30,12 @@ def _read_sse_packets(raw_text: str) -> list[dict[str, object]]:
         if line.startswith("data:"):
             packets.append(json.loads(line[5:].strip()))
     return packets
+
+
+def _request_with_headers(headers: list[tuple[bytes, bytes]]) -> Request:
+    """创建只包含指定请求头的最小 FastAPI Request。"""
+
+    return Request({"type": "http", "headers": headers})
 
 
 def test_request_classifier() -> None:
@@ -75,6 +90,10 @@ def test_fastapi_workspace_and_commerce(tmp_path: Path, monkeypatch) -> None:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["ok"] is True
+        assert health.json()["version"] == 2
+        assert health.json()["runtime"] == "source"
+        assert health.json()["sourceRoot"] == str(Path(__file__).resolve().parents[2])
+        assert "no-store" in health.headers["cache-control"]
 
         initial_theme = client.get("/api/preferences/theme")
         assert initial_theme.status_code == 200
@@ -124,3 +143,250 @@ def test_fastapi_workspace_and_commerce(tmp_path: Path, monkeypatch) -> None:
             packet for packet in research_packets if packet.get("type") == "COMMERCE_REPORT"
         )
         assert report_packet["payload"]["runMode"] == "demo"  # type: ignore[index]
+
+
+def test_model_catalog_migrates_legacy_ids() -> None:
+    """验证旧版 Kimi/千问选择值仍能映射到正确厂商模型。"""
+
+    assert get_model("kimi:kimi-k2.5").id == "kimi:kimi-k3"  # type: ignore[union-attr]
+    assert get_model("Qwen 3.7 Max Preview").model == (  # type: ignore[union-attr]
+        "qwen3.7-max-2026-06-08"
+    )
+
+
+def test_manual_model_never_silently_changes_provider() -> None:
+    """验证手动选择缺少 Key 时直接报错，而不是偷换成其他供应商。"""
+
+    credentials = LlmCredentials({"qwen": "test-qwen-key"})
+    try:
+        GATEWAY.resolve_candidates(
+            "kimi:kimi-k3",
+            credentials,
+            [LlmMessage("user", "hello")],
+        )
+    except ValueError as exc:
+        assert "Kimi / Moonshot API Key" in str(exc)
+    else:
+        raise AssertionError("手动选择 Kimi 时不应回退到 Qwen")
+
+
+def test_auto_router_builds_real_fallback_chain() -> None:
+    """验证 Auto 包含首选与后备模型，并保持明确的降级顺序。"""
+
+    AVAILABILITY.clear()
+    credentials = LlmCredentials(
+        {"qwen": "test-qwen-key", "kimi": "test-kimi-key"}
+    )
+    candidates = GATEWAY.resolve_candidates(
+        "auto",
+        credentials,
+        [LlmMessage("user", "hello")],
+    )
+    candidate_ids = [model.id for model in candidates]
+    assert candidate_ids[:3] == [
+        "qwen:qwen3.7-max",
+        "qwen:qwen3.7-plus",
+        "qwen:qwen3.7-flash",
+    ]
+    assert "qwen:glm-5.2" in candidate_ids
+    assert "qwen:kimi-k2.7-code" in candidate_ids
+    assert "qwen:deepseek-v4-pro" in candidate_ids
+    assert "kimi:kimi-k3" in candidate_ids
+    assert all(model.auto_select or model.fallback_select for model in candidates)
+
+
+def test_auto_router_requires_vision_for_image_input() -> None:
+    """验证带图片的请求不会被发送到纯文本默认模型。"""
+
+    AVAILABILITY.clear()
+    credentials = LlmCredentials(
+        {"qwen": "test-qwen-key", "kimi": "test-kimi-key"}
+    )
+    message = LlmMessage(
+        "user",
+        "describe",
+        images=[ImagePart("image/png", "AA==")],
+    )
+    candidates = GATEWAY.resolve_candidates("auto", credentials, [message])
+    assert candidates
+    assert all("vision" in model.capabilities for model in candidates)
+    assert candidates[0].id == "qwen:qwen3.7-plus"
+
+
+def test_recent_successful_model_is_prioritized() -> None:
+    """验证首次发现可用模型后，后续 Auto 请求会优先复用该模型。"""
+
+    AVAILABILITY.clear()
+    credentials = LlmCredentials({"qwen": "test-qwen-key"})
+    initial = GATEWAY.resolve_candidates(
+        "auto",
+        credentials,
+        [LlmMessage("user", "hello")],
+    )
+    flash = next(model for model in initial if model.id == "qwen:qwen3.7-flash")
+    AVAILABILITY.mark_success(flash, credentials)
+    reordered = GATEWAY.resolve_candidates(
+        "auto",
+        credentials,
+        [LlmMessage("user", "hello again")],
+    )
+    assert reordered[0].id == "qwen:qwen3.7-flash"
+
+
+def test_provider_probe_can_fallback_to_another_model() -> None:
+    """验证供应商级连接测试会尝试多个通用模型而非只认第一个。"""
+
+    candidates = _resolve_probe_models(ModelProbeRequest(provider="kimi"))
+    assert [model.id for model in candidates] == [
+        "kimi:kimi-k3",
+        "kimi:kimi-k2.6",
+    ]
+
+
+def test_provider_endpoint_environment_override(monkeypatch) -> None:
+    """验证企业或工作空间 Base URL 能覆盖公共区域端点。"""
+
+    monkeypatch.setenv(
+        "DASHSCOPE_BASE_URL",
+        "https://workspace.example.test/compatible-mode/v1/",
+    )
+    endpoints = GATEWAY._provider_endpoints(get_provider("qwen"))
+    assert endpoints == (
+        "https://workspace.example.test/compatible-mode/v1/chat/completions",
+    )
+
+
+def test_builtin_qwen_is_used_when_user_does_not_configure(monkeypatch) -> None:
+    """验证用户未填写 Key 时，Python 后端会提供百炼内置兜底。"""
+
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setattr(
+        credentials_module,
+        "get_builtin_value",
+        lambda variable_name: (
+            "builtin-qwen-key" if variable_name == "DASHSCOPE_API_KEY" else ""
+        ),
+    )
+    credentials = resolve_credentials(_request_with_headers([]))
+    assert credentials.get("qwen") == "builtin-qwen-key"
+    assert credentials.source("qwen") == "builtin"
+
+
+def test_user_qwen_key_overrides_builtin_fallback(monkeypatch) -> None:
+    """验证用户自行配置的百炼 Key 始终优先于共享兜底。"""
+
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setattr(
+        credentials_module,
+        "get_builtin_value",
+        lambda variable_name: (
+            "builtin-qwen-key" if variable_name == "DASHSCOPE_API_KEY" else ""
+        ),
+    )
+    request = _request_with_headers(
+        [(b"x-llm-key-qwen", b"user-qwen-key")]
+    )
+    credentials = resolve_credentials(request)
+    assert credentials.get("qwen") == "user-qwen-key"
+    assert credentials.source("qwen") == "user"
+
+
+def test_request_base_url_overrides_environment(monkeypatch) -> None:
+    """验证设置页填写的百炼业务空间 Host 优先于打包环境地址。"""
+
+    monkeypatch.setenv(
+        "DASHSCOPE_BASE_URL",
+        "https://environment.example.test/compatible-mode/v1",
+    )
+    request = _request_with_headers(
+        [
+            (
+                b"x-llm-base-url-qwen",
+                b"https://workspace.example.test/compatible-mode/v1",
+            )
+        ]
+    )
+    credentials = resolve_credentials(request)
+    endpoints = GATEWAY._provider_endpoints(
+        get_provider("qwen"),
+        credentials.get_endpoint("qwen"),
+    )
+    assert endpoints == (
+        "https://workspace.example.test/compatible-mode/v1/chat/completions",
+    )
+
+
+async def _collect_completion(gateway: LlmGateway, credentials: LlmCredentials):
+    """执行最小 Auto completion，供路由降级测试复用。"""
+
+    return await gateway.complete(
+        preferred_model_id="auto",
+        credentials=credentials,
+        messages=[LlmMessage("user", "hello")],
+    )
+
+
+def test_model_level_error_falls_back_within_qwen(monkeypatch) -> None:
+    """验证 Max 不存在时会继续使用同一百炼 Key 的 Plus。"""
+
+    import asyncio
+
+    AVAILABILITY.clear()
+    gateway = LlmGateway()
+    attempted: list[str] = []
+
+    async def fake_stream_model(**kwargs):
+        """模拟 Max 模型级失败，随后让 Plus 返回成功结果。"""
+
+        model = kwargs["model"]
+        attempted.append(model.id)
+        if model.id == "qwen:qwen3.7-max":
+            raise ProviderRequestError(
+                "HTTP 404：模型未开通",
+                status_code=404,
+                scope="model",
+            )
+        yield LlmChunk(text_delta="PLUS_OK")
+
+    monkeypatch.setattr(gateway, "_stream_model", fake_stream_model)
+    text, _usage, model = asyncio.run(
+        _collect_completion(gateway, LlmCredentials({"qwen": "test-key"}))
+    )
+    assert text == "PLUS_OK"
+    assert model.id == "qwen:qwen3.7-plus"
+    assert attempted[:2] == ["qwen:qwen3.7-max", "qwen:qwen3.7-plus"]
+
+
+def test_provider_network_error_skips_redundant_qwen_models(monkeypatch) -> None:
+    """验证端点断网后不会重复请求 Plus/Flash，而是切到其他供应商。"""
+
+    import asyncio
+
+    AVAILABILITY.clear()
+    gateway = LlmGateway()
+    attempted: list[str] = []
+
+    async def fake_stream_model(**kwargs):
+        """模拟百炼端点断网，并让其他供应商返回成功结果。"""
+
+        model = kwargs["model"]
+        attempted.append(model.id)
+        if model.provider == "qwen":
+            raise ProviderRequestError(
+                "无法连接百炼接口",
+                scope="provider",
+            )
+        yield LlmChunk(text_delta="KIMI_OK")
+
+    monkeypatch.setattr(gateway, "_stream_model", fake_stream_model)
+    text, _usage, model = asyncio.run(
+        _collect_completion(
+            gateway,
+            LlmCredentials({"qwen": "qwen-key", "kimi": "kimi-key"}),
+        )
+    )
+    assert text == "KIMI_OK"
+    assert model.provider == "kimi"
+    assert attempted[0] == "qwen:qwen3.7-max"
+    assert "qwen:qwen3.7-plus" not in attempted
+    assert "qwen:qwen3.7-flash" not in attempted

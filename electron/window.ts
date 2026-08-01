@@ -5,6 +5,7 @@ import { BrowserWindow, shell } from "electron";
 import path from "node:path";
 import type { AppTheme } from "./app-preferences";
 import { isDevelopmentMode } from "./backend-process";
+import { DEVELOPMENT_SESSION_PARTITION } from "./development-runtime";
 import { loadRendererPage } from "./renderer-loader";
 
 /** 根据主题返回窗口创建阶段使用的底色。 */
@@ -32,6 +33,9 @@ export function createMainWindow(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      ...(isDevelopmentMode()
+        ? { partition: DEVELOPMENT_SESSION_PARTITION }
+        : {}),
       additionalArguments: [
         `--backend-url=${backendBaseUrl}`,
         `--app-theme=${initialTheme}`,
@@ -52,7 +56,7 @@ export function createMainWindow(
   return window;
 }
 
-/** 加载 Vite 页面；Vite 未启动时自动回退到随机 FastAPI 端口上的 dist。 */
+/** 加载 React 页面；严格开发模式只允许 Vite，禁止静默回退旧 dist。 */
 export function loadMainWindow(
   window: BrowserWindow,
   backendBaseUrl: string,

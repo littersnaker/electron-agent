@@ -16,9 +16,15 @@ import os from "node:os";
 import path from "node:path";
 import {
   isAppTheme,
+  readUiPreferences,
   writeCachedTheme,
   writeThemeToBackend,
+  writeUiPreferences,
 } from "./app-preferences";
+import {
+  readSecureCredentials,
+  writeSecureCredentials,
+} from "./secure-credentials";
 
 interface CommercePdfPayload {
   html: string;
@@ -115,6 +121,16 @@ export function registerApplicationIpc(): void {
   ipcMain.on("window:close", (event) => senderWindow(event)?.close());
   ipcMain.handle("window:setTheme", (_event, theme: unknown) =>
     persistApplicationTheme(theme),
+  );
+
+  // 凭证只在主进程读写固定白名单文件，Renderer 无法传入任意路径。
+  ipcMain.handle("credentials:read", () => readSecureCredentials());
+  ipcMain.handle("credentials:write", (_event, input: unknown) =>
+    writeSecureCredentials(input),
+  );
+  ipcMain.handle("preferences:read", () => readUiPreferences());
+  ipcMain.handle("preferences:write", (_event, input: unknown) =>
+    writeUiPreferences(input),
   );
 
   ipcMain.handle(

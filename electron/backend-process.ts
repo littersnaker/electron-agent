@@ -1,17 +1,21 @@
 /**
- * 模块职责：启动、探活和关闭本地 FastAPI 子进程。
- * 说明：开发环境运行 Python 源码；生产环境运行 PyInstaller 生成的可执行文件。
+ * 模块职责：连接开发 FastAPI，或在生产环境启动打包后的 Python 子进程。
+ *
+ * 标准 `pnpm dev` 会单独启动 Uvicorn reload，并通过 BACKEND_DEV_URL 连接。
+ * 这样 Electron 主进程热重启时不会把 Python watcher 一起杀掉。
  */
 import { app } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { getStableDataPath } from "./data-paths";
 import { findAvailableServerPort, SERVER_HOST } from "./server-port";
 
 export interface BackendRuntime {
-  process: ChildProcess;
+  process: ChildProcess | null;
   port: number;
   baseUrl: string;
+  ownedByElectron: boolean;
 }
 
 export interface BackendStartupProgress {
@@ -24,11 +28,26 @@ export type BackendProgressListener = (
   progress: BackendStartupProgress,
 ) => void;
 
+interface HealthPayload {
+  ok?: boolean;
+  runtime?: string;
+  reloadEnabled?: boolean;
+  processId?: number;
+  sourceRoot?: string;
+  sourceModifiedAt?: string;
+}
+
+class DevelopmentBackendMismatchError extends Error {
+  /** 标记开发端口连接到了另一个项目或打包后端。 */
+  constructor(message: string) {
+    super(message);
+    this.name = "DevelopmentBackendMismatchError";
+  }
+}
+
 let activeRuntime: BackendRuntime | null = null;
 
-/**
- * 安全发送启动进度，避免加载页自身异常影响 FastAPI 启动。
- */
+/** 安全发送启动进度，避免加载页自身异常影响 FastAPI 启动。 */
 function reportStartupProgress(
   listener: BackendProgressListener | undefined,
   progress: BackendStartupProgress,
@@ -40,25 +59,17 @@ function reportStartupProgress(
   }
 }
 
-/**
- * 判断当前 Electron 是否处于开发模式。
- */
+/** 判断当前 Electron 是否处于开发模式。 */
 export function isDevelopmentMode(): boolean {
   return !app.isPackaged;
 }
 
-/**
- * 返回第一个真实存在的文件路径。
- */
+/** 返回第一个真实存在的文件路径。 */
 function firstExistingPath(candidates: string[]): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
-/**
- * 解析开发环境使用的 Python 解释器。
- *
- * 优先级：显式环境变量 -> 项目虚拟环境 -> 系统 python/python3。
- */
+/** 解析开发环境使用的 Python 解释器。 */
 function resolveDevelopmentPython(): string {
   const root = process.cwd();
   const configured = process.env.PYTHON_EXECUTABLE?.trim();
@@ -74,9 +85,7 @@ function resolveDevelopmentPython(): string {
   return process.platform === "win32" ? "python" : "python3";
 }
 
-/**
- * 解析生产包内的 Python 后端可执行文件。
- */
+/** 解析生产包内的 Python 后端可执行文件。 */
 function resolvePackagedBackend(): string {
   const executableName =
     process.platform === "win32"
@@ -93,9 +102,7 @@ function resolvePackagedBackend(): string {
   return executablePath;
 }
 
-/**
- * 生成 FastAPI 子进程的环境变量。
- */
+/** 生成 Electron 自己启动 Python 时使用的环境变量。 */
 function buildBackendEnvironment(port: number): NodeJS.ProcessEnv {
   const development = isDevelopmentMode();
   const envFile = development
@@ -108,24 +115,34 @@ function buildBackendEnvironment(port: number): NodeJS.ProcessEnv {
   return {
     ...process.env,
     PYTHONUNBUFFERED: "1",
+    PYTHONDONTWRITEBYTECODE: development ? "1" : process.env.PYTHONDONTWRITEBYTECODE,
+    BACKEND_RELOAD: development ? "1" : "0",
     BACKEND_HOST: SERVER_HOST,
     BACKEND_PORT: String(port),
-    AGENT_DATA_DIR: path.join(app.getPath("userData"), "python-data"),
+    AGENT_DATA_DIR: getStableDataPath("python-data"),
     FRONTEND_DIR: frontendDirectory,
     ...(fs.existsSync(envFile) ? { APP_ENV_FILE: envFile } : {}),
   };
 }
 
-/**
- * 创建后端子进程，并返回可复用的运行时信息。
- */
+/** 创建 Electron 自己管理的后端子进程。 */
 function spawnBackend(port: number): BackendRuntime {
   const development = isDevelopmentMode();
   const command = development
     ? resolveDevelopmentPython()
     : resolvePackagedBackend();
   const args = development
-    ? ["-m", "backend.main", "--host", SERVER_HOST, "--port", String(port)]
+    ? [
+        "-m",
+        "backend.main",
+        "--host",
+        SERVER_HOST,
+        "--port",
+        String(port),
+        "--reload",
+        "--reload-dir",
+        "backend",
+      ]
     : ["--host", SERVER_HOST, "--port", String(port)];
 
   const child = spawn(command, args, {
@@ -145,12 +162,55 @@ function spawnBackend(port: number): BackendRuntime {
     process: child,
     port,
     baseUrl: `http://${SERVER_HOST}:${port}`,
+    ownedByElectron: true,
   };
 }
 
-/**
- * 轮询健康检查，直到 FastAPI 真正可接受请求。
- */
+/** 读取标准开发命令提供的外部 Uvicorn 地址。 */
+function resolveExternalDevelopmentRuntime(): BackendRuntime | null {
+  if (!isDevelopmentMode()) return null;
+  const configured = process.env.BACKEND_DEV_URL?.trim();
+  if (!configured) return null;
+
+  const url = new URL(configured);
+  const allowedHosts = new Set(["127.0.0.1", "localhost"]);
+  if (url.protocol !== "http:" || !allowedHosts.has(url.hostname)) {
+    throw new Error("BACKEND_DEV_URL 只允许本机 http://127.0.0.1 地址");
+  }
+  const port = Number(url.port || "80");
+  return {
+    process: null,
+    port,
+    baseUrl: configured.replace(/\/+$/u, ""),
+    ownedByElectron: false,
+  };
+}
+
+/** 统一路径大小写，供 Windows 上比较当前项目与健康接口源码目录。 */
+function normalizeFileSystemPath(value: string): string {
+  const resolved = path.resolve(value);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/** 严格开发模式下拒绝连接另一个目录或安装包中的旧后端。 */
+function validateDevelopmentBackend(payload: HealthPayload): void {
+  if (!isDevelopmentMode() || process.env.ELECTRON_DEV_STRICT !== "1") return;
+  const sourceRoot = payload.sourceRoot?.trim();
+  if (!sourceRoot) {
+    throw new DevelopmentBackendMismatchError(
+      "开发后端没有返回 sourceRoot，可能仍在运行修改前的旧版本",
+    );
+  }
+  const expected = normalizeFileSystemPath(process.cwd());
+  const actual = normalizeFileSystemPath(sourceRoot);
+  if (expected !== actual || payload.runtime !== "source") {
+    throw new DevelopmentBackendMismatchError(
+      `开发后端源码目录不匹配。当前项目：${expected}；实际连接：${actual}`,
+    );
+  }
+}
+
+/** 轮询健康检查，直到 FastAPI 真正可接受请求。 */
 async function waitUntilHealthy(
   runtime: BackendRuntime,
   listener?: BackendProgressListener,
@@ -161,7 +221,7 @@ async function waitUntilHealthy(
   let lastProgressUpdate = 0;
 
   while (Date.now() < deadline) {
-    if (runtime.process.exitCode !== null) {
+    if (runtime.process && runtime.process.exitCode !== null) {
       throw new Error(`Python 后端提前退出，退出码：${runtime.process.exitCode}`);
     }
     try {
@@ -169,17 +229,27 @@ async function waitUntilHealthy(
       const timeout = setTimeout(() => controller.abort(), 1_500);
       const response = await fetch(`${runtime.baseUrl}/api/health`, {
         signal: controller.signal,
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
       }).finally(() => clearTimeout(timeout));
       if (response.ok) {
+        const payload = (await response.json()) as HealthPayload;
+        validateDevelopmentBackend(payload);
+        console.info(
+          `[Electron] FastAPI 源码：${payload.sourceRoot || "打包版本"}，` +
+            `PID=${payload.processId || "unknown"}，` +
+            `modified=${payload.sourceModifiedAt || "unknown"}`,
+        );
         reportStartupProgress(listener, {
           title: "本地智能服务已就绪",
-          detail: "正在打开工作台界面…",
+          detail: "正在打开最新 Vite 工作台…",
           progress: 0.94,
         });
         return;
       }
       lastError = `健康检查返回 HTTP ${response.status}`;
     } catch (error) {
+      if (error instanceof DevelopmentBackendMismatchError) throw error;
       lastError = error instanceof Error ? error.message : String(error);
     }
 
@@ -188,7 +258,7 @@ async function waitUntilHealthy(
       const elapsed = now - startedAt;
       reportStartupProgress(listener, {
         title: "正在初始化 FastAPI",
-        detail: `正在等待 Agent、数据库和本地接口就绪（${Math.max(1, Math.ceil(elapsed / 1000))} 秒）`,
+        detail: `正在等待最新 Python 源码就绪（${Math.max(1, Math.ceil(elapsed / 1000))} 秒）`,
         progress: Math.min(0.9, 0.42 + elapsed / 90_000),
       });
       lastProgressUpdate = now;
@@ -198,19 +268,27 @@ async function waitUntilHealthy(
   throw new Error(`等待 Python 后端启动超时：${lastError}`);
 }
 
-/**
- * 启动本地 FastAPI；重复调用时直接返回现有实例。
- */
+/** 启动或连接 FastAPI；标准开发模式优先连接独立的 reload 服务。 */
 export async function startBackend(
   listener?: BackendProgressListener,
 ): Promise<BackendRuntime> {
-  if (activeRuntime && activeRuntime.process.exitCode === null) {
-    reportStartupProgress(listener, {
-      title: "本地智能服务正在运行",
-      detail: "正在恢复工作台窗口…",
-      progress: 0.94,
-    });
+  if (
+    activeRuntime &&
+    (!activeRuntime.process || activeRuntime.process.exitCode === null)
+  ) {
     return activeRuntime;
+  }
+
+  const externalRuntime = resolveExternalDevelopmentRuntime();
+  if (externalRuntime) {
+    reportStartupProgress(listener, {
+      title: "正在连接热更新后端",
+      detail: `检查 ${externalRuntime.baseUrl} 是否来自当前源码目录…`,
+      progress: 0.38,
+    });
+    await waitUntilHealthy(externalRuntime, listener);
+    activeRuntime = externalRuntime;
+    return externalRuntime;
   }
 
   reportStartupProgress(listener, {
@@ -219,31 +297,30 @@ export async function startBackend(
     progress: 0.18,
   });
   const port = await findAvailableServerPort();
-  reportStartupProgress(listener, {
-    title: "正在启动 Python 服务",
-    detail: `FastAPI 将在本机端口 ${port} 上运行`,
-    progress: 0.34,
-  });
   const runtime = spawnBackend(port);
   activeRuntime = runtime;
-  runtime.process.once("exit", () => {
+  runtime.process?.once("exit", () => {
     if (activeRuntime?.process === runtime.process) activeRuntime = null;
   });
   await waitUntilHealthy(runtime, listener);
   return runtime;
 }
 
-/**
- * 关闭 FastAPI 子进程，避免退出 Electron 后残留后台进程。
- */
+/** 只关闭 Electron 自己创建的后端；外部 dev watcher 交给 concurrently 管理。 */
 export function stopBackend(): void {
   const runtime = activeRuntime;
   activeRuntime = null;
-  if (!runtime || runtime.process.exitCode !== null) return;
+  if (
+    !runtime?.ownedByElectron ||
+    !runtime.process ||
+    runtime.process.exitCode !== null
+  ) {
+    return;
+  }
 
   runtime.process.kill("SIGTERM");
   const forceTimer = setTimeout(() => {
-    if (runtime.process.exitCode === null) runtime.process.kill("SIGKILL");
+    if (runtime.process?.exitCode === null) runtime.process.kill("SIGKILL");
   }, 3_000);
   forceTimer.unref();
 }

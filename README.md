@@ -29,7 +29,7 @@ pnpm dev
 ## Key commands
 
 ```bash
-pnpm dev                 # Vite + Electron; Electron starts FastAPI
+pnpm dev                 # Fresh-cache Vite + reloading FastAPI + Electron watchers
 python -m backend.main   # FastAPI only
 pnpm backend:test        # Python smoke tests
 pnpm verify              # Type checks, Python checks/tests, Vite build
@@ -44,3 +44,7 @@ The packaged application starts `multi-agent-backend` from Electron resources. E
 - Commerce listing generation is a safe draft/demo and does not publish products.
 - TalorData is used when configured; otherwise responses are explicitly marked as demo mode.
 - Production installers do not embed `.env.local` secrets.
+
+## Local hot reload and model editing
+
+Use `pnpm dev` for local development. React, Python, the shared model JSON and Electron main process are watched. Chat models are edited in `config/chat-models.json`; see `HOT_RELOAD_MODEL_GUIDE_CN.md`.

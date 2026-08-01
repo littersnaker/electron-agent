@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/immutability */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import AgentPanel from "./components/AgentPanel";
 import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
@@ -17,6 +17,7 @@ import WorkspaceHeader from "./components/WorkspaceHeader";
 import {
   AVAILABLE_CHAT_MODELS,
   getAvailableMediaModelOptions,
+  getCustomModelOptions,
 } from "./constants/modelList";
 import type {
   ComposerMode,
@@ -31,13 +32,14 @@ import { useApiKey } from "./hooks/useApiKey";
 import { useChatStream } from "./hooks/useChatStream";
 import { useComposer } from "./hooks/useComposer";
 import { useCommerceResearch } from "./hooks/useCommerceResearch";
+import { useCustomModels } from "./hooks/useCustomModels";
 import { useMediaGeneration } from "./hooks/useMediaGeneration";
+import { useModelSelection } from "./hooks/useModelSelection";
 import { usePluginManager } from "./hooks/usePluginManager";
 import { useThemeMode } from "./hooks/useThemeMode";
 import { useWorkspaceController } from "./hooks/useWorkspaceController";
-import { AUTO_MODEL_ID } from "./lib/llm/model-catalog";
-import { DEFAULT_MEDIA_MODEL_ID } from "./lib/media/catalog";
 import type { CommerceMarketplaceCode } from "./lib/commerce/types";
+import { AUTO_MODEL_ID } from "./lib/llm/registry/models";
 import type { BuiltinPluginId } from "./lib/plugins/types";
 
 /**
@@ -49,10 +51,13 @@ import type { BuiltinPluginId } from "./lib/plugins/types";
  */
 export default function Home() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
-  const [selectedChatModel, setSelectedChatModel] = useState(AUTO_MODEL_ID);
-  const [selectedMediaModel, setSelectedMediaModel] = useState(
-    DEFAULT_MEDIA_MODEL_ID,
-  );
+  const {
+    selectedChatModel,
+    selectedMediaModel,
+    setSelectedChatModel,
+    setSelectedMediaModel,
+  } = useModelSelection();
+  const customModels = useCustomModels();
   const [typographyPolicy, setTypographyPolicy] =
     useState<TypographyPolicy>("avoid-generated-text");
   const [imageEditFidelity, setImageEditFidelity] =
@@ -80,9 +85,27 @@ export default function Home() {
       : composerMode;
 
   const availableModels = useMemo(() => {
-    if (effectiveComposerMode === "chat") return AVAILABLE_CHAT_MODELS;
+    if (effectiveComposerMode === "chat") {
+      return [
+        ...AVAILABLE_CHAT_MODELS,
+        ...getCustomModelOptions(customModels.models),
+      ];
+    }
     return getAvailableMediaModelOptions(effectiveComposerMode);
-  }, [effectiveComposerMode]);
+  }, [customModels.models, effectiveComposerMode]);
+
+  useEffect(() => {
+    if (!customModels.loaded || !selectedChatModel.startsWith("custom:")) return;
+    const stillExists = customModels.models.some(
+      (model) => model.id === selectedChatModel,
+    );
+    if (!stillExists) setSelectedChatModel(AUTO_MODEL_ID);
+  }, [
+    customModels.loaded,
+    customModels.models,
+    selectedChatModel,
+    setSelectedChatModel,
+  ]);
 
   const resolvedMediaModel =
     availableModels.find((model) => model.id === selectedMediaModel)?.id ||
@@ -101,6 +124,7 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     selectedModel: selectedChatModel,
     attachedFiles: composer.attachedFiles,
     isParsingFile: composer.isParsingFile,
@@ -115,6 +139,7 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     selectedModel: resolvedMediaModel,
     attachedFile: composer.attachedFiles[0] || null,
     typographyPolicy,
@@ -132,6 +157,7 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     serviceKeys: apiKey.serviceKeys,
     selectedModel: selectedChatModel,
     marketplace: commerceMarketplace,
@@ -279,6 +305,7 @@ export default function Home() {
       {apiKey.showKeyModal && (
         <ApiKeyModal
           initialKeys={apiKey.apiKeys}
+          initialEndpoints={apiKey.endpointOverrides}
           initialServiceKeys={apiKey.serviceKeys}
           onSave={apiKey.handleSaveKeys}
           onClose={apiKey.closeKeyModal}
@@ -409,6 +436,24 @@ export default function Home() {
                     models={availableModels}
                     selectedModel={selectedModel}
                     onSelectModel={handleSelectModel}
+                    onCreateCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? async (input) => {
+                            const created = await customModels.createModel(input);
+                            setSelectedChatModel(created.id);
+                          }
+                        : undefined
+                    }
+                    onUpdateCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? customModels.updateModel
+                        : undefined
+                    }
+                    onDeleteCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? customModels.deleteModel
+                        : undefined
+                    }
                     onSubmit={handleSubmit}
                   />
                 </div>

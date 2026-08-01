@@ -1,69 +1,120 @@
 """统一 LLM 调用网关。
 
-本模块同时支持 OpenAI 兼容协议与 Gemini REST SSE。业务层只需要传入统一消息，
-不需要了解不同供应商的 JSON 结构。
+网关负责严格解析手动选择、构建 Auto 候选链、执行供应商/区域降级。业务接口不得
+自行决定模型回退顺序，避免同一个 Key 在不同页面出现不一致行为。
 """
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 from collections.abc import AsyncIterator
-from typing import Any
+from dataclasses import dataclass
 
-import httpx
-
-from backend.core.config import get_settings
+from backend.core.builtin_credentials import get_builtin_value
+from backend.services.llm.availability import AVAILABILITY
 from backend.services.llm.catalog import (
     AUTO_MODEL_ID,
     MODELS,
     PROVIDERS,
     ModelDefinition,
-    default_model_for_provider,
+    ProviderDefinition,
     get_model,
     get_provider,
 )
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.llm.custom_models import (
+    get_custom_model_definition,
+    list_custom_model_definitions,
+)
+from backend.services.llm.protocols import LlmProtocolClient, ProviderRequestError
 from backend.services.llm.types import LlmChunk, LlmMessage, LlmUsage
 
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderFailure:
+    """记录一次不含密钥的模型调用失败，供最终错误汇总使用。"""
+
+    model_name: str
+    provider_name: str
+    detail: str
+    scope: str
+
+
 class LlmGateway:
-    """根据模型、凭证和协议执行统一文本生成。"""
+    """根据模型、凭证、输入能力和协议执行统一文本生成。"""
 
     def __init__(self) -> None:
-        """创建复用连接池的异步 HTTP 客户端。"""
+        """创建协议客户端。"""
 
-        timeout = httpx.Timeout(get_settings().request_timeout_seconds, connect=30.0)
-        self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+        self._protocols = LlmProtocolClient()
 
     async def close(self) -> None:
         """关闭 HTTP 连接池。"""
 
-        await self._client.aclose()
+        await self._protocols.close()
 
-    def resolve_model(
-        self, preferred_model_id: str, credentials: LlmCredentials
-    ) -> ModelDefinition:
-        """选择本次请求实际使用的模型。
+    def resolve_candidates(
+        self,
+        preferred_model_id: str,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+    ) -> tuple[ModelDefinition, ...]:
+        """解析本次调用候选链。
 
-        首先尝试用户选择的模型；如果该供应商没有 Key，则按注册表顺序寻找第一个
-        已配置供应商，保证 ``auto`` 模式和模型故障降级可以正常工作。
+        手动选择模型时只调用该模型，绝不静默偷换供应商。Auto 模式会把首选模型
+        与允许降级的后备模型一起纳入候选，并优先使用最近验证成功的模型。
         """
 
-        preferred = get_model(preferred_model_id)
-        if preferred and credentials.get(preferred.provider):
-            return preferred
+        requested = (preferred_model_id or AUTO_MODEL_ID).strip() or AUTO_MODEL_ID
+        requires_vision = any(message.images for message in messages)
+        required = {"text", "stream"}
+        if requires_vision:
+            required.add("vision")
 
-        for provider in PROVIDERS:
-            if credentials.get(provider.id):
-                return default_model_for_provider(provider.id)
+        if requested != AUTO_MODEL_ID:
+            selected = get_custom_model_definition(requested) or get_model(requested)
+            if not selected:
+                raise ValueError(f"未识别的模型：{requested}，请重新选择模型。")
+            provider = get_provider(selected.provider)
+            if not credentials.get(selected.provider):
+                raise ValueError(
+                    f"已选择 {selected.name}，但未配置 {provider.name} API Key。"
+                )
+            missing = required.difference(selected.capabilities)
+            if missing:
+                capability = "图像输入" if "vision" in missing else "当前任务"
+                raise ValueError(f"模型 {selected.name} 不支持{capability}，请更换模型。")
+            return (selected,)
 
-        model_name = preferred.name if preferred else preferred_model_id or AUTO_MODEL_ID
-        raise ValueError(
-            f"模型 {model_name} 没有可用 API Key。请在右上角设置中配置至少一个供应商。"
+        runtime_models = (*list_custom_model_definitions(), *MODELS)
+        eligible = tuple(
+            sorted(
+                (
+                    model
+                    for model in runtime_models
+                    if model.chat_compatible
+                    and (model.auto_select or model.fallback_select)
+                    and credentials.get(model.provider)
+                    and required.issubset(model.capabilities)
+                ),
+                key=lambda model: model.auto_priority,
+            )
         )
+        candidates = AVAILABILITY.order_candidates(eligible, credentials)
+        if candidates:
+            return candidates
+
+        configured_names = [
+            provider.name for provider in PROVIDERS if credentials.get(provider.id)
+        ]
+        if configured_names and requires_vision:
+            raise ValueError(
+                "已配置的模型均不支持图像输入，请配置或选择支持 Vision 的模型。"
+            )
+        raise ValueError("没有可用 API Key，请在右上角设置中配置至少一个模型供应商。")
 
     async def stream(
         self,
@@ -73,29 +124,58 @@ class LlmGateway:
         messages: list[LlmMessage],
         temperature: float = 0.2,
     ) -> AsyncIterator[LlmChunk]:
-        """以统一格式流式返回模型增量内容。"""
+        """统一返回流式增量；Auto 仅在尚未输出内容时切换候选模型。"""
 
-        model = self.resolve_model(preferred_model_id, credentials)
-        provider = get_provider(model.provider)
-        api_key = credentials.get(model.provider)
-        if not api_key:
-            raise ValueError(f"未配置 {provider.name} API Key")
+        candidates = self.resolve_candidates(
+            preferred_model_id,
+            credentials,
+            messages,
+        )
+        automatic = (preferred_model_id or AUTO_MODEL_ID).strip() == AUTO_MODEL_ID
+        failures: list[ProviderFailure] = []
+        blocked_routes: set[tuple[str, str]] = set()
 
-        if provider.protocol == "gemini":
-            async for chunk in self._stream_gemini(
-                model=model, api_key=api_key, messages=messages, temperature=temperature
-            ):
-                yield chunk
-            return
+        for model in candidates:
+            route_group = self._route_group(model)
+            if route_group in blocked_routes:
+                continue
+            emitted = False
+            try:
+                async for chunk in self._stream_model(
+                    model=model,
+                    credentials=credentials,
+                    messages=messages,
+                    temperature=temperature,
+                ):
+                    emitted = True
+                    yield chunk
+                AVAILABILITY.mark_success(model, credentials)
+                return
+            except ProviderRequestError as exc:
+                provider = get_provider(model.provider)
+                failures.append(
+                    ProviderFailure(
+                        model.name,
+                        provider.name,
+                        str(exc),
+                        exc.scope,
+                    )
+                )
+                AVAILABILITY.mark_failure(model, credentials, exc.scope)
+                # 已输出后切模型会拼接两个回答；手动选择也必须原样报告错误。
+                if emitted or not automatic:
+                    raise
+                if exc.provider_wide:
+                    blocked_routes.add(route_group)
+                LOGGER.warning(
+                    "Auto Router 调用 %s/%s 失败，scope=%s，尝试下一个候选：%s",
+                    provider.id,
+                    model.model,
+                    exc.scope,
+                    exc,
+                )
 
-        async for chunk in self._stream_openai_compatible(
-            model=model,
-            endpoint=provider.default_endpoint or "",
-            api_key=api_key,
-            messages=messages,
-            temperature=temperature,
-        ):
-            yield chunk
+        raise ValueError(self._format_failures(failures))
 
     async def complete(
         self,
@@ -105,200 +185,234 @@ class LlmGateway:
         messages: list[LlmMessage],
         temperature: float = 0.2,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
-        """收集完整模型响应，适合规划、JSON 提案等非流式任务。"""
+        """收集完整响应；Auto 在没有收到任何内容时允许降级。"""
 
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        usage = LlmUsage()
-        model = self.resolve_model(preferred_model_id, credentials)
-        async for chunk in self.stream(
+        candidates = self.resolve_candidates(
+            preferred_model_id,
+            credentials,
+            messages,
+        )
+        automatic = (preferred_model_id or AUTO_MODEL_ID).strip() == AUTO_MODEL_ID
+        failures: list[ProviderFailure] = []
+        blocked_routes: set[tuple[str, str]] = set()
+
+        for model in candidates:
+            route_group = self._route_group(model)
+            if route_group in blocked_routes:
+                continue
+            text_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            usage = LlmUsage()
+            try:
+                async for chunk in self._stream_model(
+                    model=model,
+                    credentials=credentials,
+                    messages=messages,
+                    temperature=temperature,
+                ):
+                    if chunk.reasoning_delta:
+                        reasoning_parts.append(chunk.reasoning_delta)
+                    if chunk.text_delta:
+                        text_parts.append(chunk.text_delta)
+                    if chunk.usage:
+                        usage = chunk.usage
+                result = "".join(text_parts).strip() or "".join(
+                    reasoning_parts
+                ).strip()
+                AVAILABILITY.mark_success(model, credentials)
+                return result, usage, model
+            except ProviderRequestError as exc:
+                provider = get_provider(model.provider)
+                failures.append(
+                    ProviderFailure(
+                        model.name,
+                        provider.name,
+                        str(exc),
+                        exc.scope,
+                    )
+                )
+                AVAILABILITY.mark_failure(model, credentials, exc.scope)
+                if text_parts or reasoning_parts or not automatic:
+                    raise
+                if exc.provider_wide:
+                    blocked_routes.add(route_group)
+
+        raise ValueError(self._format_failures(failures))
+
+    async def probe(
+        self,
+        *,
+        model_id: str,
+        credentials: LlmCredentials,
+    ) -> ModelDefinition:
+        """用极短真实请求验证 Key、端点与模型名，而不是只检查字符串格式。"""
+
+        model = get_custom_model_definition(model_id) or get_model(model_id)
+        if not model:
+            raise ValueError(f"未识别的模型：{model_id}")
+        messages = [LlmMessage("user", "只回复 OK")]
+        async for _chunk in self.stream(
             preferred_model_id=model.id,
             credentials=credentials,
             messages=messages,
+            temperature=0.0,
+        ):
+            # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
+            pass
+        AVAILABILITY.mark_success(model, credentials)
+        return model
+
+    async def _stream_model(
+        self,
+        *,
+        model: ModelDefinition,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float,
+    ) -> AsyncIterator[LlmChunk]:
+        """按供应商协议执行一次模型请求，并处理同供应商区域端点回退。"""
+
+        provider = get_provider(model.provider)
+        api_key = credentials.get(model.provider)
+        if not api_key:
+            raise ValueError(f"未配置 {provider.name} API Key")
+
+        if provider.protocol == "gemini":
+            async for chunk in self._protocols.stream_gemini(
+                model=model,
+                api_key=api_key,
+                messages=messages,
+                temperature=temperature,
+                endpoint_base=model.base_url,
+            ):
+                yield chunk
+            return
+
+        async for chunk in self._stream_openai_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
+            messages=messages,
             temperature=temperature,
         ):
-            # 结构化任务只使用模型的最终答案，避免把思考过程混进 JSON。
-            # 极少数模型如果只返回 reasoning，再把它作为兼容兜底。
-            if chunk.reasoning_delta:
-                reasoning_parts.append(chunk.reasoning_delta)
-            if chunk.text_delta:
-                text_parts.append(chunk.text_delta)
-            if chunk.usage:
-                usage = chunk.usage
-        result_text = "".join(text_parts).strip() or "".join(reasoning_parts).strip()
-        return result_text, usage, model
+            yield chunk
 
-    async def _stream_openai_compatible(
+    async def _stream_openai_provider(
         self,
         *,
+        provider: ProviderDefinition,
         model: ModelDefinition,
-        endpoint: str,
         api_key: str,
+        endpoint_override: str | None,
         messages: list[LlmMessage],
         temperature: float,
     ) -> AsyncIterator[LlmChunk]:
-        """调用 OpenAI 兼容的 ``chat/completions`` 流式接口。"""
+        """依次尝试供应商区域端点；收到内容后绝不切换端点。"""
 
-        payload = {
-            "model": model.model,
-            "messages": [self._to_openai_message(message) for message in messages],
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "temperature": temperature,
-        }
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        endpoints = self._provider_endpoints(provider, endpoint_override)
+        last_error: ProviderRequestError | None = None
+        for index, endpoint in enumerate(endpoints):
+            emitted = False
+            try:
+                async for chunk in self._protocols.stream_openai_compatible(
+                    model=model,
+                    endpoint=endpoint,
+                    api_key=api_key,
+                    messages=messages,
+                    temperature=temperature,
+                ):
+                    emitted = True
+                    yield chunk
+                return
+            except ProviderRequestError as exc:
+                last_error = exc
+                can_try_region = (
+                    not emitted
+                    and index < len(endpoints) - 1
+                    and (
+                        exc.status_code is None
+                        or exc.status_code in {401, 403, 404}
+                    )
+                )
+                if not can_try_region:
+                    raise
+                LOGGER.info(
+                    "%s 当前区域端点不可用，尝试备用区域端点（HTTP %s）",
+                    provider.id,
+                    exc.status_code or "network",
+                )
 
-        async with self._client.stream("POST", endpoint, headers=headers, json=payload) as response:
-            if response.status_code >= 400:
-                raw = (await response.aread()).decode("utf-8", errors="replace")
-                raise ValueError(self._provider_error(response.status_code, raw))
+        if last_error:
+            raise last_error
+        raise ProviderRequestError(
+            f"{provider.name} 未配置可用接口地址",
+            scope="provider",
+        )
 
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if not data or data == "[DONE]":
-                    continue
-                try:
-                    packet = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                choices = packet.get("choices") or []
-                delta = choices[0].get("delta", {}) if choices else {}
-                text = delta.get("content") or ""
-                reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
-                usage = self._read_openai_usage(packet.get("usage"))
-                if text or reasoning or usage:
-                    yield LlmChunk(text_delta=text, reasoning_delta=reasoning, usage=usage)
-
-    async def _stream_gemini(
+    def _provider_endpoints(
         self,
-        *,
-        model: ModelDefinition,
-        api_key: str,
-        messages: list[LlmMessage],
-        temperature: float,
-    ) -> AsyncIterator[LlmChunk]:
-        """调用 Gemini ``streamGenerateContent`` SSE 接口。"""
+        provider: ProviderDefinition,
+        request_override: str | None = None,
+    ) -> tuple[str, ...]:
+        """返回实际调用端点，并允许环境变量或内置配置覆盖。
 
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model.model}:streamGenerateContent"
+        百炼工作空间 Key 可能绑定专属地域或工作空间域名。优先级依次为请求头、
+        ``DASHSCOPE_BASE_URL``、构建期内置值和默认公共端点。请求头可填写控制台
+        提供的 ``.../compatible-mode/v1`` Base URL。
+        """
+
+        environment_key = provider.endpoint_environment_key
+        environment_override = (
+            os.getenv(environment_key, "").strip() if environment_key else ""
         )
-        system_text = "\n\n".join(
-            message.content for message in messages if message.role == "system"
+        builtin_override = (
+            get_builtin_value(environment_key) if environment_key else ""
         )
-        contents = [
-            self._to_gemini_content(message)
-            for message in messages
-            if message.role != "system"
-        ]
-        payload: dict[str, Any] = {
-            "contents": contents,
-            "generationConfig": {"temperature": temperature},
-        }
-        if system_text:
-            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        override = (
+            (request_override or "").strip()
+            or environment_override
+            or builtin_override
+        )
+        if override:
+            return (self._normalize_chat_endpoint(override),)
+        return tuple(
+            endpoint
+            for endpoint in (provider.default_endpoint, *provider.fallback_endpoints)
+            if endpoint
+        )
 
-        async with self._client.stream(
-            "POST",
-            url,
-            params={"key": api_key, "alt": "sse"},
-            headers={"Content-Type": "application/json"},
-            json=payload,
-        ) as response:
-            if response.status_code >= 400:
-                raw = (await response.aread()).decode("utf-8", errors="replace")
-                raise ValueError(self._provider_error(response.status_code, raw))
+    def _normalize_chat_endpoint(self, endpoint: str) -> str:
+        """把供应商 Base URL 规范成 OpenAI 兼容聊天接口地址。"""
 
-            async for line in response.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                try:
-                    packet = json.loads(line[5:].strip())
-                except json.JSONDecodeError:
-                    continue
-                text = self._gemini_text(packet)
-                usage = self._read_gemini_usage(packet.get("usageMetadata"))
-                if text or usage:
-                    yield LlmChunk(text_delta=text, usage=usage)
+        normalized = endpoint.rstrip("/")
+        if normalized.endswith("/chat/completions"):
+            return normalized
+        return f"{normalized}/chat/completions"
 
-    def _to_openai_message(self, message: LlmMessage) -> dict[str, Any]:
-        """把统一消息转换成 OpenAI 兼容格式。"""
 
-        if not message.images:
-            return {"role": message.role, "content": message.content}
-        parts: list[dict[str, Any]] = [{"type": "text", "text": message.content}]
-        for image in message.images:
-            parts.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{image.mime_type};base64,{image.data}"
-                    },
-                }
-            )
-        return {"role": message.role, "content": parts}
+    def _route_group(self, model: ModelDefinition) -> tuple[str, str]:
+        """返回端点级熔断分组，避免一个自定义地址拖累同供应商其他地址。"""
 
-    def _to_gemini_content(self, message: LlmMessage) -> dict[str, Any]:
-        """把统一消息转换成 Gemini ``contents`` 格式。"""
+        return (model.provider, (model.base_url or "provider-default").rstrip("/"))
 
-        role = "model" if message.role == "assistant" else "user"
-        parts: list[dict[str, Any]] = [{"text": message.content}]
-        for image in message.images:
-            parts.append(
-                {
-                    "inlineData": {
-                        "mimeType": image.mime_type,
-                        "data": image.data,
-                    }
-                }
-            )
-        return {"role": role, "parts": parts}
+    def _format_failures(self, failures: list[ProviderFailure]) -> str:
+        """把 Auto Router 多次失败压缩成可操作的中文错误。"""
 
-    def _gemini_text(self, packet: dict[str, Any]) -> str:
-        """从 Gemini 响应中提取文本增量。"""
-
-        candidates = packet.get("candidates") or []
-        if not candidates:
-            return ""
-        parts = (candidates[0].get("content") or {}).get("parts") or []
-        return "".join(str(part.get("text") or "") for part in parts)
-
-    def _read_openai_usage(self, raw: object) -> LlmUsage | None:
-        """解析 OpenAI 兼容用量字段。"""
-
-        if not isinstance(raw, dict):
-            return None
-        prompt = int(raw.get("prompt_tokens") or 0)
-        completion = int(raw.get("completion_tokens") or 0)
-        total = int(raw.get("total_tokens") or prompt + completion)
-        return LlmUsage(prompt, completion, total)
-
-    def _read_gemini_usage(self, raw: object) -> LlmUsage | None:
-        """解析 Gemini 用量字段。"""
-
-        if not isinstance(raw, dict):
-            return None
-        prompt = int(raw.get("promptTokenCount") or 0)
-        completion = int(raw.get("candidatesTokenCount") or 0)
-        total = int(raw.get("totalTokenCount") or prompt + completion)
-        return LlmUsage(prompt, completion, total)
-
-    def _provider_error(self, status_code: int, raw: str) -> str:
-        """生成不会泄漏请求凭证的供应商错误信息。"""
-
-        message = raw.strip()[:1000]
-        try:
-            parsed = json.loads(raw)
-            error = parsed.get("error") if isinstance(parsed, dict) else None
-            if isinstance(error, dict):
-                message = str(error.get("message") or error.get("code") or message)
-            elif isinstance(error, str):
-                message = error
-        except json.JSONDecodeError:
-            pass
-        return f"模型供应商请求失败（HTTP {status_code}）：{message or '未知错误'}"
+        if not failures:
+            return "Auto Router 没有找到可用模型。"
+        details = "；".join(
+            f"{item.provider_name}/{item.model_name}: {item.detail}"
+            for item in failures
+        )
+        has_provider_failure = any(item.scope == "provider" for item in failures)
+        guidance = (
+            " 其中包含端点级错误：这类错误与 Max/Plus/Flash 的向下兼容无关，"
+            "Router 已跳过同端点的重复模型请求；请先修复 API Host、DNS、代理或鉴权。"
+            if has_provider_failure
+            else ""
+        )
+        return f"Auto Router 已尝试可用候选但均失败：{details}{guidance}"
 
 
 GATEWAY = LlmGateway()

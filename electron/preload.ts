@@ -2,9 +2,10 @@
  * 模块职责：通过 contextBridge 向 React 暴露最小化的安全 Electron API。
  */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AppTheme } from "./app-preferences";
+import type { AppTheme, AppUiPreferences } from "./app-preferences";
 
 type MaximizedChangeListener = (maximized: boolean) => void;
+type CredentialStore = Record<string, string>;
 
 /** 从 Electron additionalArguments 中读取指定参数。 */
 function readAdditionalArgument(prefix: string): string {
@@ -32,6 +33,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     suggestedFileName: string;
   }) => ipcRenderer.invoke("commerce:exportPdf", payload),
   setTheme: (theme: AppTheme) => ipcRenderer.invoke("window:setTheme", theme),
+  credentials: {
+    read: (): Promise<CredentialStore> => ipcRenderer.invoke("credentials:read"),
+    write: (values: CredentialStore): Promise<CredentialStore> =>
+      ipcRenderer.invoke("credentials:write", values),
+  },
+  preferences: {
+    read: (): Promise<AppUiPreferences> =>
+      ipcRenderer.invoke("preferences:read"),
+    write: (values: AppUiPreferences): Promise<AppUiPreferences> =>
+      ipcRenderer.invoke("preferences:write", values),
+  },
   windowControls: {
     minimize: () => ipcRenderer.send("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
