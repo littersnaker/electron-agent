@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from backend.core.builtin_credentials import get_builtin_value
 from backend.core.config import get_settings
 from backend.schemas.common import FrontendAttachment
 from backend.schemas.media import MediaGenerateBody
@@ -23,10 +24,31 @@ IMAGE_PATH = "/api/v1/services/aigc/multimodal-generation/generation"
 VIDEO_PATH = "/api/v1/services/aigc/video-generation/video-synthesis"
 
 
-def _api_base() -> str:
-    """返回去掉末尾斜杠的 DashScope API 地址。"""
+def resolve_media_api_base(explicit_base_url: str | None = None) -> str:
+    """解析图片和视频实际使用的 DashScope 根域名。
 
-    return os.getenv("DASHSCOPE_API_BASE", DEFAULT_API_BASE).rstrip("/")
+    优先级为：设置页请求头、自定义媒体环境变量、旧版环境变量、聊天 Base URL、
+    构建期内置值、公共域名。即使用户粘贴了 ``/compatible-mode/v1`` 或完整
+    图片/视频接口，本函数也会提取同一个业务空间根域名。
+    """
+
+    candidates = (
+        explicit_base_url or "",
+        os.getenv("DASHSCOPE_MEDIA_BASE_URL", ""),
+        os.getenv("DASHSCOPE_API_BASE", ""),
+        os.getenv("DASHSCOPE_BASE_URL", ""),
+        get_builtin_value("DASHSCOPE_MEDIA_BASE_URL"),
+        get_builtin_value("DASHSCOPE_BASE_URL"),
+        DEFAULT_API_BASE,
+    )
+    raw = next((item.strip() for item in candidates if item and item.strip()), DEFAULT_API_BASE)
+    normalized = raw.rstrip("/")
+    for marker in ("/compatible-mode/", "/api/v1/"):
+        marker_index = normalized.find(marker)
+        if marker_index >= 0:
+            normalized = normalized[:marker_index]
+            break
+    return normalized.rstrip("/")
 
 
 def _attachment_data_url(attachment: FrontendAttachment) -> str:
@@ -108,7 +130,11 @@ async def _download_image(client: httpx.AsyncClient, url: str, index: int) -> di
     }
 
 
-async def generate_image(body: MediaGenerateBody, api_key: str) -> dict[str, Any]:
+async def generate_image(
+    body: MediaGenerateBody,
+    api_key: str,
+    api_base: str,
+) -> dict[str, Any]:
     """执行文生图或图片编辑请求。"""
 
     model = get_media_model(body.model_id)
@@ -136,7 +162,7 @@ async def generate_image(body: MediaGenerateBody, api_key: str) -> dict[str, Any
     timeout = httpx.Timeout(get_settings().request_timeout_seconds, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         response = await client.post(
-            f"{_api_base()}{IMAGE_PATH}",
+            f"{api_base}{IMAGE_PATH}",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model["model"],
@@ -178,11 +204,12 @@ async def _upload_video(
     attachment: FrontendAttachment,
     model_name: str,
     api_key: str,
+    api_base: str,
 ) -> str:
     """把视频附件上传到 DashScope 临时 OSS，并返回 ``oss://`` 地址。"""
 
     policy_response = await client.get(
-        f"{_api_base()}/api/v1/uploads",
+        f"{api_base}/api/v1/uploads",
         params={"action": "getPolicy", "model": model_name},
         headers={"Authorization": f"Bearer {api_key}"},
     )
@@ -234,6 +261,7 @@ async def _build_video_input(
     model_name: str,
     api_key: str,
     client: httpx.AsyncClient,
+    api_base: str,
 ) -> dict[str, Any]:
     """根据视频模式构建 DashScope ``input``。"""
 
@@ -248,12 +276,18 @@ async def _build_video_input(
     if body.mode == "reference-to-video":
         return {"prompt": prompt, "media": [{"type": "reference_image", "url": _attachment_data_url(attachment)}]}
     if body.mode == "video-edit":
-        temporary_url = await _upload_video(client, attachment, model_name, api_key)
+        temporary_url = await _upload_video(
+            client, attachment, model_name, api_key, api_base
+        )
         return {"prompt": prompt, "media": [{"type": "video", "url": temporary_url}]}
     raise ValueError(f"不支持的视频模式：{body.mode}")
 
 
-async def generate_video(body: MediaGenerateBody, api_key: str) -> dict[str, Any]:
+async def generate_video(
+    body: MediaGenerateBody,
+    api_key: str,
+    api_base: str,
+) -> dict[str, Any]:
     """提交视频任务、轮询结果并返回临时视频地址。"""
 
     model = get_media_model(body.model_id)
@@ -262,7 +296,7 @@ async def generate_video(body: MediaGenerateBody, api_key: str) -> dict[str, Any
     timeout = httpx.Timeout(420.0, connect=30.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         input_payload = await _build_video_input(
-            body, str(model["model"]), api_key, client
+            body, str(model["model"]), api_key, client, api_base
         )
         parameters: dict[str, Any]
         if body.mode == "video-edit":
@@ -273,7 +307,7 @@ async def generate_video(body: MediaGenerateBody, api_key: str) -> dict[str, Any
                 parameters["prompt_extend"] = True
 
         response = await client.post(
-            f"{_api_base()}{VIDEO_PATH}",
+            f"{api_base}{VIDEO_PATH}",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "X-DashScope-Async": "enable",
@@ -291,7 +325,7 @@ async def generate_video(body: MediaGenerateBody, api_key: str) -> dict[str, Any
         while time.monotonic() < deadline:
             await asyncio.sleep(5)
             result_response = await client.get(
-                f"{_api_base()}/api/v1/tasks/{task_id}",
+                f"{api_base}/api/v1/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             result = await _read_json(result_response)
@@ -332,10 +366,15 @@ async def generate_video(body: MediaGenerateBody, api_key: str) -> dict[str, Any
     }
 
 
-async def generate_media(body: MediaGenerateBody, api_key: str) -> dict[str, Any]:
+async def generate_media(
+    body: MediaGenerateBody,
+    api_key: str,
+    explicit_base_url: str | None = None,
+) -> dict[str, Any]:
     """根据模型协议把请求分发到图片或视频流程。"""
 
     model = get_media_model(body.model_id)
+    api_base = resolve_media_api_base(explicit_base_url)
     if model["protocol"] == "qwen-image-sync":
-        return await generate_image(body, api_key)
-    return await generate_video(body, api_key)
+        return await generate_image(body, api_key, api_base)
+    return await generate_video(body, api_key, api_base)

@@ -5,11 +5,10 @@ from __future__ import annotations
 import base64
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 
+from backend.core.timezones import PACIFIC_TIMEZONE, now_in_timezone
 from backend.schemas.chat import ChatRequest
 from backend.schemas.common import FrontendAttachment
 from backend.services.llm.catalog import AUTO_MODEL_ID
@@ -24,12 +23,12 @@ router = APIRouter(tags=["qa"])
 def _qa_system_prompt() -> str:
     """生成带当前时间的 QA 系统提示词。"""
 
-    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    now = now_in_timezone(PACIFIC_TIMEZONE)
     return f"""你是一个准确、实用、易理解的高级 AI 助手。
 默认使用中文；用户使用其他语言时跟随用户语言。先给结论，再给解释和可执行建议。
 不确定的信息必须明确说明，不要编造数据、来源或实时状态。
 技术问题要给可运行代码、修改位置和关键逻辑。
-当前服务器时间：{now.isoformat()}（America/Los_Angeles）。"""
+当前服务器时间：{now.isoformat()}（{PACIFIC_TIMEZONE}）。"""
 
 
 def _decode_attachment(attachment: FrontendAttachment) -> ImagePart:

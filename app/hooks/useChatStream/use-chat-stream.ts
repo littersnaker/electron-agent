@@ -40,6 +40,7 @@ export function useChatStream({
   setSessions,
   persistSession,
   apiKeys,
+  endpointOverrides,
   selectedModel,
   attachedFiles,
   isParsingFile,
@@ -199,7 +200,11 @@ export function useChatStream({
           activeSession.mode === "code" ? "/api/chat" : "/api/qa",
           {
             method: "POST",
-            headers: buildLlmRequestHeaders(apiKeys, selectedModel),
+            headers: buildLlmRequestHeaders(
+              apiKeys,
+              selectedModel,
+              endpointOverrides,
+            ),
             body: JSON.stringify({
               messages: requestMessages.slice(-MAX_CONTEXT_MESSAGES),
               attachments: buildImageAttachmentsPayload(fileOverride),
@@ -440,6 +445,7 @@ export function useChatStream({
       apiKeys,
       attachedFiles,
       clearAfterSubmit,
+      endpointOverrides,
       isParsingFile,
       isStreaming,
       interactiveRequest,
@@ -491,5 +497,4 @@ export function useChatStream({
     resetTransient,
   };
 }
-
 export type ChatStreamController = ReturnType<typeof useChatStream>;

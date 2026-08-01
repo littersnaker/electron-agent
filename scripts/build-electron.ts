@@ -50,12 +50,18 @@ function assertBuildOutputs(): void {
     path.join(rootDirectory, ".electron", "main.js"),
     path.join(rootDirectory, ".electron", "preload.js"),
   ];
-  const backendFiles = fs.existsSync(path.join(rootDirectory, "python-dist"))
-    ? fs.readdirSync(path.join(rootDirectory, "python-dist"))
-    : [];
-  if (!backendFiles.some((name) => name.startsWith("multi-agent-backend"))) {
-    required.push(path.join(rootDirectory, "python-dist", "multi-agent-backend"));
-  }
+  const backendDirectory = path.join(
+    rootDirectory,
+    "python-dist",
+    "multi-agent-backend",
+  );
+  const backendExecutable = path.join(
+    backendDirectory,
+    process.platform === "win32"
+      ? "multi-agent-backend.exe"
+      : "multi-agent-backend",
+  );
+  required.push(backendExecutable, path.join(backendDirectory, "_internal"));
   const missing = required.filter((file) => !fs.existsSync(file));
   if (missing.length) throw new Error(`构建产物缺失：\n${missing.join("\n")}`);
 }
@@ -64,11 +70,13 @@ function assertBuildOutputs(): void {
  * 按顺序构建三层运行时。
  */
 function main(): void {
-  console.log("=== 1/3 编译 Electron 主进程 ===");
+  console.log("=== 1/4 同步单一模型配置 ===");
+  runCommand("pnpm models:sync");
+  console.log("=== 2/4 编译 Electron 主进程 ===");
   runCommand("pnpm electron:compile");
-  console.log("=== 2/3 构建 Vite React 前端 ===");
+  console.log("=== 3/4 构建 Vite React 前端 ===");
   runCommand("pnpm build");
-  console.log("=== 3/3 构建 PyInstaller FastAPI 后端 ===");
+  console.log("=== 4/4 构建 PyInstaller FastAPI 后端 ===");
   buildPythonBackend();
   assertBuildOutputs();
   console.log("Electron 打包资源准备完成。 ");

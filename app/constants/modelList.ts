@@ -1,9 +1,7 @@
-// 模块说明：集中维护 modelList 相关常量。
+// 模块说明：集中维护模型选择器展示项；内置聊天模型只供 Auto 使用，不再直接展示。
 import type { MediaMode } from "./page-constants";
-import {
-  AUTO_MODEL_ID,
-  LLM_MODEL_CATALOG,
-} from "../lib/llm/registry/models";
+import { AUTO_MODEL_ID } from "../lib/llm/registry/models";
+import type { CustomModelRecord } from "../lib/llm/custom-models";
 import { getProviderDefinition } from "../lib/llm/registry/providers";
 import { getMediaModelsByMode } from "../lib/media/catalog";
 
@@ -12,25 +10,33 @@ export interface ModelOption {
   name: string;
   provider: string;
   description: string;
+  isCustom?: boolean;
+  customModel?: CustomModelRecord;
 }
 
-/** 普通问答 / Code Agent 使用的聊天模型。 */
+/** 普通问答只固定展示 Auto；用户新增模型会在运行时追加。 */
 export const AVAILABLE_CHAT_MODELS: readonly ModelOption[] = [
   {
     id: AUTO_MODEL_ID,
     name: "Auto Orchestration",
     provider: "自动编排",
-    description: "按任务能力选择聊天模型；图片输入时仅使用 vision 模型",
+    description: "自动探测内部候选和用户自定义模型，使用第一个可用结果",
   },
-  ...LLM_MODEL_CATALOG.filter(
-    (model) => model.chatCompatible !== false,
-  ).map((model) => ({
+];
+
+/** 把 SQLite 自定义模型转换成选择器展示项。 */
+export function getCustomModelOptions(
+  models: readonly CustomModelRecord[],
+): readonly ModelOption[] {
+  return models.map((model) => ({
     id: model.id,
     name: model.name,
     provider: getProviderDefinition(model.provider).name,
-    description: model.description,
-  })),
-];
+    description: `${model.model}${model.baseUrl ? ` · ${model.baseUrl}` : ""}`,
+    isCustom: true,
+    customModel: model,
+  }));
+}
 
 /** 绘图 / 视频模式根据能力只显示可调用的媒体模型。 */
 export function getAvailableMediaModelOptions(

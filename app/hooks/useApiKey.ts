@@ -1,17 +1,16 @@
-// 模块说明：负责 useApiKey 状态管理与业务编排。
+// 模块说明：统一管理模型与数据源凭证，并在 Electron 中跨重启持久化。
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  LLM_PROVIDER_CATALOG,
-  LLM_PROVIDER_IDS,
-} from "../lib/llm/registry/providers";
 import { apiFetch } from "../lib/api-client";
-import type { LlmCredentials } from "../lib/llm/types";
 import {
-  COMMERCE_STORAGE_KEYS,
-  type AuxiliaryServiceCredentials,
-} from "../lib/service-credentials";
+  credentialStoreToSnapshot,
+  readLegacyLocalCredentialStore,
+  snapshotToCredentialStore,
+  writeLegacyLocalCredentialStore,
+} from "../lib/local-credentials";
+import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
+import type { AuxiliaryServiceCredentials } from "../lib/service-credentials";
 
 export type CommerceDataSourceState = "environment" | "local" | "none";
 
@@ -19,106 +18,64 @@ interface DataSourceStatusResponse {
   environmentConfigured?: unknown;
 }
 
-function readStoredKeys(): LlmCredentials {
-  if (typeof window === "undefined") return {};
-  const result: LlmCredentials = {};
-
-  for (const provider of LLM_PROVIDER_CATALOG) {
-    const value = window.localStorage.getItem(provider.environmentKey);
-    if (value) result[provider.id] = value;
-  }
-  return result;
-}
-
-function readStorageValue(key: string): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  const value = window.localStorage.getItem(key)?.trim();
-  return value || undefined;
-}
-
-function readStoredServiceKeys(): AuxiliaryServiceCredentials {
-  if (typeof window === "undefined") return {};
-
-  // v5-v7 stored the TalorData token under SERPAPI_API_KEY. Prefer the new provider-specific key,
-  // but transparently migrate the old value so an upgrade never silently loses the user's token.
-  const talorDataToken =
-    readStorageValue(COMMERCE_STORAGE_KEYS.talorDataToken) ||
-    readStorageValue(COMMERCE_STORAGE_KEYS.legacySerpApi);
-
-  return {
-    talorDataToken,
-    keepaApiKey: readStorageValue(COMMERCE_STORAGE_KEYS.keepaApiKey),
-    tiktokClientKey: readStorageValue(COMMERCE_STORAGE_KEYS.tiktokClientKey),
-    tiktokClientSecret: readStorageValue(COMMERCE_STORAGE_KEYS.tiktokClientSecret),
-    tiktokMerchantId: readStorageValue(COMMERCE_STORAGE_KEYS.tiktokMerchantId),
-    temuAppKey: readStorageValue(COMMERCE_STORAGE_KEYS.temuAppKey),
-    temuAppSecret: readStorageValue(COMMERCE_STORAGE_KEYS.temuAppSecret),
-    temuAccessToken: readStorageValue(COMMERCE_STORAGE_KEYS.temuAccessToken),
-    alibaba1688AppKey: readStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AppKey),
-    alibaba1688AppSecret: readStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AppSecret),
-    alibaba1688AccessToken: readStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AccessToken),
-  };
-}
-
-function persistKeys(keys: LlmCredentials): void {
-  for (const providerId of LLM_PROVIDER_IDS) {
-    const provider = LLM_PROVIDER_CATALOG.find(
-      (item) => item.id === providerId,
-    );
-    if (!provider) continue;
-
-    const value = keys[providerId]?.trim();
-    if (value) {
-      window.localStorage.setItem(provider.environmentKey, value);
-    } else {
-      window.localStorage.removeItem(provider.environmentKey);
-    }
-  }
-}
-
-function writeStorageValue(key: string, value?: string): void {
-  const normalized = value?.trim();
-  if (normalized) window.localStorage.setItem(key, normalized);
-  else window.localStorage.removeItem(key);
-}
-
-function persistServiceKeys(keys: AuxiliaryServiceCredentials): void {
-  writeStorageValue(COMMERCE_STORAGE_KEYS.talorDataToken, keys.talorDataToken);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.keepaApiKey, keys.keepaApiKey);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.tiktokClientKey, keys.tiktokClientKey);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.tiktokClientSecret, keys.tiktokClientSecret);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.tiktokMerchantId, keys.tiktokMerchantId);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.temuAppKey, keys.temuAppKey);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.temuAppSecret, keys.temuAppSecret);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.temuAccessToken, keys.temuAccessToken);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AppKey, keys.alibaba1688AppKey);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AppSecret, keys.alibaba1688AppSecret);
-  writeStorageValue(COMMERCE_STORAGE_KEYS.alibaba1688AccessToken, keys.alibaba1688AccessToken);
-
-  // Once the new key has been persisted, remove the misleading legacy key. Reading it remains
-  // supported above for users who upgrade without ever opening the settings modal.
-  if (keys.talorDataToken?.trim()) {
-    window.localStorage.removeItem(COMMERCE_STORAGE_KEYS.legacySerpApi);
-  }
+/** 让首次 React 渲染立即继承当前 Origin 中的旧数据，避免设置弹窗闪空。 */
+function readInitialSnapshot() {
+  return credentialStoreToSnapshot(readLegacyLocalCredentialStore());
 }
 
 /**
  * Local credential manager shared by QA / Code / Commerce.
  *
- * The browser never receives packaged environment secrets. It only receives boolean/fingerprint
- * metadata from the status API, while actual provider requests are executed server-side.
+ * Electron 中的 API Key 写入主进程固定目录，并在系统支持时通过 safeStorage 加密；
+ * localStorage 仅用于纯浏览器开发模式和旧版本迁移。任何凭证都不会写入日志。
  */
 export function useApiKey() {
+  const initial = readInitialSnapshot();
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [apiKeys, setApiKeys] = useState<LlmCredentials>(readStoredKeys);
+  const [apiKeys, setApiKeys] = useState<LlmCredentials>(initial.llm);
+  const [endpointOverrides, setEndpointOverrides] =
+    useState<LlmEndpointOverrides>(initial.endpoints);
   const [serviceKeys, setServiceKeys] =
-    useState<AuxiliaryServiceCredentials>(readStoredServiceKeys);
+    useState<AuxiliaryServiceCredentials>(initial.services);
+  const [credentialsReady, setCredentialsReady] = useState(false);
   const [environmentMarketDataConfigured, setEnvironmentMarketDataConfigured] =
     useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
+    const hydrateCredentials = async () => {
+      const legacyStore = readLegacyLocalCredentialStore();
+      const electronStore = window.electronAPI?.credentials
+        ? await window.electronAPI.credentials.read().catch(() => ({}))
+        : {};
+      // 已稳定保存的主进程记录优先；旧 Origin 中独有的字段用于一次性迁移。
+      const mergedStore = { ...legacyStore, ...electronStore };
+      const snapshot = credentialStoreToSnapshot(mergedStore);
+      if (cancelled) return;
+
+      setApiKeys(snapshot.llm);
+      setEndpointOverrides(snapshot.endpoints);
+      setServiceKeys(snapshot.services);
+      setCredentialsReady(true);
+      writeLegacyLocalCredentialStore(mergedStore);
+
+      if (window.electronAPI?.credentials) {
+        // 覆盖写回可将旧 localStorage 中的 Key 迁移到稳定凭证文件。
+        void window.electronAPI.credentials.write(mergedStore).catch((error) => {
+          console.warn("[Renderer] API Key 持久化迁移失败", error);
+        });
+      }
+    };
+
+    void hydrateCredentials();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const loadStatus = async () => {
       try {
         const response = await apiFetch("/api/commerce/data-source/status", {
@@ -133,10 +90,9 @@ export function useApiKey() {
           );
         }
       } catch {
-        // Status metadata is optional; a research request will still resolve environment keys again.
+        // 状态元数据仅用于提示，真实请求仍会在服务端重新解析环境变量。
       }
     };
-
     void loadStatus();
     return () => {
       cancelled = true;
@@ -144,10 +100,24 @@ export function useApiKey() {
   }, [showKeyModal]);
 
   const handleSaveKeys = useCallback(
-    (nextKeys: LlmCredentials, nextServiceKeys: AuxiliaryServiceCredentials) => {
-      persistKeys(nextKeys);
-      persistServiceKeys(nextServiceKeys);
+    (
+      nextKeys: LlmCredentials,
+      nextEndpoints: LlmEndpointOverrides,
+      nextServiceKeys: AuxiliaryServiceCredentials,
+    ) => {
+      const store = snapshotToCredentialStore(
+        nextKeys,
+        nextEndpoints,
+        nextServiceKeys,
+      );
+      writeLegacyLocalCredentialStore(store);
+      if (window.electronAPI?.credentials) {
+        void window.electronAPI.credentials.write(store).catch((error) => {
+          console.warn("[Renderer] API Key 写入主进程失败", error);
+        });
+      }
       setApiKeys(nextKeys);
+      setEndpointOverrides(nextEndpoints);
       setServiceKeys(nextServiceKeys);
       setShowKeyModal(false);
     },
@@ -163,7 +133,9 @@ export function useApiKey() {
 
   return {
     apiKeys,
+    endpointOverrides,
     serviceKeys,
+    credentialsReady,
     commerceDataSourceState,
     showKeyModal,
     openKeyModal: () => setShowKeyModal(true),

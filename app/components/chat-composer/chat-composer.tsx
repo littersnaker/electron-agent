@@ -3,14 +3,15 @@
  * 模块职责：聊天输入器组件及附件交互。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { useCallback, useRef, useState } from "react";
-import type { ChangeEvent, ClipboardEvent, DragEvent } from "react";
+import { useCallback, useRef } from "react";
+import type { ChangeEvent, ClipboardEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   collectClipboardAttachments,
   collectDroppedAttachments,
   createFilePickerCandidates,
 } from "../../utilities/attachment-input";
+import { useComposerDrop } from "../../hooks/use-composer-drop";
 import ModelSelector from "../ModelSelector";
 import { CommerceControls } from "./commerce-controls";
 import { AttachmentList } from "./attachment-list";
@@ -53,11 +54,13 @@ export function ChatComposer({
   models,
   selectedModel,
   onSelectModel,
+  onCreateCustomModel,
+  onUpdateCustomModel,
+  onDeleteCustomModel,
   onSubmit,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
-  const [isDragActive, setIsDragActive] = useState(false);
-  const dragDepthRef = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentsEnabled = mode !== "commerce";
   const isMediaComposer = mode === "qa" && composerMode !== "chat";
   const submitDisabled =
@@ -115,35 +118,23 @@ export function ChatComposer({
     await onAddAttachments(candidates, resolveIngestionOptions());
   };
 
-  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
-    if (
-      !attachmentsEnabled ||
-      disabled ||
-      !Array.from(event.dataTransfer.types).includes("Files")
-    ) {
-      return;
-    }
-    event.preventDefault();
-    dragDepthRef.current += 1;
-    setIsDragActive(true);
-  };
+  const handleDroppedFiles = useCallback(
+    async (dataTransfer: DataTransfer): Promise<void> => {
+      const candidates = await collectDroppedAttachments(dataTransfer);
+      resolveModeFromFile(candidates[0]?.file);
+      await onAddAttachments(candidates, resolveIngestionOptions());
+    },
+    [onAddAttachments, resolveIngestionOptions, resolveModeFromFile],
+  );
 
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) setIsDragActive(false);
-  };
-
-  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    dragDepthRef.current = 0;
-    setIsDragActive(false);
-    if (!attachmentsEnabled || disabled) return;
-
-    const candidates = await collectDroppedAttachments(event.dataTransfer);
-    resolveModeFromFile(candidates[0]?.file);
-    await onAddAttachments(candidates, resolveIngestionOptions());
-  };
+  const { activeDropKind, isDragActive, dropHandlers } = useComposerDrop({
+    input,
+    disabled,
+    allowFiles: attachmentsEnabled,
+    textareaRef,
+    onInputChange,
+    onFileDrop: handleDroppedFiles,
+  });
 
   return (
     <>
@@ -166,14 +157,12 @@ export function ChatComposer({
                   className="rounded-[11px] px-3 py-2 text-left transition-all"
                   style={{
                     background: active
-                      ? "var(--glass-hover)"
+                      ? "var(--selection-bg-strong)"
                       : "transparent",
                     color: active
-                      ? "var(--text-primary)"
+                      ? "var(--selection-text)"
                       : "var(--text-tertiary)",
-                    boxShadow: active
-                      ? "inset 0 1px 0 rgba(255,255,255,0.06)"
-                      : "none",
+                    boxShadow: active ? "var(--selection-shadow)" : "none",
                   }}
                   title={tab.description}
                 >
@@ -272,13 +261,13 @@ export function ChatComposer({
                   className="rounded-full border px-2.5 py-1 text-[10px] transition-colors"
                   style={{
                     background: selected
-                      ? "rgba(10,132,255,0.13)"
+                      ? "var(--selection-bg)"
                       : "transparent",
                     borderColor: selected
-                      ? "rgba(10,132,255,0.32)"
+                      ? "var(--selection-border)"
                       : "var(--border)",
                     color: selected
-                      ? "var(--text-primary)"
+                      ? "var(--selection-text)"
                       : "var(--text-tertiary)",
                   }}
                   title={option.description}
@@ -297,7 +286,8 @@ export function ChatComposer({
                 onEnableQualityGuardChange(event.target.checked)
               }
               disabled={imageEditFidelity === "creative"}
-              className="mt-0.5 h-3.5 w-3.5 accent-[#0a84ff] disabled:opacity-40"
+              className="mt-0.5 h-3.5 w-3.5 disabled:opacity-40"
+              style={{ accentColor: "var(--accent-blue)" }}
             />
             <span>
               生成后检查重影、重复元素和无关改动；发现明显问题时自动重试一次。
@@ -326,7 +316,7 @@ export function ChatComposer({
       )}
 
       <div
-        className="relative rounded-[22px] border p-2.5 transition-all focus-within:border-[rgba(10,132,255,0.36)]"
+        className="relative rounded-[22px] border p-2.5 transition-all focus-within:border-[var(--accent-blue-border-strong)]"
         style={{
           background: isDragActive
             ? "color-mix(in srgb, var(--composer-bg) 82%, var(--accent-blue) 18%)"
@@ -337,22 +327,20 @@ export function ChatComposer({
           backdropFilter: "blur(30px) saturate(145%)",
           WebkitBackdropFilter: "blur(30px) saturate(145%)",
         }}
-        onDragEnter={handleDragEnter}
-        onDragOver={(event) => {
-          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect =
-            attachmentsEnabled && !disabled ? "copy" : "none";
-        }}
-        onDragLeave={handleDragLeave}
-        onDrop={(event) => void handleDrop(event)}
+        onDragEnter={dropHandlers.onDragEnter}
+        onDragOver={dropHandlers.onDragOver}
+        onDragLeave={dropHandlers.onDragLeave}
+        onDrop={(event) => void dropHandlers.onDrop(event)}
       >
         {isDragActive && (
           <div className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-[18px] border border-dashed border-[var(--accent-blue)] bg-[color-mix(in_srgb,var(--composer-bg)_82%,transparent)] text-[11px] font-semibold text-[var(--accent-blue)] backdrop-blur-sm">
-            松开以添加图片、文件或文件夹
+            {activeDropKind === "text"
+              ? "松开以插入文字"
+              : "松开以添加图片、文件或文件夹"}
           </div>
         )}
         <TextareaAutosize
+          ref={textareaRef}
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onPaste={(event) => void handlePaste(event)}
@@ -410,7 +398,7 @@ export function ChatComposer({
             )}
             {mode !== "commerce" && (
               <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
-                粘贴图片 / 拖入文件夹 · Enter 发送
+                粘贴图片 / 拖入文件夹 / 选中文字后拖入 · Enter 发送
               </span>
             )}
           </div>
@@ -420,6 +408,9 @@ export function ChatComposer({
               models={models}
               selectedModel={selectedModel}
               onSelect={onSelectModel}
+              onCreateCustomModel={onCreateCustomModel}
+              onUpdateCustomModel={onUpdateCustomModel}
+              onDeleteCustomModel={onDeleteCustomModel}
             />
             <button
               type="button"
@@ -433,7 +424,7 @@ export function ChatComposer({
                     : "linear-gradient(180deg, #a86df5, #7d4ce5)",
                 boxShadow:
                   mode === "commerce" || composerMode === "chat"
-                    ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
+                    ? "var(--primary-button-shadow)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
               title={resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}

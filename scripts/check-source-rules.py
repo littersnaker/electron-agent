@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKED_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".md"}
+CHECKED_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".md"}
 IGNORED_DIRECTORIES = {
     ".git",
     ".venv",
@@ -31,7 +31,7 @@ def _is_ignored(path: Path) -> bool:
 
 
 def _source_files() -> list[Path]:
-    """返回需要执行行数检查的源码和 Markdown 文档。"""
+    """返回需要执行行数检查的源码、JSON 配置和 Markdown 文档。"""
 
     return sorted(
         path

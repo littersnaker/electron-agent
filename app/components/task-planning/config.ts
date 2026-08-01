@@ -193,6 +193,11 @@ export const STATUS_META: Record<
     color: "var(--accent-green)",
     background: "rgba(48, 209, 88, 0.11)",
   },
+  skipped: {
+    label: "已跳过",
+    color: "var(--text-secondary)",
+    background: "var(--glass)",
+  },
   error: {
     label: "异常",
     color: "var(--accent-red)",

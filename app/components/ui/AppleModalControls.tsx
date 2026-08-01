@@ -128,7 +128,7 @@ export function AppleSwitch({
       aria-label={ariaLabel}
       disabled={disabled}
       onClick={onChange}
-      className="relative inline-flex h-[30px] w-[50px] shrink-0 rounded-full p-[2px] transition-all duration-300 active:scale-[0.98] disabled:opacity-45 cursor-pointer"
+      className="relative inline-flex h-7.5 w-12.5 shrink-0 rounded-full p-0.5 transition-all duration-300 active:scale-[0.98] disabled:opacity-45 cursor-pointer"
       style={{
         background: checked
           ? "linear-gradient(180deg, #39a5ff 0%, #0a84ff 100%)"

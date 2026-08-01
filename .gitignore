@@ -26,6 +26,7 @@
 /.trae/
 
 # Credentials
+/backend/core/_builtin_credentials_generated.py
 .env*
 !env.example
 *.pem

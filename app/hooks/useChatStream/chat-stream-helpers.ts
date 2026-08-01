@@ -9,7 +9,7 @@ import type {
   Message,
   WorkspaceProject,
 } from "../../constants/page-constants";
-import type { LlmCredentials } from "../../lib/llm/types";
+import type { LlmCredentials, LlmEndpointOverrides } from "../../lib/llm/types";
 import type {
   AgentLifecycleEventPayload,
   InteractiveRequest,
@@ -38,6 +38,7 @@ export interface UseChatStreamOptions {
   setSessions: Dispatch<SetStateAction<ChatSession[]>>;
   persistSession: PersistSession;
   apiKeys: LlmCredentials;
+  endpointOverrides: LlmEndpointOverrides;
   selectedModel: string;
   attachedFiles: readonly AttachedFile[];
   isParsingFile: boolean;

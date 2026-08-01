@@ -1,6 +1,6 @@
 // 模块说明：负责 client request 核心服务与领域逻辑。
 import { LLM_PROVIDER_CATALOG } from "./registry/providers";
-import type { LlmCredentials } from "./types";
+import type { LlmCredentials, LlmEndpointOverrides } from "./types";
 
 interface AttachmentLike {
   name: string;
@@ -55,6 +55,7 @@ function readBinaryData(
 export function buildLlmRequestHeaders(
   apiKeys: LlmCredentials,
   selectedModel: string,
+  endpointOverrides: LlmEndpointOverrides = {},
 ): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -64,6 +65,12 @@ export function buildLlmRequestHeaders(
   for (const provider of LLM_PROVIDER_CATALOG) {
     const value = apiKeys[provider.id]?.trim();
     if (value) headers[provider.requestHeader] = value;
+
+    // Base URL 只发送给 Python 后端，不暴露在请求正文，也不会被其他供应商复用。
+    const endpoint = endpointOverrides[provider.id]?.trim();
+    if (provider.endpointRequestHeader && endpoint) {
+      headers[provider.endpointRequestHeader] = endpoint;
+    }
   }
   return headers;
 }

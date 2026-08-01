@@ -10,6 +10,7 @@ export type PlanningStageStatus =
   | "queued"
   | "active"
   | "completed"
+  | "skipped"
   | "error";
 
 export type TaskPlanningWorkflowMode =
@@ -48,7 +49,10 @@ export interface PlanningStageView extends PlanningStageDefinition {
 
 export interface PlanningSummary {
   active: PlanningStageView | undefined;
+  /** 已完成和已跳过阶段的总数，用于表示本轮流程是否已经收束。 */
   completed: number;
+  /** 本轮未触发、但在任务结束时明确收束的阶段数。 */
+  skipped: number;
   failed: boolean;
   overallProgress: number;
 }

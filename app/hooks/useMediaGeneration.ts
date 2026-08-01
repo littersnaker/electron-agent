@@ -17,7 +17,7 @@ import {
   buildLlmRequestHeaders,
   buildMediaAttachmentPayload,
 } from "../lib/llm/client-request";
-import type { LlmCredentials } from "../lib/llm/types";
+import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
 import type { TokenInfo } from "../types/workspace";
 import type { AgentCoordinator } from "./useAgentCoordinator";
 
@@ -32,6 +32,7 @@ interface UseMediaGenerationOptions {
     title?: string,
   ) => Promise<void>;
   apiKeys: LlmCredentials;
+  endpointOverrides: LlmEndpointOverrides;
   selectedModel: string;
   attachedFile: AttachedFile | null;
   typographyPolicy: TypographyPolicy;
@@ -148,6 +149,7 @@ export function useMediaGeneration({
   setSessions,
   persistSession,
   apiKeys,
+  endpointOverrides,
   selectedModel,
   attachedFile,
   typographyPolicy,
@@ -313,7 +315,11 @@ export function useMediaGeneration({
       try {
         const response = await apiFetch("/api/media/generate", {
           method: "POST",
-          headers: buildLlmRequestHeaders(apiKeys, selectedModel),
+          headers: buildLlmRequestHeaders(
+            apiKeys,
+            selectedModel,
+            endpointOverrides,
+          ),
           body: JSON.stringify({
             prompt: visiblePrompt,
             mode,
@@ -385,6 +391,7 @@ export function useMediaGeneration({
       attachedFile,
       clearAfterSubmit,
       enableQualityGuard,
+      endpointOverrides,
       imageEditFidelity,
       isGenerating,
       isParsingFile,

@@ -6,7 +6,7 @@
 - 界面：React + Vite + TypeScript
 - 业务服务：Python + FastAPI
 - 本地数据库：SQLite
-- Python 发布：PyInstaller 单文件可执行程序
+- Python 发布：PyInstaller onedir 后端目录（避免每次启动解压）
 - 桌面安装包：electron-builder
 
 你在开发阶段需要安装 Python；最终打出的安装包会自带 Python 后端可执行文件，普通用户不需要安装 Python。
@@ -50,14 +50,14 @@ cp env.example .env.local          # 已有 .env.local 时不要覆盖
 pnpm dev
 ```
 
-`pnpm dev` 会完成下面的启动链：
+`pnpm dev` 会先清除旧 `dist`、Electron 编译产物和开发缓存，然后同时启动：
 
-1. Vite 启动 React 开发页面；
-2. Electron 主进程启动；
-3. Electron 自动寻找可用端口；
-4. Electron 启动 `.venv` 中的 FastAPI；
-5. React 通过 preload 获取 FastAPI 地址；
-6. 关闭 Electron 时自动关闭 Python 子进程。
+1. Vite React 热更新服务；
+2. Uvicorn Python 源码热更新服务；
+3. `config/chat-models.json` 模型同步 watcher；
+4. Electron 主进程编译与自动重启 watcher。
+
+开发端口被旧进程占用时会直接停止并提示 PID 排查方法，不会静默连接修改前的后端。
 
 ## 二、项目结构
 
@@ -117,7 +117,8 @@ pnpm build
 
 FastAPI 单独启动后：
 
-- 健康检查：`http://127.0.0.1:8765/api/health`
+- 轻量存活检查：`http://127.0.0.1:8765/api/health/live`
+- 详细健康检查：`http://127.0.0.1:8765/api/health`
 - 接口文档：`http://127.0.0.1:8765/api/docs`
 
 ## 四、打包桌面安装程序
@@ -145,10 +146,10 @@ pnpm electron:make:linux
 
 1. `.electron/`：Electron 主进程 JavaScript；
 2. `dist/`：Vite React 静态页面；
-3. `python-dist/multi-agent-backend*`：Python 后端可执行文件；
+3. `python-dist/multi-agent-backend/`：Python 后端可执行文件及 `_internal` 运行依赖；
 4. `release/`：最终安装包。
 
-生产安装包不会把项目根目录的 `.env.local` 自动塞进去，避免把开发者密钥分发给用户。用户可在应用的 API Key 设置界面配置自己的密钥。
+生产安装包不会直接复制 `.env.local` 文件。构建 Python 后端时，脚本只提取百炼的 `DASHSCOPE_API_KEY` 和可选 `DASHSCOPE_BASE_URL`，生成内置凭证模块并打入 PyInstaller 可执行文件。用户未配置个人百炼 Key 时会自动使用该兜底；填写个人 Key 后则优先使用用户 Key。详细说明见 [BUILTIN_BAILIAN_FALLBACK_CN.md](./BUILTIN_BAILIAN_FALLBACK_CN.md)。
 
 ## 五、Python 后端模块怎么理解
 
@@ -209,7 +210,7 @@ pnpm electron:make:linux
 - 每个 Python 函数和方法都有中文 docstring；
 - 新增 Electron/Vite 工具函数都有中文 JSDoc；
 - API、业务、数据访问分层；
-- 密钥只从请求头、环境变量或用户本地设置读取；
+- 用户密钥从请求头、环境变量或本地设置读取；百炼还可使用构建时嵌入 Python 的共享兜底；
 - 文件写入必须经过提案和人工批准；
 - 媒体下载会阻止 localhost、私有网段和危险重定向。
 
@@ -262,7 +263,7 @@ Electron 会自动选择其他端口。只有你单独执行 `python -m backend.
 
 ### 安装包启动时报“未找到 Python 后端”
 
-说明打包前没有生成 `python-dist/multi-agent-backend*`。先执行：
+说明打包前没有生成完整的 `python-dist/multi-agent-backend/` onedir 后端。先执行：
 
 ```bash
 python scripts/build-python-backend.py
@@ -270,3 +271,9 @@ pnpm electron:make
 ```
 
 更多迁移说明见 [MIGRATION_GUIDE_CN.md](./MIGRATION_GUIDE_CN.md)，本次已执行的检查见 [VALIDATION_REPORT_CN.md](./VALIDATION_REPORT_CN.md)。
+
+安装包后端冷启动和健康检查说明见 [PACKAGED_BACKEND_STARTUP_FIX_CN.md](./PACKAGED_BACKEND_STARTUP_FIX_CN.md)。
+
+## 本地热更新与模型修改
+
+本地开发统一使用 `pnpm dev`。React、Python、模型 JSON 和 Electron 主进程均支持热更新。聊天模型只需修改 `config/chat-models.json`。详细说明见 [HOT_RELOAD_MODEL_GUIDE_CN.md](./HOT_RELOAD_MODEL_GUIDE_CN.md)。

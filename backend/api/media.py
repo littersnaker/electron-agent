@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import os
 import socket
 from collections.abc import AsyncIterator
 from urllib.parse import urljoin, urlparse
@@ -14,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from backend.schemas.media import MediaGenerateBody
+from backend.services.llm.credentials import resolve_credentials, resolve_provider_key
 from backend.services.media.dashscope import generate_media
 
 router = APIRouter(tags=["media"])
@@ -26,14 +26,11 @@ REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 def _qwen_key(request: Request) -> str:
     """读取当前媒体请求可用的百炼 API Key。
 
-    优先使用前端通过请求头传来的临时 Key；请求头没有提供时，再读取后端环境变量。
-    函数只返回值，不把密钥写入日志。
+    优先使用前端通过请求头传来的用户 Key，其次读取后端环境变量，最后使用
+    打包进 Python 的百炼共享兜底。函数只返回值，不把密钥写入日志。
     """
 
-    return (
-        request.headers.get("x-llm-key-qwen", "").strip()
-        or os.getenv("DASHSCOPE_API_KEY", "").strip()
-    )
+    return resolve_provider_key(request, "qwen")
 
 
 def _is_forbidden_ip(address: str) -> bool:
@@ -155,8 +152,13 @@ async def post_media_generate(
     api_key = _qwen_key(request)
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置百炼 API Key")
+    credentials = resolve_credentials(request)
     try:
-        return await generate_media(body, api_key)
+        return await generate_media(
+            body,
+            api_key,
+            credentials.get_endpoint("qwen"),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

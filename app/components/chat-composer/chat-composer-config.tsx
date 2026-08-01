@@ -13,6 +13,7 @@ import type {
 } from "../../constants/page-constants";
 import type { ModelOption } from "../../constants/modelList";
 import type { CommerceMarketplaceCode } from "../../lib/commerce/types";
+import type { CustomModelInput } from "../../lib/llm/custom-models";
 import type { CommerceWorkflowMode } from "../../lib/commerce/listing/types";
 import type { AttachmentCandidate } from "../../utilities/attachment-input";
 import type { AttachmentIngestionOptions } from "../../hooks/useComposer";
@@ -48,6 +49,9 @@ export interface ChatComposerProps {
   models: readonly ModelOption[];
   selectedModel: string;
   onSelectModel: (modelId: string) => void;
+  onCreateCustomModel?: (input: CustomModelInput) => Promise<void>;
+  onUpdateCustomModel?: (modelId: string, input: CustomModelInput) => Promise<void>;
+  onDeleteCustomModel?: (modelId: string) => Promise<void>;
   onSubmit: () => void;
 }
 

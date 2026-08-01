@@ -138,7 +138,7 @@ export function useWorkspaceController(
       nextMessages: Message[],
       title = session.title,
     ) => {
-      await apiFetch("/api/workspace", {
+      const response = await apiFetch("/api/workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -148,6 +148,13 @@ export function useWorkspaceController(
           messages: nextMessages,
         }),
       });
+      // 旧版忽略非 2xx 响应，界面看似保存成功，重启后才发现消息没有写入 SQLite。
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(payload.error || `会话保存失败：HTTP ${response.status}`);
+      }
     },
     [],
   );
@@ -171,11 +178,14 @@ export function useWorkspaceController(
       event.stopPropagation();
       const remaining = sessions.filter((session) => session.id !== id);
 
-      await apiFetch("/api/workspace", {
+      const response = await apiFetch("/api/workspace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "deleteSession", id }),
       });
+      if (!response.ok) {
+        throw new Error(`删除会话失败：HTTP ${response.status}`);
+      }
 
       setSessions(remaining);
 

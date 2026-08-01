@@ -1,0 +1,41 @@
+# =============================================
+# 1. 强制忽略 Electron 打包产物（不参与统计）
+# =============================================
+dist/** linguist-vendored
+out/** linguist-vendored
+build/** linguist-vendored
+release/** linguist-vendored
+
+# =============================================
+# 2. 强制忽略前端构建后的压缩文件（自动生成）
+# =============================================
+*.min.js linguist-generated
+*.min.css linguist-generated
+bundle.js linguist-generated
+static/js/*.js linguist-generated
+
+# =============================================
+# 3. 忽略 Python 虚拟环境与缓存目录
+# =============================================
+venv/** linguist-vendored
+.venv/** linguist-vendored
+__pycache__/** linguist-generate
+.pytest_cache/** linguist-vendored
+*.pyc linguist-generated
+
+# =============================================
+# 4. 处理 Electron 主进程 & React 前端识别
+# =============================================
+# 如果你使用 TypeScript 写 React，强制识别为 TypeScript
+*.tsx linguist-language=TypeScript
+*.ts linguist-language=TypeScript
+
+# 如果主进程暴露在项目根目录（如 main.js / index.js）
+# 但你又不想让纯 JS 文件占比过大，可以让 Electron 核心不参与统计（适当保留真实业务代码）
+electron/** linguist-vendored
+
+# =============================================
+# 5. 决定 Python 的“纯粹性”（可选）
+# =============================================
+# 如果你想让 Python 完全不显示，只需隐藏所有 .py（不推荐，仅特殊情况）
+# *.py linguist-detectable=false
