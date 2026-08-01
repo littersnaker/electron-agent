@@ -18,6 +18,9 @@ const COLORS = {
   materialStrong: "var(--glass-solid)",
   border: "var(--border)",
   blue: "var(--accent-blue)",
+  selection: "var(--selection-bg)",
+  selectionBorder: "var(--selection-border)",
+  selectionText: "var(--selection-text)",
 };
 
 export default function ModelSelector({
@@ -72,7 +75,7 @@ export default function ModelSelector({
           className="flex h-9 w-full items-center justify-between gap-2 rounded-[11px] border px-3 text-left transition-all active:scale-[0.99]"
           style={{
             background: isOpen ? "var(--glass-hover)" : COLORS.material,
-            borderColor: isOpen ? "rgba(10,132,255,0.4)" : COLORS.border,
+            borderColor: isOpen ? COLORS.selectionBorder : COLORS.border,
             color: COLORS.text,
           }}
           aria-expanded={isOpen}
@@ -134,9 +137,7 @@ export default function ModelSelector({
                   }}
                   className="flex w-full items-start gap-2 rounded-[10px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--glass-hover)]"
                   style={{
-                    background: selected
-                      ? "rgba(10,132,255,0.12)"
-                      : "transparent",
+                    background: selected ? COLORS.selection : "transparent",
                     color: selected ? COLORS.text : COLORS.textMuted,
                   }}
                 >
@@ -148,7 +149,7 @@ export default function ModelSelector({
                       <span
                         className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px]"
                         style={{
-                          background: "rgba(10,132,255,0.1)",
+                          background: "var(--accent-blue-soft)",
                           color: COLORS.blue,
                         }}
                       >
@@ -163,7 +164,7 @@ export default function ModelSelector({
                     </div>
                   </div>
                   {selected && (
-                    <span style={{ color: COLORS.blue }}>✓</span>
+                    <span style={{ color: COLORS.selectionText }}>✓</span>
                   )}
                 </button>
               );

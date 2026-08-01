@@ -9,7 +9,7 @@ import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
 import TaskPlanningPanel from "./components/TaskPlanningPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
 import ApiKeyModal from "./components/ApiKeyModal";
-import ChatComposer from "./components/ChatComposer";
+import { ChatComposer } from "./components/ChatComposer";
 import ChatList from "./components/ChatList";
 import ChatSidebar from "./components/ChatSidebar";
 import CustomTitleBar from "./components/CustomTitleBar";

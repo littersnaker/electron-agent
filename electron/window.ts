@@ -18,8 +18,8 @@ export function createMainWindow(
   initialTheme: AppTheme,
 ): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1765,
+    height: 1115,
     minWidth: 800,
     minHeight: 600,
     accentColor: false,

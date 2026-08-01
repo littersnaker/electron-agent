@@ -154,14 +154,12 @@ export function ChatComposer({
                   className="rounded-[11px] px-3 py-2 text-left transition-all"
                   style={{
                     background: active
-                      ? "var(--glass-hover)"
+                      ? "var(--selection-bg-strong)"
                       : "transparent",
                     color: active
-                      ? "var(--text-primary)"
+                      ? "var(--selection-text)"
                       : "var(--text-tertiary)",
-                    boxShadow: active
-                      ? "inset 0 1px 0 rgba(255,255,255,0.06)"
-                      : "none",
+                    boxShadow: active ? "var(--selection-shadow)" : "none",
                   }}
                   title={tab.description}
                 >
@@ -260,13 +258,13 @@ export function ChatComposer({
                   className="rounded-full border px-2.5 py-1 text-[10px] transition-colors"
                   style={{
                     background: selected
-                      ? "rgba(10,132,255,0.13)"
+                      ? "var(--selection-bg)"
                       : "transparent",
                     borderColor: selected
-                      ? "rgba(10,132,255,0.32)"
+                      ? "var(--selection-border)"
                       : "var(--border)",
                     color: selected
-                      ? "var(--text-primary)"
+                      ? "var(--selection-text)"
                       : "var(--text-tertiary)",
                   }}
                   title={option.description}
@@ -285,7 +283,8 @@ export function ChatComposer({
                 onEnableQualityGuardChange(event.target.checked)
               }
               disabled={imageEditFidelity === "creative"}
-              className="mt-0.5 h-3.5 w-3.5 accent-[#0a84ff] disabled:opacity-40"
+              className="mt-0.5 h-3.5 w-3.5 disabled:opacity-40"
+              style={{ accentColor: "var(--accent-blue)" }}
             />
             <span>
               生成后检查重影、重复元素和无关改动；发现明显问题时自动重试一次。
@@ -314,7 +313,7 @@ export function ChatComposer({
       )}
 
       <div
-        className="relative rounded-[22px] border p-2.5 transition-all focus-within:border-[rgba(10,132,255,0.36)]"
+        className="relative rounded-[22px] border p-2.5 transition-all focus-within:border-[var(--accent-blue-border-strong)]"
         style={{
           background: isDragActive
             ? "color-mix(in srgb, var(--composer-bg) 82%, var(--accent-blue) 18%)"
@@ -419,7 +418,7 @@ export function ChatComposer({
                     : "linear-gradient(180deg, #a86df5, #7d4ce5)",
                 boxShadow:
                   mode === "commerce" || composerMode === "chat"
-                    ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
+                    ? "var(--primary-button-shadow)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
               title={resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}

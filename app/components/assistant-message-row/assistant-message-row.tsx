@@ -200,7 +200,7 @@ export function AssistantMessageRow({
                     target="_blank"
                     rel="noreferrer"
                     className="underline decoration-current/30 underline-offset-4 transition-colors hover:decoration-current/70"
-                    style={{ color: "#64b5ff" }}
+                    style={{ color: "var(--accent-blue-hover)" }}
                   >
                     {children}
                   </a>

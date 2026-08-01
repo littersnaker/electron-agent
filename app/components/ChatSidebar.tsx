@@ -1,7 +1,6 @@
 // 模块说明：负责 ChatSidebar 用户界面组件。
 import type { MouseEvent } from "react";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
-
 interface ChatSidebarProps {
   sessions: ChatSession[];
   projects: WorkspaceProject[];
@@ -18,14 +17,16 @@ interface ChatSidebarProps {
   switchSession: (id: string) => void;
   deleteSession: (id: string, event: MouseEvent) => void;
 }
-
 const COLORS = {
   text: "var(--text-primary)",
   textMuted: "var(--text-secondary)",
   textSubtle: "var(--text-tertiary)",
   material: "var(--glass)",
   materialStrong: "var(--glass-hover)",
-  materialHover: "var(--glass-hover)",
+  selection: "var(--selection-bg-strong)",
+  selectionText: "var(--selection-text)",
+  selectionIndicator: "var(--selection-indicator)",
+  selectionShadow: "var(--selection-shadow)",
   border: "var(--border)",
   blue: "var(--accent-blue)",
   green: "var(--accent-green)",
@@ -121,7 +122,6 @@ function SessionItem({
   | "deleteSession"
 > & { session: ChatSession }) {
   const active = session.id === activeSessionId;
-  const activeColor = COLORS.blue;
 
   return (
     <button
@@ -129,11 +129,9 @@ function SessionItem({
       onClick={() => switchSession(session.id)}
       className="group flex w-full items-center gap-2 rounded-[11px] px-2.5 py-2 text-left transition-all duration-150 cursor-pointer"
       style={{
-        color: active ? COLORS.text : COLORS.textMuted,
-        background: active ? COLORS.materialHover : "transparent",
-        boxShadow: active
-          ? "inset 0 1px 0 rgba(255,255,255,0.035)"
-          : "none",
+        color: active ? COLORS.selectionText : COLORS.textMuted,
+        background: active ? COLORS.selection : "transparent",
+        boxShadow: active ? COLORS.selectionShadow : "none",
       }}
       onMouseEnter={(event) => {
         if (!active) event.currentTarget.style.background = COLORS.material;
@@ -145,7 +143,9 @@ function SessionItem({
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full transition-colors"
         style={{
-          background: active ? activeColor : "rgba(255,255,255,0.18)",
+          background: active
+            ? COLORS.selectionIndicator
+            : "rgba(255,255,255,0.18)",
         }}
       />
       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
@@ -243,8 +243,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           style={{
             background:
               "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
-            boxShadow:
-              "0 8px 20px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.2)",
+            boxShadow: "var(--primary-button-shadow)",
           }}
         >
           <PlusIcon />
@@ -304,8 +303,8 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
             style={{
               background:
-                "linear-gradient(145deg, rgba(10,132,255,0.13), rgba(10,132,255,0.045))",
-              borderColor: "rgba(10,132,255,0.20)",
+                "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
+              borderColor: "var(--accent-blue-border)",
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
             }}
             title="新建跨境市场情报研究"
@@ -313,9 +312,9 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             <span
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
               style={{
-                background: "rgba(10,132,255,0.13)",
-                borderColor: "rgba(10,132,255,0.22)",
-                color: "#64b5ff",
+                background: "var(--accent-blue-soft-strong)",
+                borderColor: "var(--accent-blue-border-strong)",
+                color: "var(--accent-blue-hover)",
               }}
             >
               <CommerceIcon className="h-[18px] w-[18px]" />
@@ -336,7 +335,10 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             </span>
             <span
               className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-              style={{ background: "rgba(10,132,255,0.12)", color: "#64b5ff" }}
+              style={{
+                background: "var(--accent-blue-soft-strong)",
+                color: "var(--accent-blue-hover)",
+              }}
             >
               <PlusIcon className="h-3.5 w-3.5" />
             </span>

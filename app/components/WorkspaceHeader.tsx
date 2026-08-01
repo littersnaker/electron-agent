@@ -35,16 +35,16 @@ function SessionGlyph({
   const isMedia = sessionMode === "qa" && isMediaMode(composerMode);
 
   const background = isCode
-    ? "rgba(10,132,255,0.13)"
+    ? "var(--accent-blue-soft-strong)"
     : isCommerce
-      ? "rgba(10,132,255,0.13)"
+      ? "var(--accent-blue-soft-strong)"
       : isMedia
         ? "rgba(191,90,242,0.14)"
         : "rgba(191,90,242,0.12)";
   const color = isCode
-    ? "#64b5ff"
+    ? "var(--accent-blue-hover)"
     : isCommerce
-      ? "#64b5ff"
+      ? "var(--accent-blue-hover)"
       : isMedia
         ? "#bf5af2"
         : "#d6a5ff";

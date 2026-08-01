@@ -20,6 +20,15 @@
   --accent-glow: rgba(10, 132, 255, 0.22);
   color-scheme: light;
 }
+
+[data-theme="dark"] {
+  --accent-from: var(--accent-blue-gradient-start);
+  --accent-via: var(--accent-blue);
+  --accent-to: var(--accent-blue-gradient-end);
+  --accent: var(--accent-blue);
+  --accent-glow: var(--accent-blue-glow);
+}
+
 .custom-title-bar{
   /* 可拖拽 */
   -webkit-app-region: drag;

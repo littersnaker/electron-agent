@@ -44,7 +44,7 @@ function AssistantBadge() {
         />
         <defs>
           <linearGradient id="assistant-gradient" x1="4" y1="3" x2="16" y2="15">
-            <stop stopColor="#64b5ff" />
+            <stop stopColor="var(--accent-blue-hover)" />
             <stop offset="1" stopColor="#bf5af2" />
           </linearGradient>
         </defs>
@@ -178,8 +178,7 @@ function ChatList({
                     style={{
                       background:
                         "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
-                      boxShadow:
-                        "0 10px 28px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.18)",
+                      boxShadow: "var(--message-user-shadow)",
                     }}
                   >
                     <MessageAttachmentGallery

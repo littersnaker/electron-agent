@@ -26,8 +26,8 @@ export function CommerceControls({
       className="mb-2 rounded-[15px] border px-3 py-2.5"
       style={{
         background:
-          "linear-gradient(145deg, rgba(10,132,255,0.08), var(--glass-soft))",
-        borderColor: "rgba(10,132,255,0.16)",
+          "linear-gradient(145deg, var(--accent-blue-soft), var(--glass-soft))",
+        borderColor: "var(--accent-blue-border)",
       }}
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -53,8 +53,12 @@ export function CommerceControls({
                 disabled={disabled}
                 className="rounded-[8px] px-2.5 py-1.5 text-[9px] font-semibold transition-colors disabled:opacity-40"
                 style={{
-                  background: selected ? "rgba(10,132,255,0.16)" : "transparent",
-                  color: selected ? "#64b5ff" : "var(--text-tertiary)",
+                  background: selected
+                    ? "var(--selection-bg-strong)"
+                    : "transparent",
+                  color: selected
+                    ? "var(--selection-text)"
+                    : "var(--text-tertiary)",
                 }}
               >
                 {label}
@@ -84,11 +88,15 @@ export function CommerceControls({
                 disabled={disabled}
                 className="rounded-full border px-2.5 py-1.5 text-[9px] font-medium transition-all disabled:opacity-40"
                 style={{
-                  background: selected ? "rgba(10,132,255,0.14)" : "transparent",
+                  background: selected
+                    ? "var(--selection-bg)"
+                    : "transparent",
                   borderColor: selected
-                    ? "rgba(10,132,255,0.30)"
+                    ? "var(--selection-border)"
                     : "var(--border)",
-                  color: selected ? "#64b5ff" : "var(--text-tertiary)",
+                  color: selected
+                    ? "var(--selection-text)"
+                    : "var(--text-tertiary)",
                 }}
                 title={`${marketplace.label} · ${marketplace.currency}`}
               >
@@ -110,11 +118,18 @@ export function CommerceControls({
           onClick={onOpenServiceSettings}
           className="rounded-full border px-2.5 py-1 text-[8px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
           style={{
-            color: dataSourceState !== "none" ? "#0a84ff" : "var(--text-secondary)",
+            color:
+              dataSourceState !== "none"
+                ? "var(--accent-blue)"
+                : "var(--text-secondary)",
             borderColor:
-              dataSourceState !== "none" ? "rgba(10,132,255,0.25)" : "var(--border)",
+              dataSourceState !== "none"
+                ? "var(--accent-blue-border-strong)"
+                : "var(--border)",
             background:
-              dataSourceState !== "none" ? "rgba(10,132,255,0.10)" : "var(--glass)",
+              dataSourceState !== "none"
+                ? "var(--accent-blue-soft)"
+                : "var(--glass)",
           }}
           title="设置 TalorData、Keepa 或 Amazon SP-API；未配置时会尝试 Amazon 公开页面爬虫"
         >
