@@ -42,6 +42,7 @@ async function requestCreateSession(
 interface WorkspaceControllerOptions {
   includeCode?: boolean;
   includeCommerce?: boolean;
+  includeMedia?: boolean;
 }
 
 export function useWorkspaceController(
@@ -66,6 +67,7 @@ export function useWorkspaceController(
     const params = new URLSearchParams();
     if (options.includeCode) params.set("code", "1");
     if (options.includeCommerce) params.set("commerce", "1");
+    if (options.includeMedia) params.set("media", "1");
     const query = params.toString();
     const response = await apiFetch(`/api/workspace${query ? `?${query}` : ""}`, {
       cache: "no-store",
@@ -76,7 +78,7 @@ export function useWorkspaceController(
     setProjects(workspace.projects);
     setSessions(workspace.sessions);
     return workspace;
-  }, [options.includeCode, options.includeCommerce]);
+  }, [options.includeCode, options.includeCommerce, options.includeMedia]);
 
   const createSession = useCallback(
     async (

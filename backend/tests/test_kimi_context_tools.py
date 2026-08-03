@@ -11,12 +11,18 @@ import pytest
 
 from backend.services.agent.context import _fallback_overview_files
 from backend.services.agent.read_only_loop import stream_read_only_tool_answer
-from backend.services.agent.tool_registry import public_tool_catalog
-from backend.services.agent.workspace_tools import search_workspace
+from backend.services.agent.tool_registry import (
+    public_tool_catalog,
+    tool_names_for_mode,
+)
+from backend.services.agent.workspace_tools import (
+    render_workspace_tree,
+    search_workspace,
+)
 from backend.services.llm.catalog import ModelDefinition, get_provider
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import LlmGateway
-from backend.services.llm.protocols import LlmProtocolClient
+from backend.services.llm.protocols import LlmProtocolClient, ProviderRequestError
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.services.workspace.indexer import _query_terms
 
@@ -81,6 +87,37 @@ def test_tool_catalog_contains_read_and_write_tools() -> None:
     assert {"search", "read", "edit", "run", "complete_work", "finish"} <= names
 
 
+
+def test_tool_catalog_matches_execution_mode() -> None:
+    """全自动必须暴露 edit/run，自动编辑只禁用 run，只读模式不得暴露写入。"""
+
+    assert "edit" in tool_names_for_mode(execution_mode="auto_edit")
+    assert "run" not in tool_names_for_mode(execution_mode="auto_edit")
+    assert {"edit", "run"} <= set(
+        tool_names_for_mode(execution_mode="full_auto")
+    )
+    assert set(tool_names_for_mode(read_only=True)) == {
+        "search",
+        "read",
+        "inspect",
+        "finish",
+    }
+
+
+def test_workspace_tree_hides_sensitive_files_but_keeps_template(tmp_path: Path) -> None:
+    """目录树不向模型暴露真实环境文件，但保留可安全参考的模板。"""
+
+    (tmp_path / ".env.development").write_text("SECRET=value", "utf-8")
+    (tmp_path / ".env.example").write_text("API_URL=", "utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/app.ts").write_text("export {};", "utf-8")
+
+    tree = render_workspace_tree(tmp_path)
+
+    assert ".env.development" not in tree
+    assert ".env.example" in tree
+    assert "src/app.ts" in tree
+
 def test_kimi_k26_omits_temperature_and_keeps_full_endpoint() -> None:
     """验证 K2.6 不发送非法 temperature，并兼容 Base URL 与完整端点。"""
 
@@ -113,14 +150,22 @@ async def test_openai_protocol_omits_none_temperature() -> None:
         captured.update(json.loads(request.content.decode("utf-8")))
         return httpx.Response(
             200,
-            text='data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n',
+            text=(
+                'data: {"choices":[{"delta":{"content":"OK"}}]}\n\n'
+                'data: {"choices":[],"usage":{"prompt_tokens":12,'
+                '"completion_tokens":3,"total_tokens":15}}\n\n'
+                "data: [DONE]\n\n"
+            ),
             headers={"content-type": "text/event-stream"},
         )
 
     client = LlmProtocolClient()
     await client._client.aclose()
-    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await client._direct_client.aclose()
+    # Kimi 属于国内直连供应商，测试必须替换直连客户端。
+    client._direct_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     chunks = []
+    usages: list[LlmUsage] = []
     async for chunk in client.stream_openai_compatible(
         model=_kimi_model(),
         endpoint="https://api.moonshot.cn/v1/chat/completions",
@@ -129,10 +174,14 @@ async def test_openai_protocol_omits_none_temperature() -> None:
         temperature=None,
     ):
         chunks.append(chunk.text_delta)
+        if chunk.usage:
+            usages.append(chunk.usage)
     await client.close()
 
     assert "temperature" not in captured
+    assert captured["stream_options"] == {"include_usage": True}
     assert "".join(chunks) == "OK"
+    assert usages == [LlmUsage(prompt=12, completion=3, total=15)]
 
 
 @pytest.mark.asyncio
@@ -178,3 +227,50 @@ async def test_read_only_agent_uses_search_and_read_before_answer(
     assert "search_codebase" in output
     assert "read_file_from_disk" in output
     assert "项目包含 package.json" in output
+
+
+@pytest.mark.asyncio
+async def test_connectivity_measures_headers_only_latency() -> None:
+    """纯网络延迟只测量到响应头，不等待模型生成内容。"""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="data: [DONE]\n\n",
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = LlmProtocolClient()
+    await client._client.aclose()
+    await client._direct_client.aclose()
+    client._direct_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    latency_ms = await client.measure_connectivity(
+        model=_kimi_model(),
+        endpoint="https://api.moonshot.cn/v1/chat/completions",
+        api_key="test-key",
+    )
+
+    assert latency_ms >= 0
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_connectivity_reports_auth_failure() -> None:
+    """401 鉴权错误必须抛出，不能显示为连接正常。"""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text='{"error":{"message":"bad key"}}')
+
+    client = LlmProtocolClient()
+    await client._client.aclose()
+    await client._direct_client.aclose()
+    client._direct_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ProviderRequestError):
+        await client.measure_connectivity(
+            model=_kimi_model(),
+            endpoint="https://api.moonshot.cn/v1/chat/completions",
+            api_key="bad-key",
+        )
+    await client.close()

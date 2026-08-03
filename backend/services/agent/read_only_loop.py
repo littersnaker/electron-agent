@@ -10,21 +10,22 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from backend.services.agent.loop_protocol import coerce_read_paths
 from backend.services.agent.service_events import lifecycle, usage_packet
 from backend.services.agent.tool_registry import render_tool_catalog
-from backend.services.agent.workspace_tools import (
-    read_workspace_files,
-    render_workspace_tree,
-    search_workspace,
-)
+from backend.services.agent.workspace_tools import ReadBatchResult, render_workspace_tree
+from backend.tools.code_tools import execute_code_tool
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.utils.sse import encode_sse
 
-MAX_READ_ONLY_TRANSCRIPT_CHARS = 220_000
+MAX_READ_ONLY_TRANSCRIPT_CHARS = 80_000
+MAX_READ_ONLY_ENTRY_CHARS = 16_000
+MAX_READ_ONLY_ITERATIONS = 12
+MAX_SAME_ACTION_REPEATS = 2
 
 
 def _trim(entries: list[str]) -> str:
@@ -40,6 +41,25 @@ def _trim(entries: list[str]) -> str:
         consumed += min(len(entry), remaining)
     selected.reverse()
     return "\n\n".join(selected)
+
+
+def _append_transcript(entries: list[str], entry: str) -> None:
+    """追加观察并执行单条与总量存储上限，避免只读循环无界膨胀。"""
+
+    text = str(entry or "")
+    marker = "\n（单条观察已按存储预算截断）"
+    if len(text) > MAX_READ_ONLY_ENTRY_CHARS:
+        text = text[: MAX_READ_ONLY_ENTRY_CHARS - len(marker)] + marker
+    entries.append(text)
+    if sum(len(item) for item in entries) <= MAX_READ_ONLY_TRANSCRIPT_CHARS:
+        return
+    kept = list(dict.fromkeys([*entries[:3], *entries[-30:]]))
+    while (
+        sum(len(item) for item in kept) > MAX_READ_ONLY_TRANSCRIPT_CHARS
+        and len(kept) > 3
+    ):
+        kept.pop(3)
+    entries[:] = kept
 
 
 def _parse_action(text: str) -> dict[str, Any]:
@@ -60,10 +80,21 @@ def _parse_action(text: str) -> dict[str, Any]:
     if not isinstance(action, dict):
         raise ValueError("只读 Agent 响应必须是 JSON 对象")
     kind = str(action.get("action") or "").strip().lower()
-    if kind not in {"search", "read", "finish"}:
+    if kind not in {"search", "read", "inspect", "finish"}:
         raise ValueError(f"只读 Agent 不允许动作：{kind or '空'}")
     action["action"] = kind
     return action
+
+
+def _action_fingerprint(action: dict[str, Any]) -> str:
+    """生成只读动作指纹，用于阻止模型重复读取同一路径。"""
+
+    kind = str(action.get("action") or "")
+    if kind == "search":
+        return f"search:{str(action.get('query') or '').strip().lower()}"
+    paths = action.get("paths")
+    normalized = sorted(str(item).strip().lower() for item in paths or [])
+    return f"{kind}:{'|'.join(normalized)}"
 
 
 def _system_prompt() -> str:
@@ -76,13 +107,16 @@ def _system_prompt() -> str:
 每轮只返回一个 JSON 对象，不得附加 Markdown：
 1. {{"action":"search","query":"文件名、业务词或符号名"}}
 2. {{"action":"read","paths":["相对路径"]}}
-3. {{"action":"finish","answer":"基于已读取文件的最终中文回答"}}
+3. {{"action":"inspect","paths":["Python 相对路径"],"query":"可选符号名"}}
+4. {{"action":"finish","answer":"基于已读取文件的最终中文回答"}}
 
 规则：
 - 在 finish 前至少执行一次 search 或 read；初始索引未命中不代表项目没有文件。
 - 对项目能力、架构或完整度做判断时，优先搜索并读取 package.json、README、路由、页面、状态管理、API、数据库和测试文件。
 - search 直接扫描当前磁盘，能够看到索引遗漏或刚写入的文件。
-- 不读取 .env、密钥、二进制文件，不越出项目根目录。
+- 禁止请求 .env、.env.*、私钥和凭据；工具会返回 SECURITY SKIP，收到后不得重试同一路径。
+- 需要配置结构时只读 .env.example、类型定义、构建配置或源码中的环境变量名称。
+- 不读取二进制文件，不越出项目根目录。
 - 最终回答先给结论，再列证据文件路径、已有能力、缺口与建议；不要声称读过未提供的文件。
 """
 
@@ -99,12 +133,14 @@ async def stream_read_only_tool_answer(
 
     transcript = [
         f"USER QUESTION:\n{user_text}",
-        f"PROJECT TREE:\n{render_workspace_tree(root)}",
+        f"PROJECT TREE:\n{render_workspace_tree(root, limit=800)}",
         f"INITIAL INDEX CONTEXT:\n{initial_context}",
     ]
     usage_total = LlmUsage()
     used_tool = False
     invalid_rounds = 0
+    iterations = 0
+    action_counts: dict[str, int] = {}
 
     yield encode_sse(
         {
@@ -119,6 +155,9 @@ async def stream_read_only_tool_answer(
     )
 
     while True:
+        iterations += 1
+        if iterations > MAX_READ_ONLY_ITERATIONS:
+            raise ValueError("只读 Agent 达到最大分析轮次，请缩小问题范围后重试。")
         text, usage, _model = await GATEWAY.complete(
             preferred_model_id=preferred_model_id,
             credentials=credentials,
@@ -127,6 +166,7 @@ async def stream_read_only_tool_answer(
                 LlmMessage("user", _trim(transcript)),
             ],
             temperature=0.1,
+            timeout_seconds=90,
         )
         usage_total.prompt += usage.prompt
         usage_total.completion += usage.completion
@@ -142,21 +182,35 @@ async def stream_read_only_tool_answer(
             invalid_rounds = 0
         except ValueError as exc:
             invalid_rounds += 1
-            transcript.append(f"PROTOCOL ERROR: {exc}\n请返回合法的单动作 JSON。")
+            _append_transcript(
+                transcript,
+                f"PROTOCOL ERROR: {exc}\n请返回合法的单动作 JSON。",
+            )
             if invalid_rounds >= 3:
                 raise ValueError(f"只读 Agent 连续返回无效工具协议：{exc}") from exc
             continue
 
         kind = str(action["action"])
+        if kind != "finish":
+            fingerprint = _action_fingerprint(action)
+            action_counts[fingerprint] = action_counts.get(fingerprint, 0) + 1
+            if action_counts[fingerprint] > MAX_SAME_ACTION_REPEATS:
+                _append_transcript(
+                    transcript,
+                    "DUPLICATE ACTION REJECTED：该 search/read/inspect 已执行，"
+                    "结果没有变化。请改用其他安全路径，或根据现有证据 finish。"
+                )
+                continue
         if kind == "finish":
             answer = str(action.get("answer") or action.get("summary") or "").strip()
             if not used_tool:
-                transcript.append(
+                _append_transcript(
+                    transcript,
                     "FINISH REJECTED: 尚未使用 search/read。必须先检查真实项目文件。"
                 )
                 continue
             if not answer:
-                transcript.append("FINISH REJECTED: answer 不能为空。")
+                _append_transcript(transcript, "FINISH REJECTED: answer 不能为空。")
                 continue
             yield encode_sse(
                 {
@@ -175,11 +229,20 @@ async def stream_read_only_tool_answer(
         if kind == "search":
             query = str(action.get("query") or "").strip()
             if not query:
-                transcript.append("SEARCH ERROR: query 不能为空。")
+                _append_transcript(transcript, "SEARCH ERROR: query 不能为空。")
                 continue
-            result = search_workspace(root, query)
+            result = await execute_code_tool(
+                "workspace.search",
+                root=root,
+                arguments={"query": query},
+                permissions={"read"},
+                agent_id="read_only_agent",
+            )
             used_tool = True
-            transcript.append(f"ACTION search query={query}\nOBSERVATION:\n{result}")
+            _append_transcript(
+                transcript,
+                f"ACTION search query={query}\nOBSERVATION:\n{result}",
+            )
             yield encode_sse(
                 {
                     "type": "AGENT_LIFECYCLE",
@@ -193,25 +256,69 @@ async def stream_read_only_tool_answer(
             )
             continue
 
-        raw_paths = action.get("paths")
-        paths = (
-            list(dict.fromkeys(str(item).strip() for item in raw_paths if str(item).strip()))
-            if isinstance(raw_paths, list)
-            else []
-        )
-        if not paths:
-            transcript.append("READ ERROR: paths 必须是非空数组。")
+        if kind == "inspect":
+            paths = coerce_read_paths(action.get("paths", action.get("path")))
+            query = str(action.get("query") or "").strip()
+            if not paths and not query:
+                _append_transcript(
+                    transcript,
+                    "INSPECT ERROR: paths 或 query 至少提供一个。",
+                )
+                continue
+            result = await execute_code_tool(
+                "code.inspect",
+                root=root,
+                arguments={"paths": paths, "query": query},
+                permissions={"read"},
+                agent_id="read_only_agent",
+            )
+            used_tool = True
+            _append_transcript(
+                transcript,
+                f"ACTION inspect paths={paths} query={query}\nOBSERVATION:\n{result}"
+            )
+            yield encode_sse(
+                {
+                    "type": "AGENT_LIFECYCLE",
+                    "payload": lifecycle(
+                        role="researcher",
+                        status="running",
+                        detail="已完成 AST、符号与影响分析，继续整理证据…",
+                        tool_name="code_intelligence",
+                    ),
+                }
+            )
             continue
-        result = read_workspace_files(root, paths)
-        used_tool = True
-        transcript.append(f"ACTION read paths={paths}\nOBSERVATION:\n{result}")
+
+        paths = coerce_read_paths(action.get("paths", action.get("path")))
+        if not paths:
+            _append_transcript(transcript, "READ ERROR: paths 必须是非空数组。")
+            continue
+        read_result = cast(
+            ReadBatchResult,
+            await execute_code_tool(
+                "workspace.read",
+                root=root,
+                arguments={"paths": paths},
+                permissions={"read"},
+                agent_id="read_only_agent",
+            ),
+        )
+        used_tool = used_tool or bool(read_result.versions)
+        _append_transcript(
+            transcript,
+            f"ACTION read paths={paths}\nOBSERVATION:\n{read_result.content}"
+        )
         yield encode_sse(
             {
                 "type": "AGENT_LIFECYCLE",
                 "payload": lifecycle(
                     role="researcher",
                     status="running",
-                    detail=f"已读取 {len(paths)} 个项目文件，继续分析…",
+                    detail=(
+                        f"已读取 {len(read_result.versions)} 个安全文件；"
+                        f"跳过 {len(read_result.blocked_paths)} 个敏感路径，继续分析…"
+                    ),
                     tool_name="read_file_from_disk",
                 ),
             }

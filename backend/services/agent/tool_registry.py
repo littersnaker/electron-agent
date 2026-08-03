@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ToolScope = Literal["read", "write", "execute", "control"]
+ExecutionMode = Literal["auto_edit", "full_auto"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,13 +33,39 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
     AgentToolDefinition(
         name="read",
         scope="read",
-        description="读取一个或多个已知相对路径的文本文件；内容过大时可在下一轮继续读取。",
-        example='{"action":"read","workId":"W001","paths":["package.json","src/app.ts"]}',
+        description=(
+            "读取一个或多个已知相对路径的文本文件；大文件按预算截断并标注位置，"
+            "可用 offsets 从指定字符位置续读。"
+        ),
+        example=(
+            '{"action":"read","workId":"W001","paths":["src/app.ts"],'
+            '"offsets":{"src/app.ts":12000}}'
+        ),
+    ),
+    AgentToolDefinition(
+        name="inspect",
+        scope="read",
+        description="使用 AST、符号索引、调用图和影响分析理解代码结构。",
+        example='{"action":"inspect","workId":"W001","paths":["backend/main.py"],"query":"create_app"}',
+    ),
+    AgentToolDefinition(
+        name="factory",
+        scope="write",
+        description=(
+            "规划、生成或校验电商领域模型、OpenAPI、Mock、API Client 和前端数据源。"
+        ),
+        example=(
+            '{"action":"factory","workId":"SF001","mode":"plan",'
+            '"domainId":"commerce-miniapp","outputRoot":"src/features/commerce",'
+            '"mockCount":12,"overwrite":false}'
+        ),
     ),
     AgentToolDefinition(
         name="edit",
         scope="write",
-        description="以 write、replace 或 delete 操作事务式修改项目文件。",
+        description=(
+            "写入或新建文件的主工具；以 write、replace 或 delete 操作事务式修改项目文件。"
+        ),
         example='{"action":"edit","workId":"W001","summary":"修复路由","operations":[{"type":"replace","path":"src/router.ts","oldText":"旧代码","newText":"新代码"}]}',
     ),
     AgentToolDefinition(
@@ -62,20 +89,52 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
 )
 
 
-READ_ONLY_TOOL_NAMES = ("search", "read", "finish")
+READ_ONLY_TOOL_NAMES = ("search", "read", "inspect", "finish")
+AUTO_EDIT_TOOL_NAMES = (
+    "search",
+    "read",
+    "inspect",
+    "factory",
+    "edit",
+    "complete_work",
+    "finish",
+)
+FULL_AUTO_TOOL_NAMES = (*AUTO_EDIT_TOOL_NAMES[:-2], "run", *AUTO_EDIT_TOOL_NAMES[-2:])
 
 
-def render_tool_catalog(*, read_only: bool = False) -> str:
-    """把工具目录渲染为模型可读的稳定文本。"""
+def tool_names_for_mode(
+    *,
+    read_only: bool = False,
+    execution_mode: ExecutionMode = "full_auto",
+) -> tuple[str, ...]:
+    """返回当前运行分支真实允许模型选择的内部动作名称。"""
 
-    allowed = set(READ_ONLY_TOOL_NAMES) if read_only else None
+    if read_only:
+        return READ_ONLY_TOOL_NAMES
+    return FULL_AUTO_TOOL_NAMES if execution_mode == "full_auto" else AUTO_EDIT_TOOL_NAMES
+
+
+def render_tool_catalog(
+    *,
+    read_only: bool = False,
+    compact: bool = False,
+    execution_mode: ExecutionMode = "full_auto",
+) -> str:
+    """把当前模式的真实工具目录渲染为模型可读文本。"""
+
+    allowed = set(
+        tool_names_for_mode(read_only=read_only, execution_mode=execution_mode)
+    )
     lines: list[str] = []
     for tool in CODE_AGENT_TOOLS:
-        if allowed is not None and tool.name not in allowed:
+        if tool.name not in allowed:
             continue
-        lines.append(
-            f"- {tool.name} [{tool.scope}]：{tool.description}\n  示例：{tool.example}"
-        )
+        if compact:
+            lines.append(f"- {tool.name}：{tool.description}")
+        else:
+            lines.append(
+                f"- {tool.name} [{tool.scope}]：{tool.description}\n  示例：{tool.example}"
+            )
     return "\n".join(lines)
 
 

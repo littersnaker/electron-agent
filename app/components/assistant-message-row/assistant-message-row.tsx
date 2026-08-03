@@ -149,6 +149,9 @@ export function AssistantMessageRow({
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                urlTransform={(url: string) =>
+                  /^(https?:|data:image\/)/i.test(url) ? url : ""
+                }
                 disallowedElements={[
                   "script",
                   "iframe",
@@ -174,8 +177,11 @@ export function AssistantMessageRow({
         >
           {finalText.trim() ? (
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              disallowedElements={[
+                remarkPlugins={[remarkGfm]}
+                urlTransform={(url: string) =>
+                  /^(https?:|data:image\/)/i.test(url) ? url : ""
+                }
+                disallowedElements={[
                 "script",
                 "iframe",
                 "object",

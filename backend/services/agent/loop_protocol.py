@@ -12,7 +12,16 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-ActionKind = Literal["search", "read", "edit", "run", "complete_work", "finish"]
+ActionKind = Literal[
+    "search",
+    "read",
+    "inspect",
+    "factory",
+    "edit",
+    "run",
+    "complete_work",
+    "finish",
+]
 OperationKind = Literal["write", "replace", "delete"]
 MAX_BATCH_TEXT_CHARS = 2_500_000
 
@@ -38,35 +47,163 @@ class AgentAction:
     work_id: str = ""
     query: str = ""
     paths: list[str] = field(default_factory=list)
+    offsets: dict[str, int] = field(default_factory=dict)
     operations: list[EditOperation] = field(default_factory=list)
     command: str = ""
+    factory_mode: str = ""
+    factory_domain_id: str = "commerce-miniapp"
+    factory_output_root: str = ""
+    factory_mock_count: int = 12
+    factory_overwrite: bool = False
     summary: str = ""
     tests: list[str] = field(default_factory=list)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    """从模型回复中提取第一个完整 JSON 对象。"""
+    """从模型回复中提取首个平衡 JSON 对象，并兼容常见尾逗号。"""
 
     stripped = text.strip()
     fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped, re.IGNORECASE)
     candidate = fenced.group(1).strip() if fenced else stripped
-    start = candidate.find("{")
-    end = candidate.rfind("}")
-    if start < 0 or end < start:
-        raise ValueError("模型没有返回代理工具 JSON")
+    fragment = _first_balanced_object(candidate)
     try:
-        value = json.loads(candidate[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"代理工具 JSON 无效：{exc.msg}") from exc
+        value = json.loads(fragment)
+    except json.JSONDecodeError:
+        # 部分兼容模型会在对象或数组结尾留下尾逗号；只修复结构分隔符，
+        # 不尝试猜测缺失字段，避免把自然语言误当成可执行动作。
+        repaired = re.sub(r",\s*([}\]])", r"\1", fragment)
+        try:
+            value = json.loads(repaired)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"代理工具 JSON 无效：{exc.msg}") from exc
     if not isinstance(value, dict):
         raise ValueError("代理工具响应必须是 JSON 对象")
-    return value
+    return _normalize_tool_wrapper(value)
+
+
+def _first_balanced_object(text: str) -> str:
+    """按字符串和转义规则寻找首个完整对象，避免多个示例 JSON 相互污染。"""
+
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("模型没有返回代理工具 JSON")
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        character = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    raise ValueError("模型返回的代理工具 JSON 未闭合")
+
+
+def _normalize_tool_wrapper(value: dict[str, Any]) -> dict[str, Any]:
+    """把 OpenAI 风格 tool-call 包装转换为内部单动作协议。"""
+
+    if value.get("action"):
+        action = str(value["action"]).strip().lower()
+        normalized_action = _normalize_action_name(action)
+        value["action"] = normalized_action
+        if normalized_action == "edit" and not value.get("operations"):
+            simple_operation = _simple_write_operation(value)
+            if simple_operation:
+                value["operations"] = [simple_operation]
+        return value
+
+    function = value.get("function")
+    name = value.get("name") or value.get("tool")
+    arguments = value.get("arguments")
+    if isinstance(function, dict):
+        name = function.get("name") or name
+        arguments = function.get("arguments") or arguments
+    if not name:
+        return value
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+    normalized = dict(arguments) if isinstance(arguments, dict) else {}
+    normalized_name = str(name).strip().lower()
+    normalized["action"] = _normalize_action_name(normalized_name)
+    if normalized_name.startswith("software_factory.") and not normalized.get("mode"):
+        normalized["mode"] = normalized_name.rsplit(".", 1)[-1]
+    return normalized
+
+
+def _normalize_action_name(value: str) -> str:
+    """兼容供应商常见的工具全名和完成动作别名。"""
+
+    aliases = {
+        "workspace.search": "search",
+        "workspace.read": "read",
+        "code.inspect": "inspect",
+        "workspace.edit": "edit",
+        "workspace.write": "edit",
+        "write": "edit",
+        "create_file": "edit",
+        "workspace.run": "run",
+        "software_factory.plan": "factory",
+        "software_factory.generate": "factory",
+        "software_factory.validate": "factory",
+        "complete": "complete_work",
+        "done": "complete_work",
+    }
+    return aliases.get(value, value.rsplit(".", 1)[-1])
+
+
+def _simple_write_operation(value: dict[str, Any]) -> dict[str, Any] | None:
+    """把供应商常见的顶层 write/path/content 结构转换为 edit 操作。"""
+
+    path = str(value.get("path") or "").strip()
+    content = value.get("content")
+    if not path or not isinstance(content, str):
+        return None
+    return {
+        "type": "write",
+        "path": path,
+        "content": content,
+        "reason": str(value.get("reason") or value.get("summary") or "按任务要求写入文件"),
+    }
 
 
 def _clean_path(value: object) -> str:
     """清洗模型返回的工作区相对路径。"""
 
     return str(value or "").strip().replace("\\", "/")
+
+
+def coerce_read_paths(value: object) -> list[str]:
+    """把模型常见的 paths 变体归一化为去重后的相对路径数组。
+
+    兼容：paths 数组、path 单数字段、逗号/中文逗号/换行分隔的字符串。
+    返回空数组表示模型没有给出任何可用路径。
+    """
+
+    raw: list[object] = []
+    if isinstance(value, str):
+        raw = [
+            part.strip()
+            for part in re.split(r"[,，\n]+", value)
+            if part.strip()
+        ]
+    elif isinstance(value, list):
+        raw = value
+    return list(dict.fromkeys(_clean_path(item) for item in raw if _clean_path(item)))
 
 
 def _parse_operations(raw: object) -> list[EditOperation]:
@@ -117,7 +254,16 @@ def parse_agent_action(text: str) -> AgentAction:
 
     raw = _extract_json(text)
     action = str(raw.get("action") or "").strip().lower()
-    if action not in {"search", "read", "edit", "run", "complete_work", "finish"}:
+    if action not in {
+        "search",
+        "read",
+        "inspect",
+        "factory",
+        "edit",
+        "run",
+        "complete_work",
+        "finish",
+    }:
         raise ValueError(f"未知代理动作：{action or '空'}")
 
     work_id = str(raw.get("workId") or raw.get("work_id") or "").strip().upper()[:40]
@@ -129,11 +275,54 @@ def parse_agent_action(text: str) -> AgentAction:
         return AgentAction(action="search", work_id=work_id, query=query[:1000])
 
     if action == "read":
-        raw_paths = raw.get("paths")
-        if not isinstance(raw_paths, list) or not raw_paths:
-            raise ValueError("read 动作必须包含 paths")
-        paths = list(dict.fromkeys(_clean_path(item) for item in raw_paths if _clean_path(item)))
-        return AgentAction(action="read", work_id=work_id, paths=paths)
+        paths = coerce_read_paths(raw.get("paths", raw.get("path")))
+        if not paths:
+            raise ValueError("read 动作必须包含 paths（非空相对路径数组）")
+        offsets: dict[str, int] = {}
+        raw_offsets = raw.get("offsets")
+        if isinstance(raw_offsets, dict):
+            for raw_path, value in raw_offsets.items():
+                path = _clean_path(raw_path)
+                if not path:
+                    continue
+                try:
+                    offset = max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+                if offset > 0:
+                    offsets[path] = offset
+        return AgentAction(action="read", work_id=work_id, paths=paths, offsets=offsets)
+
+    if action == "inspect":
+        paths = coerce_read_paths(raw.get("paths", raw.get("path")))
+        query = str(raw.get("query") or "").strip()[:1000]
+        if not paths and not query:
+            raise ValueError("inspect 动作必须包含 paths 或 query")
+        return AgentAction(action="inspect", work_id=work_id, paths=paths, query=query)
+
+    if action == "factory":
+        mode = str(raw.get("mode") or "").strip().lower()
+        if mode not in {"plan", "generate", "validate"}:
+            raise ValueError("factory 动作 mode 必须是 plan、generate 或 validate")
+        output_root = _clean_path(raw.get("outputRoot") or raw.get("output_root"))
+        if mode == "validate" and not output_root:
+            raise ValueError("factory validate 必须包含 outputRoot")
+        try:
+            mock_count = int(raw.get("mockCount") or raw.get("mock_count") or 12)
+        except (TypeError, ValueError):
+            mock_count = 12
+        return AgentAction(
+            action="factory",
+            work_id=work_id,
+            factory_mode=mode,
+            factory_domain_id=str(
+                raw.get("domainId") or raw.get("domain_id") or "commerce-miniapp"
+            ).strip()[:100],
+            factory_output_root=output_root[:1000],
+            factory_mock_count=max(3, min(mock_count, 100)),
+            factory_overwrite=bool(raw.get("overwrite")),
+            summary=str(raw.get("summary") or "执行 Software Factory")[:2000],
+        )
 
     if action == "edit":
         return AgentAction(

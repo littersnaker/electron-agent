@@ -4,23 +4,61 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import socket
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from backend.schemas.media import MediaGenerateBody
+from backend.schemas.chat import ChatRequest
+from backend.runtime.bootstrap import RUNTIME
+from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
+from backend.services.llm.catalog import AUTO_MODEL_ID
 from backend.services.llm.credentials import resolve_credentials, resolve_provider_key
 from backend.services.media.dashscope import generate_media
+from backend.utils.sse import create_sse_response
 
 router = APIRouter(tags=["media"])
 
 MAX_REDIRECTS = 5
 MAX_MEDIA_BYTES = 512 * 1024 * 1024
 REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+
+
+def _last_user_text(body: ChatRequest) -> str:
+    for message in reversed(body.messages):
+        if message.role == "user":
+            return message.content.strip()
+    return ""
+
+
+@router.post("/api/media/chat")
+async def post_media_chat(body: ChatRequest, request: Request):
+    """把媒体/漫剧请求交给统一 Runtime 的 Media Agent 执行。"""
+
+    preferred_model = request.headers.get("x-llm-model-id", AUTO_MODEL_ID).strip()
+    messages = tuple(
+        RuntimeMessage(role=message.role, content=message.content)
+        for message in body.messages
+    )
+    runtime_request = RuntimeRequest(
+        agent_id="media",
+        payload=body,
+        preferred_model_id=preferred_model,
+        credentials=resolve_credentials(request),
+        session_id=body.session_id,
+        project_id=body.project_id,
+        user_text=_last_user_text(body),
+        messages=messages,
+        metadata={"route": "/api/media/chat", "agentMode": body.agent_mode},
+    )
+    return create_sse_response(RUNTIME.execute_stream(runtime_request))
 
 
 def _qwen_key(request: Request) -> str:
@@ -196,3 +234,18 @@ async def get_media_download(url: str = Query(...)) -> StreamingResponse:
         if not client.is_closed:
             await client.aclose()
         raise
+
+
+@router.get("/api/media/asset/{session_id}/{name}")
+async def get_media_asset(session_id: str, name: str) -> FileResponse:
+    """提供漫剧管线生成的本地产物（分镜图、分镜视频、合并成片）。"""
+
+    if not re.match(r"^[A-Za-z0-9_-]{1,80}$", session_id):
+        raise HTTPException(status_code=400, detail="非法的会话 ID")
+    if not re.match(r"^[A-Za-z0-9._-]{1,160}$", name):
+        raise HTTPException(status_code=400, detail="非法的文件名")
+    base = (Path(tempfile.gettempdir()) / "media" / session_id).resolve()
+    target = (base / name).resolve()
+    if not str(target).startswith(str(base)) or not target.is_file():
+        raise HTTPException(status_code=404, detail="资产不存在")
+    return FileResponse(target)

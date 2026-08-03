@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.services.agent.loop_protocol import EditOperation
-from backend.services.workspace.indexer import IGNORED_DIRECTORIES, TEXT_EXTENSIONS
+from backend.services.workspace.indexer import TEXT_EXTENSIONS, iter_project_files
 from backend.services.workspace.search_terms import extract_search_terms
 from backend.utils.paths import is_probably_binary, resolve_inside
+from backend.utils.sensitive_paths import (
+    is_sensitive_workspace_path,
+    partition_safe_workspace_paths,
+    render_sensitive_skip,
+)
 
 
-MAX_READ_FILE_CHARS = 160_000
-MAX_READ_TOTAL_CHARS = 360_000
+MAX_READ_FILE_CHARS = 12_000
+MAX_READ_TOTAL_CHARS = 48_000
 MAX_SEARCH_FILE_BYTES = 1_500_000
 MAX_WRITE_FILE_CHARS = 2_000_000
 MAXIMUM_SOURCE_LINES = 500
@@ -29,6 +34,7 @@ class ReadBatchResult:
 
     content: str
     versions: dict[str, str]
+    blocked_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -43,12 +49,9 @@ class EditBatchResult:
 def _iter_text_files(root: Path):
     """遍历可安全提供给模型的文本文件。"""
 
-    for path in root.rglob("*"):
-        if any(part in IGNORED_DIRECTORIES for part in path.parts):
-            continue
-        if not path.is_file() or path.is_symlink():
-            continue
-        if path.name == ".env" or path.name.startswith(".env."):
+    for relative in iter_project_files(root):
+        path = root / relative
+        if is_sensitive_workspace_path(relative):
             continue
         if path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
@@ -65,16 +68,8 @@ def render_workspace_tree(root: Path, *, limit: int | None = None) -> str:
     """返回紧凑的项目目录树，帮助模型先理解代码库结构。"""
 
     lines: list[str] = []
-    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix().lower()):
-        if any(part in IGNORED_DIRECTORIES for part in path.parts):
-            continue
-        if path.is_symlink():
-            continue
-        try:
-            relative = path.relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if path.is_dir():
+    for relative in iter_project_files(root):
+        if is_sensitive_workspace_path(relative):
             continue
         lines.append(relative)
         if limit is not None and len(lines) >= limit:
@@ -127,8 +122,10 @@ def search_workspace(root: Path, query: str, *, limit: int = 24) -> str:
 
 
 def file_version(root: Path, relative_path: str) -> str:
-    """返回工作区文件内容指纹；不存在时返回稳定标记。"""
+    """返回工作区文件内容指纹；敏感路径不读取内容并返回稳定标记。"""
 
+    if is_sensitive_workspace_path(relative_path):
+        return "blocked-sensitive"
     target = resolve_inside(root, relative_path)
     if not target.exists():
         return "missing"
@@ -140,13 +137,26 @@ def file_version(root: Path, relative_path: str) -> str:
         return "unreadable"
 
 
-def read_workspace_files_with_versions(root: Path, paths: list[str]) -> ReadBatchResult:
-    """读取文件，并记录并行编辑冲突检测所需的内容指纹。"""
+def read_workspace_files_with_versions(
+    root: Path,
+    paths: list[str],
+    offsets: dict[str, int] | None = None,
+) -> ReadBatchResult:
+    """读取安全文本文件，并把敏感路径转换为非致命的过滤提示。
 
+    ``offsets`` 提供 path -> 字符偏移 的映射，用于对截断文件分页续读；
+    返回内容按预算截断并明确标注，避免把超大文件全文塞入模型上下文。
+    """
+
+    safe_paths, blocked_paths = partition_safe_workspace_paths(paths)
+    offsets = offsets or {}
     sections: list[str] = []
+    skip_message = render_sensitive_skip(blocked_paths)
+    if skip_message:
+        sections.append(skip_message)
     versions: dict[str, str] = {}
     consumed = 0
-    for relative_path in paths:
+    for relative_path in safe_paths:
         versions[relative_path] = file_version(root, relative_path)
         target = resolve_inside(root, relative_path)
         if not target.exists():
@@ -164,11 +174,20 @@ def read_workspace_files_with_versions(root: Path, paths: list[str]) -> ReadBatc
         if remaining <= 0:
             sections.append("（本轮读取总量达到上限，请下一轮继续 read）")
             break
-        included = content[: min(MAX_READ_FILE_CHARS, remaining)]
-        suffix = "\n（文件内容已截断）" if len(included) < len(content) else ""
-        sections.append(f"--- {relative_path} ---\n{included}{suffix}")
+        offset = max(0, int(offsets.get(relative_path) or 0))
+        chunk_size = min(MAX_READ_FILE_CHARS, remaining)
+        included = content[offset : offset + chunk_size]
+        offset_note = f"（从字符 {offset} 续读）" if offset > 0 else ""
+        if offset + len(included) < len(content):
+            suffix = (
+                "\n（文件内容已截断，可用 offsets 从字符 "
+                f"{offset + len(included)} 续读）"
+            )
+        else:
+            suffix = ""
+        sections.append(f"--- {relative_path} ---{offset_note}\n{included}{suffix}")
         consumed += len(included)
-    return ReadBatchResult("\n\n".join(sections), versions)
+    return ReadBatchResult("\n\n".join(sections), versions, blocked_paths)
 
 
 def read_workspace_files(root: Path, paths: list[str]) -> str:

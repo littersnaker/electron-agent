@@ -73,14 +73,17 @@ export default function Home() {
   const plugins = usePluginManager();
   const codePluginEnabled = plugins.isEnabled("code-agent");
   const commercePluginEnabled = plugins.isEnabled("commerce-research");
+  const mediaPluginEnabled = plugins.isEnabled("media-agent");
   const workspace = useWorkspaceController({
     includeCode: codePluginEnabled,
     includeCommerce: commercePluginEnabled,
+    includeMedia: mediaPluginEnabled,
   });
   const agentCoordinator = useAgentCoordinator();
   const effectiveComposerMode: ComposerMode =
     workspace.activeSession?.mode === "code" ||
-    workspace.activeSession?.mode === "commerce"
+    workspace.activeSession?.mode === "commerce" ||
+    workspace.activeSession?.mode === "media"
       ? "chat"
       : composerMode;
   const availableModels = useMemo(() => {
@@ -204,10 +207,16 @@ export default function Home() {
       setShowPluginCenter(true);
       return;
     }
+    if (mode === "media" && !mediaPluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
 
     const session = await workspace.createSession(mode, projectId);
     if (session) resetConversationUi();
-    if (mode === "code" || mode === "commerce") setComposerMode("chat");
+    if (mode === "code" || mode === "commerce" || mode === "media") {
+      setComposerMode("chat");
+    }
   };
 
   const handleSwitchSession = (id: string) => {
@@ -329,12 +338,14 @@ export default function Home() {
           isStreaming={isBusy}
           createQaSession={() => void handleCreateSession("qa")}
           createCommerceSession={() => void handleCreateSession("commerce")}
+          createMediaSession={() => void handleCreateSession("media")}
           createCodeSession={(projectId: string) =>
             void handleCreateSession("code", projectId)
           }
           addProject={() => void handleAddProject()}
           codePluginEnabled={codePluginEnabled}
           commercePluginEnabled={commercePluginEnabled}
+          mediaPluginEnabled={mediaPluginEnabled}
           onOpenPluginCenter={() => setShowPluginCenter(true)}
           reindexProject={(projectId: string) =>
             void workspace.reindexProject(projectId)
@@ -390,8 +401,8 @@ export default function Home() {
                       onDiscard={() => void checkpointRuns.discard()}
                     />
                   ) : null}
-                  {codePluginEnabled &&
-                    workspace.activeSession?.mode === "code" &&
+                  {(workspace.activeSession?.mode === "code" ||
+                    workspace.activeSession?.mode === "media") &&
                     chat.interactiveRequest &&
                     !isBusy && (
                     <InteractiveRequestPanel
@@ -479,6 +490,8 @@ export default function Home() {
                   workflowMode={
                     workspace.activeSession?.mode === "commerce"
                       ? `commerce-${commerce.workflowMode}`
+                      : workspace.activeSession?.mode === "media"
+                        ? "media"
                       : effectiveComposerMode
                   }
                 />

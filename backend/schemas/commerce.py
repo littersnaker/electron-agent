@@ -18,6 +18,7 @@ class CommerceRequest(FlexibleModel):
     query: str
     session_id: str = Field(default="", alias="sessionId")
     checkpoint_id: str = Field(default="", alias="checkpointId")
+    project_id: str = Field(default="", alias="projectId")
     marketplace: MarketplaceCode = "US"
     sample_size: int = Field(default=24, alias="sampleSize", ge=1, le=100)
     messages: list[FrontendMessage] = Field(default_factory=list)

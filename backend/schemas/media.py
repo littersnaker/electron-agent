@@ -33,3 +33,5 @@ class MediaGenerateBody(FlexibleModel):
     attachment: FrontendAttachment | None = None
     attachments: list[FrontendAttachment] = Field(default_factory=list)
     size: str | None = None
+    seed: int | None = None
+    negative_prompt: str | None = Field(default=None, alias="negativePrompt")

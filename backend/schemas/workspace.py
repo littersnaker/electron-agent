@@ -28,7 +28,7 @@ class ChatSession(FlexibleModel):
     id: str
     title: str
     messages: list[StoredMessage]
-    mode: Literal["qa", "code", "commerce"]
+    mode: Literal["qa", "code", "commerce", "media"]
     project_id: str | None = Field(default=None, alias="projectId")
     updated_at: str = Field(alias="updatedAt")
 
@@ -46,7 +46,7 @@ class WorkspaceAction(FlexibleModel):
     action: str
     id: str | None = None
     root_path: str | None = Field(default=None, alias="rootPath")
-    mode: Literal["qa", "code", "commerce"] | None = None
+    mode: Literal["qa", "code", "commerce", "media"] | None = None
     project_id: str | None = Field(default=None, alias="projectId")
     title: str | None = None
     messages: list[StoredMessage] | None = None

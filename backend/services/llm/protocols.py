@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from time import monotonic
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -18,6 +19,9 @@ from backend.services.llm.catalog import ModelDefinition
 from backend.services.llm.types import LlmChunk, LlmMessage, LlmUsage
 
 ErrorScope = Literal["model", "provider", "request"]
+
+# 需要走代理的海外供应商；国内模型（qwen/deepseek/kimi/glm）直连。
+PROXY_REQUIRED_PROVIDERS = frozenset({"openai", "gemini"})
 
 
 class ProviderRequestError(ValueError):
@@ -56,11 +60,10 @@ class LlmProtocolClient:
     """复用 HTTP 连接池并适配 OpenAI-compatible 与 Gemini 协议。"""
 
     def __init__(self) -> None:
-        """按应用统一超时创建异步客户端。
+        """创建直连与代理两套异步客户端。
 
-        ``trust_env=True`` 会读取 HTTP_PROXY、HTTPS_PROXY 和 NO_PROXY。需要注意，
-        Windows 系统代理并不总会自动转换成这些环境变量，因此网络错误提示中会
-        明确区分“模型不可用”和“端点无法连接”。
+        国内模型使用直连客户端（忽略 HTTP_PROXY/HTTPS_PROXY），避免代理不可用时
+        拖慢 DeepSeek/Kimi/Qwen/GLM；OpenAI/Gemini 等海外模型走代理客户端。
         """
 
         timeout = httpx.Timeout(get_settings().request_timeout_seconds, connect=30.0)
@@ -69,11 +72,73 @@ class LlmProtocolClient:
             follow_redirects=True,
             trust_env=True,
         )
+        self._direct_client = httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False,
+        )
 
     async def close(self) -> None:
         """关闭 HTTP 连接池。"""
 
         await self._client.aclose()
+        await self._direct_client.aclose()
+
+    def _client_for(self, provider: str) -> httpx.AsyncClient:
+        """按供应商选择走代理还是直连。"""
+
+        return (
+            self._client
+            if provider in PROXY_REQUIRED_PROVIDERS
+            else self._direct_client
+        )
+
+    async def measure_connectivity(
+        self,
+        *,
+        model: ModelDefinition,
+        endpoint: str,
+        api_key: str,
+    ) -> float:
+        """只测量到响应头的纯网络延迟（毫秒），不等待模型生成内容。"""
+
+        payload: dict[str, Any] = {
+            "model": model.model,
+            "messages": [{"role": "user", "content": "OK"}],
+            "stream": True,
+            "max_tokens": 1,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        client = self._client_for(model.provider)
+        started = monotonic()
+        async with client.stream(
+            "POST",
+            endpoint,
+            headers=headers,
+            json=payload,
+        ) as response:
+            elapsed_ms = (monotonic() - started) * 1000.0
+            if response.status_code >= 400:
+                raw = (await response.aread()).decode("utf-8", errors="replace")
+                message, error_code = self._provider_error(
+                    response.status_code,
+                    raw,
+                )
+                raise ProviderRequestError(
+                    message,
+                    status_code=response.status_code,
+                    scope=self._error_scope(
+                        response.status_code,
+                        error_code,
+                        raw,
+                    ),
+                    error_code=error_code,
+                    endpoint=endpoint,
+                )
+        return elapsed_ms
 
     async def stream_openai_compatible(
         self,
@@ -86,8 +151,9 @@ class LlmProtocolClient:
     ) -> AsyncIterator[LlmChunk]:
         """调用 OpenAI 兼容 ``chat/completions`` 流式接口。
 
-        不统一附加 ``stream_options`` 等扩展字段，因为 Kimi、DeepSeek、GLM 等兼容
-        实现支持范围不同；只发送所有供应商都接受的最小参数集合。
+        Kimi 与 OpenAI 官方接口支持通过 ``stream_options.include_usage`` 在最后一个
+        数据块返回真实 Token 用量。其他兼容实现仍使用最小公共参数，避免扩展字段
+        导致供应商返回 HTTP 400。
         """
 
         payload: dict[str, Any] = {
@@ -95,6 +161,9 @@ class LlmProtocolClient:
             "messages": [self._to_openai_message(item) for item in messages],
             "stream": True,
         }
+        if model.provider in {"kimi", "openai"}:
+            # 优先获取供应商真实计费数据；网关仍保留本地估算作为兼容兜底。
+            payload["stream_options"] = {"include_usage": True}
         # Kimi K2.5/K2.6 等模型会按思考模式限制 temperature。传入不兼容值会
         # 直接返回 HTTP 400，因此允许网关用 None 表示“交给供应商默认值”。
         if temperature is not None:
@@ -105,7 +174,7 @@ class LlmProtocolClient:
         }
 
         try:
-            async with self._client.stream(
+            async with self._client_for(model.provider).stream(
                 "POST",
                 endpoint,
                 headers=headers,
@@ -193,7 +262,7 @@ class LlmProtocolClient:
             payload["systemInstruction"] = {"parts": [{"text": system_text}]}
 
         try:
-            async with self._client.stream(
+            async with self._client_for(model.provider).stream(
                 "POST",
                 url,
                 params={"key": api_key, "alt": "sse"},

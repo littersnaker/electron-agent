@@ -7,7 +7,7 @@ import type { SessionMode } from "../../constants/page-constants";
  * QA 属于核心能力，不进入插件系统；Code Agent 与跨境市场情报属于按需能力，
  * 关闭后不会在启动页主动初始化对应入口与重型 UI。
  */
-export type BuiltinPluginId = "code-agent" | "commerce-research";
+export type BuiltinPluginId = "code-agent" | "commerce-research" | "media-agent";
 
 export interface BuiltinPluginManifest {
   id: BuiltinPluginId;

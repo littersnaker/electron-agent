@@ -19,6 +19,9 @@ function buildDownloadUrl(attachment: MessageAttachment): string {
   if (!attachment.url) return "";
 
   const name = attachment.downloadName || attachment.name;
+  if (attachment.url?.startsWith("/api/")) {
+    return buildApiUrl(attachment.url);
+  }
   return buildApiUrl(
     `/api/media/download?url=${encodeURIComponent(
       attachment.url,
@@ -39,7 +42,8 @@ function MessageAttachmentGallery({
   return (
     <div className={`grid gap-3 ${compact ? "mb-2" : "mt-3"}`}>
       {attachments.map((attachment, index) => {
-        const source = attachment.dataUrl || attachment.url || "";
+        const rawSource = attachment.dataUrl || attachment.url || "";
+        const source = attachment.dataUrl ? rawSource : buildApiUrl(rawSource);
         const image =
           attachment.assetKind === "image" ||
           isImageMimeType(attachment.type);

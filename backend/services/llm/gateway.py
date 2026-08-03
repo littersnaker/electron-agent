@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from time import monotonic
 
 from backend.core.builtin_credentials import get_builtin_value
 from backend.services.llm.availability import AVAILABILITY
@@ -28,6 +30,7 @@ from backend.services.llm.custom_models import (
     list_custom_model_definitions,
 )
 from backend.services.llm.protocols import LlmProtocolClient, ProviderRequestError
+from backend.services.llm.token_usage import ensure_usage
 from backend.services.llm.types import LlmChunk, LlmMessage, LlmUsage
 
 LOGGER = logging.getLogger(__name__)
@@ -184,8 +187,14 @@ class LlmGateway:
         credentials: LlmCredentials,
         messages: list[LlmMessage],
         temperature: float = 0.2,
+        timeout_seconds: float | None = None,
+        stall_timeout_seconds: float | None = None,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
-        """收集完整响应；Auto 在没有收到任何内容时允许降级。"""
+        """收集完整响应；Auto 在没有收到任何内容时允许降级。
+
+        ``timeout_seconds`` 控制单次模型调用的总时长上限；``stall_timeout_seconds``
+        控制“没有新数据”的卡死阈值。默认只杀卡死流，不杀慢速但持续输出的长生成。
+        """
 
         candidates = self.resolve_candidates(
             preferred_model_id,
@@ -193,6 +202,8 @@ class LlmGateway:
             messages,
         )
         automatic = (preferred_model_id or AUTO_MODEL_ID).strip() == AUTO_MODEL_ID
+        total_budget = max(1.0, timeout_seconds or 900.0)
+        stall_budget = max(0.5, stall_timeout_seconds or 90.0)
         failures: list[ProviderFailure] = []
         blocked_routes: set[tuple[str, str]] = set()
 
@@ -204,11 +215,13 @@ class LlmGateway:
             reasoning_parts: list[str] = []
             usage = LlmUsage()
             try:
-                async for chunk in self._stream_model(
+                async for chunk in self._stream_with_deadline(
                     model=model,
                     credentials=credentials,
                     messages=messages,
                     temperature=temperature,
+                    total_budget=total_budget,
+                    stall_budget=stall_budget,
                 ):
                     if chunk.reasoning_delta:
                         reasoning_parts.append(chunk.reasoning_delta)
@@ -219,6 +232,9 @@ class LlmGateway:
                 result = "".join(text_parts).strip() or "".join(
                     reasoning_parts
                 ).strip()
+                # Moonshot 等兼容端点的流式响应可能不返回 usage。此处使用
+                # 本地估算补齐统计，保证 Token Budget 与前端用量始终可用。
+                usage = ensure_usage(usage, messages=messages, output_text=result)
                 AVAILABILITY.mark_success(model, credentials)
                 return result, usage, model
             except ProviderRequestError as exc:
@@ -239,17 +255,88 @@ class LlmGateway:
 
         raise ValueError(self._format_failures(failures))
 
+    async def _stream_with_deadline(
+        self,
+        *,
+        model: ModelDefinition,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float,
+        total_budget: float,
+        stall_budget: float,
+    ) -> AsyncIterator[LlmChunk]:
+        """流式读取模型输出：卡住才中断，慢速长生成不误杀。"""
+
+        deadline = monotonic() + total_budget
+        iterator = self._stream_model(
+            model=model,
+            credentials=credentials,
+            messages=messages,
+            temperature=temperature,
+        ).__aiter__()
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise ProviderRequestError(
+                    f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
+                    scope="provider",
+                )
+            try:
+                chunk = await asyncio.wait_for(
+                    anext(iterator),
+                    timeout=min(stall_budget, remaining),
+                )
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                raise ProviderRequestError(
+                    f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
+                    scope="provider",
+                )
+            yield chunk
+
     async def probe(
         self,
         *,
         model_id: str,
         credentials: LlmCredentials,
-    ) -> ModelDefinition:
-        """用极短真实请求验证 Key、端点与模型名，而不是只检查字符串格式。"""
+    ) -> tuple[ModelDefinition, float]:
+        """验证 Key/端点/模型名，并返回到响应头的纯网络延迟（毫秒）。
+
+        纯网络延迟只等待 HTTP 响应头，不包含模型生成时间；完整流仍会读完，
+        确保供应商端不会因提前取消而误报。
+        """
 
         model = get_custom_model_definition(model_id) or get_model(model_id)
         if not model:
             raise ValueError(f"未识别的模型：{model_id}")
+        provider = get_provider(model.provider)
+        api_key = credentials.get(model.provider)
+        if not api_key:
+            raise ValueError(f"未配置 {provider.name} API Key")
+        endpoints = self._provider_endpoints(
+            provider,
+            model.base_url or credentials.get_endpoint(model.provider),
+        )
+        network_ms = 0.0
+        last_error: ProviderRequestError | None = None
+        for endpoint in endpoints:
+            try:
+                network_ms = await self._protocols.measure_connectivity(
+                    model=model,
+                    endpoint=endpoint,
+                    api_key=api_key,
+                )
+                break
+            except ProviderRequestError as exc:
+                last_error = exc
+                can_try_region = (
+                    exc.status_code is None or exc.status_code in {401, 403, 404}
+                )
+                if not can_try_region or endpoint == endpoints[-1]:
+                    raise
+        if last_error is not None:
+            raise last_error
         messages = [LlmMessage("user", "只回复 OK")]
         async for _chunk in self.stream(
             preferred_model_id=model.id,
@@ -260,7 +347,7 @@ class LlmGateway:
             # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
             pass
         AVAILABILITY.mark_success(model, credentials)
-        return model
+        return model, max(0.0, network_ms)
 
     async def _stream_model(
         self,

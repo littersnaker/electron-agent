@@ -10,6 +10,7 @@ from tempfile import mkdtemp
 
 from backend.services.agent.work_models import FileSystemOperation
 from backend.utils.paths import resolve_inside
+from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 
 @dataclass(slots=True)
@@ -88,7 +89,7 @@ def _assert_safe_path(relative_path: str) -> None:
     parts = [part for part in lowered.split("/") if part]
     if not normalized:
         raise ValueError("文件系统操作路径不能为空")
-    if any(part == ".env" or part.startswith(".env.") for part in parts):
+    if is_sensitive_workspace_path(normalized):
         raise ValueError(f"禁止操作敏感配置文件：{relative_path}")
     if any(part.startswith(".multi-agent-fs-") for part in parts):
         raise ValueError(f"禁止操作内部事务目录：{relative_path}")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from backend.services.workspace.repository import (
     update_project_index_state,
 )
 from backend.utils.paths import is_probably_binary
+from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 
 IGNORED_DIRECTORIES = {
@@ -22,6 +25,7 @@ IGNORED_DIRECTORIES = {
     ".next-electron",
     ".electron",
     "node_modules",
+    ".pnpm-store",
     "dist",
     "build",
     "release",
@@ -57,6 +61,31 @@ TEXT_EXTENSIONS = {
     ".sql",
 }
 
+
+def iter_project_files(root: Path):
+    """按忽略目录剪枝地遍历项目相对路径。
+
+    使用 ``os.walk`` 在进入目录前直接剪掉 node_modules、.pnpm-store 等巨型目录，
+    避免 ``rglob`` 先全量遍历再过滤带来的秒级浪费。
+    """
+
+    resolved_root = Path(root).resolve()
+    for current, dirs, files in os.walk(resolved_root, followlinks=False):
+        dirs[:] = sorted(
+            directory
+            for directory in dirs
+            if directory not in IGNORED_DIRECTORIES
+        )
+        for name in sorted(files):
+            path = Path(current) / name
+            try:
+                relative = path.relative_to(resolved_root).as_posix()
+            except ValueError:
+                continue
+            if path.is_symlink():
+                continue
+            yield relative
+
 MAX_INDEX_FILE_BYTES = 1_000_000
 MAX_INDEX_CONTENT_CHARS = 200_000
 
@@ -78,7 +107,7 @@ def _should_index(path: Path) -> bool:
     发送给模型的上下文。
     """
 
-    if path.is_symlink() or path.name == ".env" or path.name.startswith(".env."):
+    if path.is_symlink() or is_sensitive_workspace_path(path.name):
         return False
     if path.suffix.lower() not in TEXT_EXTENSIONS:
         return False
@@ -108,11 +137,8 @@ def _collect_files(root: Path) -> list[IndexedFile]:
     """递归扫描工作区并收集可索引文件。"""
 
     records: list[IndexedFile] = []
-    for path in root.rglob("*"):
-        if any(part in IGNORED_DIRECTORIES for part in path.parts):
-            continue
-        if not path.is_file():
-            continue
+    for relative in iter_project_files(root):
+        path = root / relative
         record = _read_index_file(root, path)
         if record:
             records.append(record)
@@ -125,7 +151,7 @@ async def index_project(project_id: str) -> dict[str, object]:
     root = await resolve_project_root(project_id)
     await update_project_index_state(project_id, status="indexing")
     try:
-        records = _collect_files(root)
+        records = await asyncio.to_thread(_collect_files, root)
         async with open_database() as connection:
             await connection.execute(
                 "DELETE FROM file_index WHERE project_id = ?", (project_id,)

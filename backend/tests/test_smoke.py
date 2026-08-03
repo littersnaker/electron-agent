@@ -8,10 +8,15 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+from backend.schemas.chat import ChatRequest
 from backend.core.config import get_settings
 from backend.api.models import ModelProbeRequest, _resolve_probe_models
 from backend.main import app
-from backend.services.agent.classifier import classify_request
+from backend.services.agent.classifier import (
+    classify_request,
+    resolve_effective_code_request,
+)
+from backend.services.agent.request_routing import route_code_request
 from backend.services.commerce.analytics import calculate_metrics, resolve_category
 from backend.services.llm.availability import AVAILABILITY
 from backend.services.llm.catalog import get_model, get_provider
@@ -39,11 +44,80 @@ def _request_with_headers(headers: list[tuple[bytes, bytes]]) -> Request:
 
 
 def test_request_classifier() -> None:
-    """验证 Code Agent 能区分只读问题和文件修改请求。"""
+    """验证 Code Agent 能区分只读问题、开发任务和省略式继续指令。"""
 
     assert classify_request("解释一下这个项目的入口") == "read_only"
     assert classify_request("请修改 main.py 并增加日志") == "code_change"
+    assert classify_request("把这个项目做成电商小程序") == "code_change"
+    assert (
+        classify_request(
+            "这次帮我把活干完",
+            agent_mode="full_auto",
+            conversation_text="把这个项目做成电商小程序\n这次帮我把活干完",
+        )
+        == "code_change"
+    )
+    assert (
+        classify_request(
+            "先只分析失败原因，不要修改",
+            agent_mode="full_auto",
+            conversation_text="请修改购物车页面",
+        )
+        == "read_only"
+    )
+    assert (
+        classify_request(
+            "为什么这个 Work 会失败",
+            agent_mode="full_auto",
+            conversation_text="请修改购物车页面",
+        )
+        == "read_only"
+    )
+    assert (
+        classify_request(
+            "敏感配置一直报错，别再读它，继续处理",
+            agent_mode="full_auto",
+            conversation_text="把这个项目做成电商小程序",
+        )
+        == "code_change"
+    )
 
+
+def test_effective_request_restores_previous_code_goal() -> None:
+    """验证“继续做完”会补回最近代码目标，而不是只把短追问交给 Planner。"""
+
+    result = resolve_effective_code_request(
+        "不要只分析，继续把活干完",
+        ["把这个项目做成电商小程序", "不要只分析，继续把活干完"],
+    )
+
+    assert "把这个项目做成电商小程序" in result
+    assert "本轮补充要求" in result
+
+
+
+def test_full_auto_follow_up_keeps_write_and_run_tools() -> None:
+    """验证自动任务的报错追问不会误入只读 Agent。"""
+
+    body = ChatRequest.model_validate(
+        {
+            "messages": [
+                {"role": "user", "content": "把这个项目做成电商小程序"},
+                {"role": "assistant", "content": "正在执行"},
+                {
+                    "role": "user",
+                    "content": "敏感配置一直报错，别再读它，继续处理",
+                },
+            ],
+            "agentMode": "full_auto",
+        }
+    )
+
+    routed = route_code_request(body, body.messages[-1].content)
+
+    assert routed.mode == "code_change"
+    assert {"edit", "run"} <= set(routed.tool_names)
+    assert "把这个项目做成电商小程序" in routed.effective_text
 
 def test_commerce_analytics_is_deterministic() -> None:
     """验证市场指标使用确定性代码计算，而不是随机模型输出。"""

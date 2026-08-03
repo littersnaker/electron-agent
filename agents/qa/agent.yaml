@@ -1,0 +1,13 @@
+id: qa
+name: QA Agent
+adapter: qa_agent
+planner: conversational_qa
+skills:
+  - qa-assistant
+tools: []
+memory:
+  - episodic
+  - semantic
+output_schema: sse_stream
+metadata:
+  migration: runtime_native

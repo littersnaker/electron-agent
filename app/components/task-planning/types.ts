@@ -18,7 +18,8 @@ export type PlanningStageStatus =
 
 export type TaskPlanningWorkflowMode =
   | ComposerMode
-  | `commerce-${CommerceWorkflowMode}`;
+  | `commerce-${CommerceWorkflowMode}`
+  | "media";
 
 export interface TaskPlanningPanelProps {
   agents: AgentInstance[];

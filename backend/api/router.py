@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from backend.api.agents import router as agents_router
-from backend.api.chat import router as chat_router
+from backend.api.code import router as code_router
 from backend.api.checkpoints import router as checkpoints_router
 from backend.api.commerce import router as commerce_router
 from backend.api.health import router as health_router
@@ -33,7 +33,7 @@ def register_routes() -> None:
         workspace_router,
         preferences_router,
         qa_router,
-        chat_router,
+        code_router,
         media_router,
         commerce_router,
         observability_router,

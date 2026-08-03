@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.services.workspace.indexer import (
-    IGNORED_DIRECTORIES,
     TEXT_EXTENSIONS,
     index_project,
+    iter_project_files,
     search_project_index,
 )
 from backend.services.workspace.repository import get_project
 from backend.utils.paths import is_probably_binary
+from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 OVERVIEW_EXACT_NAMES = {
     "package.json",
@@ -38,8 +39,8 @@ OVERVIEW_PATH_TOKENS = (
     "app",
     "config",
 )
-MAX_OVERVIEW_FILES = 12
-MAX_OVERVIEW_FILE_CHARS = 8_000
+MAX_OVERVIEW_FILES = 8
+MAX_OVERVIEW_FILE_CHARS = 4_000
 
 
 def _overview_score(relative_path: str) -> int:
@@ -59,17 +60,13 @@ def _fallback_overview_files(root: Path) -> list[dict[str, object]]:
     """索引关键词无命中时读取项目清单、入口和核心结构文件。"""
 
     candidates: list[tuple[int, Path]] = []
-    for path in root.rglob("*"):
-        if any(part in IGNORED_DIRECTORIES for part in path.parts):
-            continue
-        if not path.is_file() or path.is_symlink():
-            continue
-        if path.name == ".env" or path.name.startswith(".env."):
-            continue
+    for relative in iter_project_files(root):
+        path = root / relative
         if path.suffix.lower() not in TEXT_EXTENSIONS and path.name.lower() not in OVERVIEW_EXACT_NAMES:
             continue
+        if is_sensitive_workspace_path(relative):
+            continue
         try:
-            relative = path.relative_to(root).as_posix()
             if path.stat().st_size > 500_000 or is_probably_binary(path):
                 continue
         except (OSError, ValueError):
@@ -107,9 +104,16 @@ async def ensure_context(
 
     project = await get_project(project_id)
     root = Path(project.root_path).resolve()
-    if project.index_status != "ready" or project.indexed_file_count == 0:
+    if project.index_status != "indexing" and (
+        project.index_status != "ready" or project.indexed_file_count == 0
+    ):
         await index_project(project_id)
-    files = await search_project_index(project_id, query, limit=12)
+    files = await search_project_index(project_id, query, limit=8)
+    files = [
+        item
+        for item in files
+        if not is_sensitive_workspace_path(item.get("path"))
+    ]
     if not files:
         files = _fallback_overview_files(root)
     return root, files
@@ -123,6 +127,8 @@ def render_context(files: list[dict[str, object]]) -> str:
     sections: list[str] = []
     for item in files:
         path = str(item.get("path") or "unknown")
+        if is_sensitive_workspace_path(path):
+            continue
         content = str(item.get("content") or "")
         source = "结构概览回退" if item.get("fallback") else "索引匹配"
         sections.append(f"--- FILE: {path} [{source}] ---\n{content}")

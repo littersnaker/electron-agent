@@ -1,0 +1,17 @@
+id: commerce-agent
+name: Commerce Agent
+version: 1.0.0
+description: 提供电商市场研究、Listing 草稿和数据源边界规则。
+prompt:
+  file: prompt.md
+tools: []
+memory:
+  - episodic
+  - semantic
+  - task
+permissions: {}
+requires_reasoning: true
+tags:
+  - 电商
+  - commerce
+  - listing

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
+from typing import cast
 
 from backend.services.agent.filesystem_executor import (
-    execute_filesystem_operations,
+    FileSystemExecutionResult,
     operation_resources,
 )
 from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
 from backend.services.agent.work_models import WorkItem
+from backend.tools.code_tools import execute_code_tool
 from backend.services.agent.work_worker import (
     CheckpointCallback,
     EmitCallback,
@@ -57,13 +58,19 @@ async def execute_fast_filesystem_work(
             owner=work.id,
             priority=work.priority,
         ):
-            result = await asyncio.to_thread(
-                execute_filesystem_operations,
-                root,
-                work.file_operations,
+            result = cast(
+                FileSystemExecutionResult,
+                await execute_code_tool(
+                    "workspace.filesystem",
+                    root=root,
+                    arguments={"operations": work.file_operations},
+                    permissions={"write"},
+                    agent_id=agent_id,
+                    task_id=work.id,
+                ),
             )
     except Exception as exc:
-        state.transcript.append(f"FILESYSTEM FAST PATH FAILED: {exc}")
+        state.append_transcript(f"FILESYSTEM FAST PATH FAILED: {exc}")
         await checkpoint()
         return WorkExecutionResult(
             work_id=work.id,
@@ -76,7 +83,7 @@ async def execute_fast_filesystem_work(
     for path in result.changed_paths:
         if path not in state.changed_files:
             state.changed_files.append(path)
-    state.transcript.append(
+    state.append_transcript(
         "FILESYSTEM FAST PATH COMPLETED\n"
         f"OPERATIONS: {[item.to_json() for item in work.file_operations]}\n"
         f"CHANGED: {result.changed_paths}"

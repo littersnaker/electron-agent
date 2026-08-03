@@ -1,0 +1,15 @@
+id: qa-assistant
+name: QA Assistant
+version: 1.0.0
+description: 提供可靠问答、上下文利用和不确定性声明规则。
+prompt:
+  file: prompt.md
+tools: []
+memory:
+  - episodic
+  - semantic
+permissions: {}
+requires_reasoning: false
+tags:
+  - 问答
+  - qa

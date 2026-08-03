@@ -45,6 +45,8 @@ export function buildWelcomeMessages(
           ? `已进入 ${project?.name || "项目"} 的 Code Agent。可选择建议、自动编辑或全自动模式；自动模式会持续读取、修改并验证项目，而不是只生成步骤文档。`
           : mode === "commerce"
             ? "已进入 Cross-border Market Intelligence Agent。告诉我一个大概品类或市场问题，我会用公开 SERP / Shopping 做核心研究，并把 Amazon、Keepa 等平台数据作为可选增强。"
+            : mode === "media"
+              ? "已进入 AI 漫剧工作室。输入剧本或剧情梗概，我会拆分成镜并等待你确认，然后并行出图、图生视频并合并成集。"
             : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",
     },
   ];

@@ -25,9 +25,13 @@ def work_item_from_json(value: dict[str, Any]) -> WorkItem:
         and str(item.get("type") or "") in allowed_operation_types
         and str(item.get("sourcePath") or "")
     ]
-    execution_type = str(value.get("executionType") or "agent")
-    if execution_type != "filesystem" or not file_operations:
+    execution_type = str(value.get("executionType") or "agent").lower()
+    allowed_execution_types = {"agent", "coding", "filesystem", "validation", "artifact"}
+    if execution_type not in allowed_execution_types:
         execution_type = "agent"
+    if execution_type == "filesystem" and not file_operations:
+        execution_type = "agent"
+    if execution_type != "filesystem":
         file_operations = []
     return WorkItem(
         id=str(value.get("id") or "W001"),
@@ -42,6 +46,9 @@ def work_item_from_json(value: dict[str, Any]) -> WorkItem:
         serial_group=str(value.get("serialGroup") or ""),
         execution_type=execution_type,  # type: ignore[arg-type]
         file_operations=file_operations,
+        validation_commands=[
+            str(item) for item in value.get("validationCommands", []) if str(item)
+        ],
         status=str(value.get("status") or "pending"),
         attempts=int(value.get("attempts") or 0),
         summary=str(value.get("summary") or ""),
@@ -151,6 +158,7 @@ async def save_loop_checkpoint(
     execution_mode: str,
     worker_states: dict[str, dict[str, Any]] | None = None,
     active_work_ids: list[str] | None = None,
+    project_harness: dict[str, Any] | None = None,
 ) -> None:
     """在每个安全动作后保存可精确继续的 Code Agent 状态。"""
 
@@ -182,6 +190,7 @@ async def save_loop_checkpoint(
                 "executionMode": execution_mode,
                 "workerStates": worker_states or {},
                 "activeWorkIds": active_work_ids or [],
+                "projectHarness": project_harness or {},
             }
         },
     )

@@ -6,14 +6,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from backend.schemas.chat import ChatRequest
 from backend.services.agent.classifier import classify_request
 from backend.services.agent.context import ensure_context, render_context
+from backend.services.agent.request_routing import route_code_request
 from backend.services.agent.task_planner import (
     CodeTaskPlan,
     PreparedTask,
@@ -30,7 +33,7 @@ from backend.services.agent.pending import (
     pop_pending_action,
     save_pending_action,
 )
-from backend.services.agent.proposal import apply_proposal, generate_proposal, proposal_to_json
+from backend.services.agent.proposal import generate_proposal, proposal_to_json
 from backend.services.agent.filesystem_executor import parse_direct_filesystem_request
 from backend.services.agent.work_models import FileSystemOperation, WorkItem
 from backend.services.agent.workspace_tools import render_workspace_tree
@@ -44,6 +47,7 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 from backend.services.workspace.indexer import index_project
 from backend.services.workspace.repository import get_project, resolve_project_root
+from backend.tools.code_tools import execute_code_tool
 from backend.utils.sse import encode_sse, encode_sse_comment
 
 LOGGER = logging.getLogger(__name__)
@@ -83,8 +87,18 @@ async def _handle_interactive_reply(
             "payload": lifecycle(role="merge", status="running", detail="已获得批准，正在安全写入文件…"),
         }
     )
-    changed = apply_proposal(root, action)
-    await index_project(project_id)
+    changed = cast(
+        list[str],
+        await execute_code_tool(
+            "workspace.apply_proposal",
+            root=root,
+            arguments={"action": action},
+            permissions={"write"},
+            agent_id="suggestion_approval",
+            task_id=request_id,
+        ),
+    )
+    asyncio.create_task(index_project(project_id))
     yield encode_sse(
         {
             "type": "AGENT_LIFECYCLE",
@@ -213,9 +227,17 @@ async def _stream_suggest_mode(
 
 
 async def stream_code_agent(
-    *, body: ChatRequest, preferred_model_id: str, credentials: LlmCredentials
+    *,
+    body: ChatRequest,
+    preferred_model_id: str,
+    credentials: LlmCredentials,
+    runtime_context: str = "",
 ) -> AsyncIterator[str]:
-    """执行本地项目 Code Agent 工作流并持续输出 SSE。"""
+    """执行本地项目 Code Agent 工作流并持续输出 SSE。
+
+    ``runtime_context`` 由统一 Context Manager 构建，包含 Skill 和 Memory；旧调用方省略时
+    仍保持原有行为，从而支持小步迁移。
+    """
 
     yield encode_sse_comment()
     user_text = _last_user_text(body)
@@ -278,13 +300,20 @@ async def stream_code_agent(
             return
 
         yield encode_sse({"type": "STATUS", "content": "🤖 Agent 已接收请求，正在识别任务类型…"})
-        request_mode = classify_request(user_text)
+        routed_request = route_code_request(body, user_text)
+        request_mode = routed_request.mode
+        effective_user_text = routed_request.effective_text
+        capability_names = routed_request.tool_names
         await add_trace_event(
             trace,
             category="router",
             name="request_classifier",
             status="completed",
-            metadata={"mode": request_mode, "agentMode": body.agent_mode},
+            metadata={
+                "mode": request_mode,
+                "agentMode": body.agent_mode,
+                "tools": list(capability_names),
+            },
         )
         yield encode_sse(
             {
@@ -292,7 +321,10 @@ async def stream_code_agent(
                 "payload": lifecycle(
                     role="router",
                     status="completed",
-                    detail=f"请求已识别为 {request_mode}，执行模式为 {body.agent_mode}。",
+                    detail=(
+                        f"请求已识别为 {request_mode}，执行模式为 {body.agent_mode}；"
+                        f"本轮工具：{', '.join(capability_names)}。"
+                    ),
                 ),
             }
         )
@@ -313,8 +345,11 @@ async def stream_code_agent(
                 ),
             }
         )
-        root, files = await ensure_context(body.project_id, user_text)
+        root, files = await ensure_context(body.project_id, effective_user_text)
         context_text = render_context(files)
+        if runtime_context.strip():
+            # Runtime 约束必须放在项目索引上下文之前，避免长文件片段将 Skill 和 Memory 挤出。
+            context_text = f"{runtime_context.strip()}\n\n{context_text}"
         yield encode_sse(
             {
                 "type": "AGENT_LIFECYCLE",
@@ -328,7 +363,7 @@ async def stream_code_agent(
         if request_mode == "read_only":
             async for frame in stream_read_only_tool_answer(
                 root=root,
-                user_text=user_text,
+                user_text=effective_user_text,
                 initial_context=context_text,
                 preferred_model_id=preferred_model_id,
                 credentials=credentials,
@@ -348,13 +383,15 @@ async def stream_code_agent(
                 ),
             }
         )
-        direct_operations = parse_direct_filesystem_request(root, user_text)
+        direct_operations = parse_direct_filesystem_request(root, effective_user_text)
         if direct_operations:
-            prepared = _prepare_direct_filesystem_task(user_text, direct_operations)
+            prepared = _prepare_direct_filesystem_task(
+                effective_user_text, direct_operations
+            )
         else:
             prepared = await prepare_code_task(
-                user_request=user_text,
-                project_tree=render_workspace_tree(root),
+                user_request=effective_user_text,
+                project_tree=render_workspace_tree(root, limit=800),
                 initial_context=context_text,
                 preferred_model_id=preferred_model_id,
                 credentials=credentials,
@@ -403,6 +440,7 @@ async def stream_code_agent(
                 "fallbackUsed": prepared.fallback_used,
                 "objective": prepared.plan.objective[:1000],
                 "workIds": [item.id for item in prepared.plan.works],
+                "reviewNotes": prepared.review_notes,
             },
         )
 

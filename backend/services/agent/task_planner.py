@@ -4,20 +4,25 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from backend.services.agent.plan_optimizer import optimize_work_granularity
+from backend.services.agent.planner_context import build_planner_prompt
+from backend.services.agent.target_preflight import is_greenfield_project
 from backend.services.agent.work_models import (
     FileSystemOperation,
     WorkItem,
     WorkLedger,
 )
+from backend.services.agent.worklist_reviewer import review_worklist
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
+from backend.software_factory.planning import enrich_software_factory_works
 
 
-MAX_PLANNING_CONTEXT_CHARS = 90_000
+MAX_PLANNING_CONTEXT_CHARS = 32_000
 
 
 @dataclass(slots=True)
@@ -55,6 +60,7 @@ class PreparedTask:
     usage: LlmUsage
     model_name: str
     fallback_used: bool = False
+    review_notes: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -159,8 +165,12 @@ def _parse_work_items(
         objective = str(raw.get("objective") or title).strip()[:3000]
         file_operations = _parse_file_operations(raw.get("fileOperations"))
         execution_type = str(raw.get("executionType") or "agent").strip().lower()
-        if execution_type != "filesystem" or not file_operations:
+        allowed_execution_types = {"agent", "coding", "filesystem", "validation", "artifact"}
+        if execution_type not in allowed_execution_types:
             execution_type = "agent"
+        if execution_type == "filesystem" and not file_operations:
+            execution_type = "agent"
+        if execution_type != "filesystem":
             file_operations = []
         target_files = _strings(raw.get("targetFiles"), limit=200)
         for operation in file_operations:
@@ -179,6 +189,7 @@ def _parse_work_items(
                 serial_group=str(raw.get("serialGroup") or "").strip()[:120],
                 execution_type=execution_type,  # type: ignore[arg-type]
                 file_operations=file_operations,
+                validation_commands=_strings(raw.get("validationCommands"), limit=20),
             )
         )
     valid_ids = {item.id for item in works}
@@ -215,6 +226,23 @@ def _fallback_plan(user_request: str) -> CodeTaskPlan:
     )
 
 
+def _enriched_fallback_plan(
+    user_request: str,
+    *,
+    greenfield: bool = False,
+) -> CodeTaskPlan:
+    """在模型规划失败时仍补齐电商 Software Factory 工程链。"""
+
+    plan = _fallback_plan(user_request)
+    plan.works = optimize_work_granularity(user_request, plan.works)
+    plan.works = enrich_software_factory_works(
+        user_request,
+        plan.works,
+        greenfield=greenfield,
+    )
+    return plan
+
+
 async def prepare_code_task(
     *,
     user_request: str,
@@ -235,16 +263,31 @@ async def prepare_code_task(
   "nonGoals":["明确不做的内容"],
   "validationCommands":["建议的安全验证命令"],
   "worklist":[
-    {"id":"W001","title":"短标题","objective":"独立目标","acceptanceCriteria":["标准"],"dependencies":[],"priority":100,"targetFiles":["预计写入的相对路径"],"serialGroup":"可选共享资源组","executionType":"agent","fileOperations":[{"type":"rename","sourcePath":"旧相对路径","targetPath":"新相对路径"}]}
+    {"id":"W001","title":"短标题","objective":"独立目标","acceptanceCriteria":["标准"],"dependencies":[],"priority":100,"targetFiles":["预计写入的相对路径"],"serialGroup":"可选共享资源组","executionType":"coding","fileOperations":[{"type":"rename","sourcePath":"旧相对路径","targetPath":"新相对路径"}],"validationCommands":["pnpm lint"]}
   ]
 }
-规则：Work 应互不重复、边界清晰、依赖明确；不要按文件机械拆分；简单任务 1-3 个 Work；复杂任务按真实需要拆分，不设置 Work 数量硬上限。
-priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不冲突的 Work 会并行。会写同一文件或共享资源的 Work 必须填写相同 targetFiles/serialGroup，并用 priority 确定串行先后。
-纯重命名、移动或删除空目录的 Work 必须设置 executionType=filesystem，并给出完整 fileOperations；这类 Work 将由 Python 本地执行器直接完成，不再调用 Worker 大模型。只有需要理解或修改文件内容时才使用 executionType=agent。"""
-    prompt = (
-        f"RAW USER REQUEST:\n{user_request}\n\n"
-        f"PROJECT TREE:\n{project_tree[:30_000]}\n\n"
-        f"INITIAL CONTEXT:\n{initial_context[:MAX_PLANNING_CONTEXT_CHARS]}"
+规则：Work 应互不重复、边界清晰、依赖明确；不要按文件机械拆分。默认 3-6 个 Work，最多 8 个。
+多文件功能域合并进同一个 Work，由 Worker 在内部分批 edit；只有文件完全不重叠、可独立验收的大模块才拆成独立 Work，不要为了并行而过度拆分。
+单个 Work 的 targetFiles 控制在 15 个以内；涉及文件很多时按项目目录/路由/模块自然分组，每组不超过 15 个；存在共享基础（入口、主题、公共组件）时先做一个小的前置 Work，其余组互不依赖、可并行。不要所有页面塞进一个 Work，也不要按页面拆成几十个 Work。
+“看看要不要补充/审计/完善”类请求：数据层审计与补齐合并为 1 个 Work（优先走本地校验快速通道），不要生成多个数据层 Work。
+依赖只能表达真实产物前置关系，不能因为“先理解再开发”而把全部 Work 串成一条链。基础契约完成后，页面、购物车、订单等互不冲突模块应并行。
+每个 coding Work 应控制在一个可独立验收的功能域，预计修改文件过多时拆分；不要把全部 Mock、类型、全局配置和所有页面塞进一个超大 W001。
+每个 coding/artifact Work 必须填写 targetFiles（具体相对路径数组），禁止留空；批量直写依赖它。不要只填 src、app、pages 等宽泛目录；宽泛目录只表示影响范围，不应阻止其他模块并行。
+priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不冲突的 Work 会滚动并行，任一 Work 完成后立即补充新任务。会写同一具体文件或共享资源的 Work 必须填写相同 targetFiles/serialGroup，并用 priority 确定串行先后。
+纯重命名、移动或删除空目录使用 filesystem；普通代码理解与修改使用 coding（兼容旧值 agent）；只执行质量命令使用 validation 并填写 validationCommands；生成可复用产物使用 artifact。filesystem 将由本地执行器完成，不调用 Worker 大模型。"""
+    # Planner 只接收目标、项目元数据和相关文件摘要，不接收全仓库或完整历史。
+    greenfield = is_greenfield_project(project_tree)
+    if greenfield:
+        system += "\n\n" + (
+            "当前项目基本为空，这是从零构建请求。不要按页面拆成多个 Work："
+            "只生成 1-3 个整站生成 Work。targetFiles 使用你将要创建的具体相对路径"
+            "（允许文件尚不存在），禁止留空或只填目录；数据层走 artifact/factory "
+            "确定性生成，页面层合并进单个 coding Work 一次性创建全部页面文件。"
+        )
+    prompt = build_planner_prompt(
+        user_request=user_request,
+        project_tree=project_tree,
+        initial_context=initial_context[:MAX_PLANNING_CONTEXT_CHARS],
     )
     try:
         text, usage, model = await GATEWAY.complete(
@@ -252,9 +295,17 @@ priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不�
             credentials=credentials,
             messages=[LlmMessage("system", system), LlmMessage("user", prompt)],
             temperature=0.1,
+            timeout_seconds=180,
         )
         raw = _extract_json(text)
         works = _parse_work_items(raw.get("worklist"))
+        works = optimize_work_granularity(user_request, works)
+        works = enrich_software_factory_works(
+            user_request,
+            works,
+            greenfield=greenfield,
+        )
+        works, review_report = review_worklist(works)
         if not works:
             raise ValueError("Planner 没有生成有效 WorkList")
         plan = CodeTaskPlan(
@@ -267,14 +318,68 @@ priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不�
             validation_commands=_strings(raw.get("validationCommands"), limit=20),
             works=works,
         )
-        return PreparedTask(plan=plan, usage=usage, model_name=model.name)
+        return PreparedTask(
+            plan=plan,
+            usage=usage,
+            model_name=model.name,
+            review_notes=review_report.adjustments,
+        )
     except Exception:
         return PreparedTask(
-            plan=_fallback_plan(user_request),
+            plan=_enriched_fallback_plan(
+                user_request,
+                greenfield=greenfield,
+            ),
             usage=LlmUsage(),
             model_name="",
             fallback_used=True,
         )
+
+
+def _compact_replan_snapshot(ledger: WorkLedger) -> dict[str, Any]:
+    """只保留重规划需要的 Work 字段，避免把历史错误和产物全文再次输入模型。"""
+
+    snapshot = ledger.snapshot()
+    return {
+        "revision": ledger.revision,
+        "reason": ledger.reason[:500],
+        # 保留测试和诊断依赖的状态计数，但不携带完整产物与历史 transcript。
+        "total": snapshot["total"],
+        "succeeded": snapshot["succeeded"],
+        "failed": snapshot["failed"],
+        "pending": snapshot["pending"],
+        "running": snapshot["running"],
+        "skipped": snapshot["skipped"],
+        "items": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "objective": item.objective[:1_200],
+                "status": item.status,
+                "attempts": item.attempts,
+                "dependencies": item.dependencies,
+                "targetFiles": item.target_files[:30],
+                "serialGroup": item.serial_group,
+                "executionType": item.execution_type,
+                "error": item.error[:1_500],
+            }
+            for item in ledger.items
+        ],
+    }
+
+
+def _replacement_matches(failed: WorkItem, candidate: WorkItem) -> bool:
+    """判断新增修复 Work 是否已经替代原失败 Work。"""
+
+    failed_paths = {path.strip("/") for path in failed.target_files if path.strip("/")}
+    candidate_paths = {path.strip("/") for path in candidate.target_files if path.strip("/")}
+    if failed_paths.intersection(candidate_paths):
+        return True
+    if failed.serial_group and failed.serial_group == candidate.serial_group:
+        return True
+    failed_terms = set(re.findall(r"[A-Za-z0-9_\u4e00-\u9fff]{2,}", failed.title.lower()))
+    candidate_text = f"{candidate.title} {candidate.objective}".lower()
+    return sum(term in candidate_text for term in failed_terms) >= 2
 
 
 async def replan_after_failures(
@@ -283,6 +388,7 @@ async def replan_after_failures(
     ledger: WorkLedger,
     failed_work_ids: list[str],
     failure_observation: str,
+    failures: list[dict[str, object]] | None = None,
     preferred_model_id: str,
     credentials: LlmCredentials,
 ) -> ReplanResult:
@@ -292,16 +398,24 @@ async def replan_after_failures(
 你只能调整 failed/pending 工作，必要时新增修复 Work。返回 JSON：
 {
   "reason":"重规划原因",
-  "retry":[{"id":"失败或待办 Work ID","title":"可选新标题","objective":"新执行策略","acceptanceCriteria":["标准"],"dependencies":["已完成或待办 ID"],"priority":100,"targetFiles":["路径"],"serialGroup":"可选","executionType":"agent","fileOperations":[{"type":"rename","sourcePath":"旧路径","targetPath":"新路径"}]}],
-  "newWorks":[{"id":"R001","title":"新增修复项","objective":"目标","acceptanceCriteria":["标准"],"dependencies":["ID"],"priority":100,"targetFiles":["路径"],"serialGroup":"可选","executionType":"agent","fileOperations":[]}],
+  "retry":[{"id":"失败或待办 Work ID","title":"可选新标题","objective":"新执行策略","acceptanceCriteria":["标准"],"dependencies":["已完成或待办 ID"],"priority":100,"targetFiles":["路径"],"serialGroup":"可选","executionType":"coding","fileOperations":[{"type":"rename","sourcePath":"旧路径","targetPath":"新路径"}],"validationCommands":[]}],
+  "newWorks":[{"id":"R001","title":"新增修复项","objective":"目标","acceptanceCriteria":["标准"],"dependencies":["ID"],"priority":100,"targetFiles":["路径"],"serialGroup":"可选","executionType":"coding","fileOperations":[],"validationCommands":[]}],
   "skip":["确认无需继续的 failed/pending ID"]
 }
-不要返回 succeeded/skipped ID 的更新；不要创建与成功 Work 重复的新 Work。"""
+不要返回 succeeded/skipped ID 的更新；不要创建与成功 Work 重复的新 Work。
+必须以 failureObservation 的真实错误为依据，不能仅因一个 Work 涉及 5 个左右文件就判定“范围过大”或擅自返工。
+默认直接在 retry 中修正原失败 Work；只有原 Work 确实无法独立验收时才拆分。若拆成 newWorks，必须把被替代的原 Work 放入 skip，避免原 Work 与修复 Work 重复执行。
+failures 数组逐条列出每个失败 Work 的原因、状态与失败类型。你必须逐条处理：
+对每个 failed Work 决定 retry（修正原项）、skip（放弃）或 newWorks（拆分修复）；
+不能因为某一个 Work 失败就重排或重做其它成功/待办 Work。
+如果失败 Work 的目标文件已经存在且从错误信息看可能已满足验收标准，优先放入 skip，
+避免重试时把已落盘的产物重复修改一遍。"""
     payload = {
         "taskSpec": json.loads(plan.to_prompt_json()),
         "failedWorkIds": failed_work_ids,
-        "failureObservation": failure_observation[-60_000:],
-        "fullWorkListSnapshot": ledger.snapshot(),
+        "failureObservation": failure_observation[-12_000:],
+        "failures": (failures or [])[:30],
+        "fullWorkListSnapshot": _compact_replan_snapshot(ledger),
     }
     text, usage, model = await GATEWAY.complete(
         preferred_model_id=preferred_model_id,
@@ -311,6 +425,7 @@ async def replan_after_failures(
             LlmMessage("user", json.dumps(payload, ensure_ascii=False, indent=2)),
         ],
         temperature=0.1,
+        timeout_seconds=120,
     )
     raw = _extract_json(text)
     existing_ids = {item.id for item in ledger.items}
@@ -330,21 +445,36 @@ async def replan_after_failures(
         if failed_work_id in handled:
             continue
         failed = ledger.get(failed_work_id)
-        if failed:
-            retry_items.append(
-                WorkItem(
-                    id=failed.id,
-                    title=failed.title,
-                    objective=failed.objective,
-                    acceptance_criteria=failed.acceptance_criteria,
-                    dependencies=failed.dependencies,
-                    priority=failed.priority,
-                    target_files=failed.target_files,
-                    serial_group=failed.serial_group,
-                    execution_type=failed.execution_type,
-                    file_operations=failed.file_operations,
-                )
+        if not failed:
+            continue
+        replacements = [
+            item for item in new_items if _replacement_matches(failed, item)
+        ]
+        if replacements:
+            # Planner 忘记填写 skip 时由后端兜底，防止原 Work 与拆分修复项同时返工。
+            skipped_ids.append(failed.id)
+            for replacement in replacements:
+                replacement.dependencies = [
+                    dependency
+                    for dependency in replacement.dependencies
+                    if dependency != failed.id
+                ]
+            continue
+        retry_items.append(
+            WorkItem(
+                id=failed.id,
+                title=failed.title,
+                objective=failed.objective,
+                acceptance_criteria=failed.acceptance_criteria,
+                dependencies=failed.dependencies,
+                priority=failed.priority,
+                target_files=failed.target_files,
+                serial_group=failed.serial_group,
+                execution_type=failed.execution_type,
+                file_operations=failed.file_operations,
+                validation_commands=failed.validation_commands,
             )
+        )
     return ReplanResult(
         reason=str(raw.get("reason") or "根据失败结果调整未完成 Work").strip()[:3000],
         retry_items=retry_items,

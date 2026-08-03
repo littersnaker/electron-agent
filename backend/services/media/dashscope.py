@@ -148,12 +148,19 @@ async def generate_image(
     if attachment:
         content.append({"image": _attachment_data_url(attachment)})
     content.append({"text": _build_prompt(body)})
+    base_negative = "乱码，伪文字，文字扭曲，重复主体，重影，双重曝光，低画质"
     parameters: dict[str, Any] = {
         "n": 1,
-        "negative_prompt": "乱码，伪文字，文字扭曲，重复主体，重影，双重曝光，低画质",
+        "negative_prompt": (
+            f"{base_negative}，{body.negative_prompt}"
+            if body.negative_prompt
+            else base_negative
+        ),
         "prompt_extend": body.image_edit_fidelity != "precise",
         "watermark": False,
     }
+    if body.seed is not None:
+        parameters["seed"] = int(body.seed)
     if body.size:
         parameters["size"] = body.size
     elif body.mode == "text-to-image":
@@ -305,6 +312,8 @@ async def generate_video(
             parameters = {"resolution": "720P", "ratio": "16:9", "duration": 5, "watermark": False}
             if "happyhorse" not in body.model_id:
                 parameters["prompt_extend"] = True
+        if body.seed is not None:
+            parameters["seed"] = int(body.seed)
 
         response = await client.post(
             f"{api_base}{VIDEO_PATH}",

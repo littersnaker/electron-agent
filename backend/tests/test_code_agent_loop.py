@@ -220,7 +220,7 @@ async def test_agent_loop_can_edit_many_files_and_finish(tmp_path: Path, monkeyp
 
     assert result is not None
     assert len(result.changed_files) == 10
-    assert result.iterations == 4
+    assert result.iterations == 3
     assert result.usage.total == 45
     assert result.worklist["succeeded"] == 1
 
@@ -323,3 +323,247 @@ async def test_failed_work_replans_with_full_snapshot_without_repeating_success(
     assert first["id"] == "W001"
     assert first["attempts"] == 1
     assert (tmp_path / "a.py").read_text("utf-8") == "A = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_runtime_protocol_failure_retries_with_clean_attempt_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """协议错误应由 Runtime 干净重试，不能创建代码返工项或继承旧熔断。"""
+
+    worker_calls = 0
+
+    async def fake_complete(**kwargs):
+        """第一次尝试连续返回无效协议，第二次尝试直接完成。"""
+
+        nonlocal worker_calls
+        system = kwargs["messages"][0].content
+        if "并行 Worker" not in system:
+            return (
+                json.dumps({"action": "finish", "summary": "完成"}),
+                LlmUsage(),
+                SimpleNamespace(name="Final Model"),
+            )
+        worker_calls += 1
+        content = (
+            "我还需要继续分析"
+            if worker_calls <= 5
+            else json.dumps(
+                {
+                    "action": "complete_work",
+                    "workId": "W001",
+                    "summary": "第二次尝试已完成",
+                }
+            )
+        )
+        return (
+            content,
+            LlmUsage(prompt=10, completion=2, total=12),
+            SimpleNamespace(name="Worker Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(WorkItem("W001", "完成修改", "完成一个小修改")),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert result is not None
+    assert result.replans == 0
+    assert result.worklist["succeeded"] == 1
+    assert result.worklist["items"][0]["attempts"] == 2
+    assert worker_calls == 6
+
+
+@pytest.mark.asyncio
+async def test_planner_adds_greenfield_directive_for_empty_project(monkeypatch) -> None:
+    """空项目规划时，Planner 应收到“从零构建、整站生成”的强约束。"""
+
+    captured: list[str] = []
+
+    async def fake_complete(**kwargs):
+        captured.append(kwargs["messages"][0].content)
+        return (
+            json.dumps(
+                {
+                    "optimizedPrompt": "创建电商小程序",
+                    "objective": "创建电商小程序",
+                    "constraints": [],
+                    "acceptanceCriteria": ["页面创建完成"],
+                    "nonGoals": [],
+                    "validationCommands": [],
+                    "worklist": [
+                        {
+                            "id": "W001",
+                            "title": "整站生成",
+                            "objective": "创建全部页面",
+                            "targetFiles": ["src/pages/Home.tsx"],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            LlmUsage(prompt=20, completion=10, total=30),
+            SimpleNamespace(name="Planner Model"),
+        )
+
+    monkeypatch.setattr(
+        "backend.services.agent.task_planner.GATEWAY.complete",
+        fake_complete,
+    )
+    await prepare_code_task(
+        user_request="做一个电商小程序",
+        project_tree="package.json\n",
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+    )
+    assert captured
+    assert "从零构建请求" in captured[0]
+    assert "整站生成" in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_planner_omits_greenfield_directive_for_existing_project(
+    monkeypatch,
+) -> None:
+    """已有较多文件的项目不应触发从零构建约束。"""
+
+    captured: list[str] = []
+
+    async def fake_complete(**kwargs):
+        captured.append(kwargs["messages"][0].content)
+        return (
+            json.dumps(
+                {
+                    "optimizedPrompt": "修改页面",
+                    "objective": "修改页面",
+                    "constraints": [],
+                    "acceptanceCriteria": [],
+                    "nonGoals": [],
+                    "validationCommands": [],
+                    "worklist": [
+                        {
+                            "id": "W001",
+                            "title": "修改",
+                            "objective": "修改页面",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            LlmUsage(prompt=20, completion=10, total=30),
+            SimpleNamespace(name="Planner Model"),
+        )
+
+    monkeypatch.setattr(
+        "backend.services.agent.task_planner.GATEWAY.complete",
+        fake_complete,
+    )
+    tree = "\n".join(
+        [
+            "app/page.tsx",
+            "app/cart/CartPage.tsx",
+            "app/home/HomePage.tsx",
+            "lib/api/mock.ts",
+            "lib/theme/tokens.ts",
+            "backend/services/agent/work_worker.py",
+            "README.md",
+        ]
+    )
+    await prepare_code_task(
+        user_request="修改购物车页面",
+        project_tree=tree,
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+    )
+    assert captured
+    assert "从零构建请求" not in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_guard_stop_work_goes_to_replanner_with_failure_reason(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """守卫终止（连续重复上下文动作）应把失败原因送回 Planner 重规划，
+    而不是像协议/超时那样原样重试。"""
+
+    monkeypatch.setenv("CODE_AGENT_MAX_CONTEXT_ACTIONS", "4")
+    monkeypatch.setenv("CODE_AGENT_MAX_GUARD_REJECTIONS", "2")
+    (tmp_path / "src").mkdir()
+    for index in range(4):
+        (tmp_path / "src" / f"f{index}.py").write_text(f"V = {index}\n", "utf-8")
+
+    responses = iter(
+        [
+            {"action": "read", "workId": "W001", "paths": ["src/f0.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f1.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f2.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f3.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f4.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f5.py"]},
+            {
+                "reason": "目标模糊导致守卫终止，重设计为只读审计",
+                "retry": [
+                    {
+                        "id": "W001",
+                        "title": "只读审计",
+                        "objective": "仅审计 src 目录并输出结论",
+                        "acceptanceCriteria": ["输出审计结论"],
+                    }
+                ],
+                "newWorks": [],
+                "skip": [],
+            },
+            {"action": "complete_work", "workId": "W001", "summary": "审计完成"},
+        ]
+    )
+    planner_payloads: list[dict[str, object]] = []
+
+    async def fake_complete(**kwargs):
+        """依次模拟 Worker 只读循环与失败恢复 Planner。"""
+
+        response = next(responses)
+        if "fullWorkListSnapshot" in kwargs["messages"][-1].content:
+            planner_payloads.append(json.loads(kwargs["messages"][-1].content))
+        return (
+            json.dumps(response, ensure_ascii=False),
+            LlmUsage(prompt=10, completion=5, total=15),
+            SimpleNamespace(name="Fake Coding Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr(
+        "backend.services.agent.task_planner.GATEWAY.complete", fake_complete
+    )
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(WorkItem("W001", "完成修改", "完成一个小修改")),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert planner_payloads, "守卫终止后应触发一次重规划"
+    failures = planner_payloads[0]["failures"]
+    assert any(
+        item.get("failureKind") == "guard" for item in failures
+    ), "Planner 应收到 guard 失败类型"
+    assert "执行守卫" in str(planner_payloads[0]["failureObservation"])
+    assert result is not None
+    assert result.replans == 1
+    assert result.worklist["succeeded"] == 1
+    assert result.worklist["items"][0]["attempts"] == 2

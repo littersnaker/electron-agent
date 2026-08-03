@@ -58,6 +58,23 @@ def test_parallel_wave_respects_target_file_conflicts_and_priority() -> None:
     assert [item.id for item in select_parallel_wave(conflicting, 4)] == ["W002"]
 
 
+def test_rolling_candidates_mix_independent_and_conflicting_works() -> None:
+    """滚动补位时应同时选择不冲突 Work，并让同文件冲突项等待高优先级完成。"""
+
+    from backend.services.agent.resource_coordinator import select_parallel_candidates
+
+    ready = [
+        WorkItem("W001", "模块 A", "修改 A", priority=20, target_files=["a.ts"]),
+        WorkItem("W002", "模块 B", "修改 B", priority=10, target_files=["b.ts"]),
+        WorkItem("W003", "低优先级共享", "修改共享文件", priority=50, target_files=["shared.ts"]),
+        WorkItem("W004", "高优先级共享", "修改共享文件", priority=5, target_files=["shared.ts"]),
+    ]
+    selected = select_parallel_candidates(ready, [], 4)
+
+    assert [item.id for item in selected] == ["W004", "W002", "W001"]
+    assert "W003" not in {item.id for item in selected}
+
+
 @pytest.mark.asyncio
 async def test_runtime_resource_lock_orders_conflicting_writes_by_priority() -> None:
     """实际编辑路径未在 Planner 中声明时，运行时锁仍按优先级串行。"""
@@ -337,3 +354,86 @@ async def test_parallel_wave_replans_once_with_full_success_and_failure_json(
     assert result.worklist["succeeded"] == 2
     assert result.worklist["items"][0]["attempts"] == 1
     assert (tmp_path / "b.py").read_text("utf-8") == "B = 2\n"
+
+
+@pytest.mark.asyncio
+async def test_rolling_scheduler_starts_unlocked_work_before_slow_peer_finishes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """一个 Work 完成后应立即启动其下游任务，而不是等待同批慢任务结束。"""
+
+    monkeypatch.setenv("CODE_AGENT_PARALLEL_WORKERS", "2")
+    downstream_started = asyncio.Event()
+    slow_started = asyncio.Event()
+    start_order: list[str] = []
+
+    async def fake_complete(**kwargs):
+        """让 W002 等待 W003 启动，以验证调度器不存在整波屏障。"""
+
+        system = kwargs["messages"][0].content
+        work_id = _worker_id(system)
+        start_order.append(work_id)
+        if work_id == "W001":
+            await asyncio.sleep(0.02)
+        elif work_id == "W002":
+            slow_started.set()
+            await asyncio.wait_for(downstream_started.wait(), timeout=1)
+        elif work_id == "W003":
+            downstream_started.set()
+        return (
+            json.dumps(
+                {
+                    "action": "complete_work",
+                    "workId": work_id,
+                    "summary": f"{work_id} 完成",
+                }
+            ),
+            LlmUsage(prompt=2, completion=1, total=3),
+            SimpleNamespace(name="Worker Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(
+            WorkItem("W001", "基础契约", "完成契约", target_files=["types.ts"]),
+            WorkItem("W002", "慢速模块", "完成慢速模块", target_files=["slow.ts"]),
+            WorkItem(
+                "W003",
+                "下游模块",
+                "依赖基础契约",
+                dependencies=["W001"],
+                target_files=["downstream.ts"],
+            ),
+        ),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert slow_started.is_set()
+    assert downstream_started.is_set()
+    assert start_order.index("W003") > start_order.index("W001")
+    assert result is not None
+    assert result.worklist["succeeded"] == 3
+
+
+def test_directory_scope_does_not_serialize_exact_file_work() -> None:
+    """宽泛目录只表示影响范围，不应把不同文件的 Work 全部串行化。"""
+
+    works = [
+        WorkItem("W001", "目录范围", "修改页面", target_files=["src/pages"]),
+        WorkItem(
+            "W002",
+            "具体文件",
+            "修改购物车",
+            target_files=["src/store/cart.ts"],
+        ),
+    ]
+
+    assert [item.id for item in select_parallel_wave(works, 4)] == ["W001", "W002"]

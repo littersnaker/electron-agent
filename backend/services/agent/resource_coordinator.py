@@ -42,10 +42,35 @@ def resources_conflict(left: str, right: str) -> bool:
     )
 
 
+def _is_probable_directory(resource: str) -> bool:
+    """判断 Planner 声明是否更像目录而不是具体文件。
+
+    目录级 targetFiles 仅代表影响范围，不能在整个 Work 生命周期内充当静态写锁；
+    真正写入时仍由 ``WorkspaceResourceCoordinator`` 按实际文件路径加锁。
+    """
+
+    normalized = normalize_resource(resource)
+    if not normalized or normalized.startswith("@"):
+        return False
+    name = PurePosixPath(normalized).name
+    known_extensionless_files = {
+        "dockerfile",
+        "makefile",
+        "license",
+        "readme",
+        "procfile",
+    }
+    return "." not in name and name.lower() not in known_extensionless_files
+
+
 def work_resources(work: WorkItem) -> set[str]:
     """返回 Planner 声明的写资源和可选串行组。"""
 
-    resources = {normalize_resource(path) for path in work.target_files if path}
+    resources = {
+        normalize_resource(path)
+        for path in work.target_files
+        if path and not _is_probable_directory(path)
+    }
     for operation in work.file_operations:
         if operation.source_path:
             resources.add(normalize_resource(operation.source_path))
@@ -57,15 +82,22 @@ def work_resources(work: WorkItem) -> set[str]:
 
 
 def works_conflict(left: WorkItem, right: WorkItem) -> bool:
-    """根据目标文件与串行组判断两个 Work 是否必须串行。"""
+    """根据精确目标文件和串行组判断两个 Work 是否必须串行。
+
+    静态调度只阻止相同具体文件或相同逻辑组并发；父目录影响范围不再提前锁死
+    整个 Work。实际编辑仍使用父子路径冲突规则，保证写入安全。
+    """
 
     left_resources = work_resources(left)
     right_resources = work_resources(right)
-    return any(
-        resources_conflict(first, second)
-        for first in left_resources
-        for second in right_resources
-    )
+    for first in left_resources:
+        for second in right_resources:
+            if first.startswith("@") or second.startswith("@"):
+                if first == second:
+                    return True
+            elif first == second:
+                return True
+    return False
 
 
 def max_parallel_workers() -> int:
@@ -90,6 +122,26 @@ def select_parallel_wave(ready: list[WorkItem], limit: int) -> list[WorkItem]:
             continue
         selected.append(work)
     return selected or ready[:1]
+
+
+def select_parallel_candidates(
+    ready: list[WorkItem],
+    active: list[WorkItem],
+    limit: int,
+) -> list[WorkItem]:
+    """为滚动任务池选择不会与当前运行 Work 冲突的新工作项。"""
+
+    if limit <= 0:
+        return []
+    selected: list[WorkItem] = []
+    for work in sorted(ready, key=lambda item: (item.priority, item.id)):
+        if len(selected) >= limit:
+            break
+        blockers = [*active, *selected]
+        if any(works_conflict(work, running) for running in blockers):
+            continue
+        selected.append(work)
+    return selected
 
 
 @dataclass(slots=True)

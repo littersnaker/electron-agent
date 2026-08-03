@@ -1,0 +1,29 @@
+id: apple-miniapp-ui
+name: Apple Miniapp UI
+version: 1.0.0
+description: 为小程序和移动端页面提供克制、清晰、可访问的 Apple 风格 UI 工程规则。
+prompt:
+  file: prompt.md
+tools:
+  - workspace.search
+  - workspace.read
+  - workspace.edit
+  - workspace.run
+memory:
+  - project
+  - task
+permissions:
+  filesystem:
+    read: true
+    write: true
+  shell:
+    execute: true
+requires_reasoning: false
+tags:
+  - 小程序
+  - UI
+  - ui
+  - 界面
+  - 页面
+  - 商城
+  - apple

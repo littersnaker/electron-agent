@@ -25,6 +25,7 @@ import {
   describeWorkListSnapshot,
   isAgentLifecyclePayload,
   isInteractiveRequestPayload,
+  isMediaResultPayload,
   isWorkListSnapshotPayload,
   interactiveWaitingMessage,
   readResponseError,
@@ -60,6 +61,7 @@ export function useChatStream({
   const [interactiveAnswer, setInteractiveAnswer] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const finalTextRef = useRef("");
+  const mediaAttachmentsRef = useRef<Message["attachments"] | undefined>(undefined);
   const hasLifecycleRef = useRef(false);
   const checkpointBinding = useChatCheckpointBinding();
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -72,6 +74,7 @@ export function useChatStream({
     setWorkListSnapshot(null);
     setInteractiveRequest(null);
     setInteractiveAnswer("");
+    mediaAttachmentsRef.current = undefined;
     hasLifecycleRef.current = false;
   }, []);
   const submitPrompt = useCallback(
@@ -208,8 +211,14 @@ export function useChatStream({
       abortRef.current = abortController;
       const requestModel = options.modelOverride || selectedModel;
       try {
+        const endpoint =
+          activeSession.mode === "code"
+            ? "/api/chat"
+            : activeSession.mode === "media"
+              ? "/api/media/chat"
+              : "/api/qa";
         const response = await apiFetch(
-          activeSession.mode === "code" ? "/api/chat" : "/api/qa",
+          endpoint,
           {
             method: "POST",
             headers: buildLlmRequestHeaders(
@@ -368,6 +377,15 @@ export function useChatStream({
                 setInteractiveAnswer("");
                 applyInteractiveRequestAgents(packet.payload, agents);
               }
+              if (
+                packet.type === "MEDIA_RESULT" &&
+                isMediaResultPayload(packet)
+              ) {
+                if (packet.content) {
+                  finalTextRef.current ||= packet.content;
+                }
+                mediaAttachmentsRef.current = packet.attachments;
+              }
             } catch {
               // 忽略不完整的 SSE 帧，等待下一段数据补齐。
             }
@@ -418,7 +436,11 @@ export function useChatStream({
             : "已停止生成。");
         const finalHistory: Message[] = [
           ...visibleHistory.slice(0, -1),
-          { role: "assistant", content: answer },
+          {
+            role: "assistant",
+            content: answer,
+            attachments: mediaAttachmentsRef.current,
+          },
         ];
         const finalSession = {
           ...activeSession,

@@ -1,0 +1,6 @@
+.electron/
+dist/
+node_modules/
+python-dist/
+release/
+app/constants/modelList.ts

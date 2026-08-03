@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from backend.schemas.chat import ChatRequest
 from backend.services.agent.loop import AgentLoopResult, stream_autonomous_loop
 from backend.services.agent.task_planner import PreparedTask
 from backend.services.agent.trace import TraceHandle, add_trace_event
+from backend.services.workspace.completed_works import record_completed_works
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.workspace.indexer import index_project
 from backend.utils.sse import encode_sse
@@ -26,6 +28,7 @@ def _lifecycle(
     tool_name: str | None = None,
     agent_id: str | None = None,
     slot: int | None = None,
+    current_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """创建前端可消费的稳定生命周期事件。"""
 
@@ -40,6 +43,8 @@ def _lifecycle(
     }
     if tool_name:
         payload["toolName"] = tool_name
+    if current_files:
+        payload["currentFiles"] = current_files
     if slot is not None:
         payload["slot"] = slot
     return payload
@@ -91,12 +96,20 @@ def _format_loop_result(result: AgentLoopResult, mode: str) -> str:
             label = status_labels.get(str(item.get("status")), "待办")
             work_lines.append(f"- `{item.get('id')}` [{label}] {item.get('title')}")
     works = "\n".join(work_lines) or "- 未生成 WorkList"
+    quality = result.quality
+    quality_text = (
+        f"变更 {quality.get('changes', 0)} 个 · "
+        f"风险 {quality.get('riskScore', 0)} ({quality.get('risk', 'low')}) · "
+        f"验证 {'通过' if quality.get('validationPassed') else '未通过或未执行'} · "
+        f"回归 {'检测到' if quality.get('regression') else '未检测到'}"
+    )
     return (
         f"{result.summary}\n\n"
         f"**优化后的执行目标**\n{result.objective}\n\n"
         f"**WorkList 结果**\n{works}\n\n"
         f"**实际修改文件（{len(result.changed_files)} 个）**\n{files}\n\n"
         f"**验证记录**\n{commands}\n\n"
+        f"**工程质量**\n{quality_text}\n\n"
         f"代理共执行 {result.iterations} 轮工具循环，使用模型：{result.model_name or 'Auto'}。"
     )
 
@@ -119,6 +132,7 @@ async def stream_prepared_autonomous(
     async for event in stream_autonomous_loop(
         root=root,
         task_plan=prepared.plan,
+        project_id=body.project_id,
         initial_context=context_text,
         preferred_model_id=preferred_model_id,
         credentials=credentials,
@@ -145,6 +159,11 @@ async def stream_prepared_autonomous(
                             if payload.get("slot") is not None
                             else None
                         ),
+                        current_files=[
+                            str(path)
+                            for path in (payload.get("currentFiles") or [])
+                            if path
+                        ],
                     ),
                 }
             )
@@ -168,6 +187,11 @@ async def stream_prepared_autonomous(
 
     if not result:
         raise ValueError("Code Agent 循环异常结束，没有生成结果")
+    if body.project_id.strip():
+        await record_completed_works(
+            body.project_id,
+            list((result.worklist or {}).get("items") or []),
+        )
     yield encode_sse(
         {
             "type": "AGENT_LIFECYCLE",
@@ -179,7 +203,8 @@ async def stream_prepared_autonomous(
             ),
         }
     )
-    await index_project(body.project_id)
+    # 重建索引不阻塞最终回复；ensure_context 已对 indexing 状态去重，避免并发重建。
+    asyncio.create_task(index_project(body.project_id))
     await add_trace_event(
         trace,
         category="agent",
@@ -192,6 +217,7 @@ async def stream_prepared_autonomous(
             "agentMode": body.agent_mode,
             "worklist": result.worklist,
             "optimizedPrompt": result.optimized_prompt[:4000],
+            "quality": result.quality,
         },
     )
     yield encode_sse({"type": "TEXT", "content": _format_loop_result(result, body.agent_mode)})

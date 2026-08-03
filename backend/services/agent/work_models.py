@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 WorkStatus = Literal["pending", "running", "succeeded", "failed", "skipped"]
-WorkExecutionType = Literal["agent", "filesystem"]
+WorkExecutionType = Literal["agent", "coding", "filesystem", "validation", "artifact"]
 FileOperationType = Literal["rename", "move", "delete_empty_dir"]
 
 
@@ -46,6 +46,8 @@ class WorkItem:
     # filesystem 表示该 Work 可由本地执行器直接完成，不再调用 Worker LLM。
     execution_type: WorkExecutionType = "agent"
     file_operations: list[FileSystemOperation] = field(default_factory=list)
+    # validation Work 可直接携带白名单质量命令，避免再调用 Worker LLM 选择命令。
+    validation_commands: list[str] = field(default_factory=list)
     status: WorkStatus = "pending"
     attempts: int = 0
     summary: str = ""
@@ -67,6 +69,7 @@ class WorkItem:
             "serialGroup": self.serial_group,
             "executionType": self.execution_type,
             "fileOperations": [item.to_json() for item in self.file_operations],
+            "validationCommands": list(self.validation_commands),
             "status": self.status,
             "attempts": self.attempts,
             "summary": self.summary,
@@ -204,6 +207,31 @@ class WorkLedger:
         self.revision += 1
         self.reason = f"{work_id} 执行失败，正在重规划"
 
+    def skip(self, work_id: str, reason: str = "") -> None:
+        """把工作项标记为明确跳过（如注册表确认已完成），不参与执行。"""
+
+        item = self.get(work_id)
+        if not item or item.status in {"succeeded", "skipped"}:
+            return
+        item.status = "skipped"
+        item.summary = (reason.strip() or "该 Work 无需执行")[:4_000]
+        item.error = ""
+        self.revision += 1
+        self.reason = f"{work_id} 已跳过"
+
+    def retry_runtime_failure(self, work_id: str, reason: str) -> None:
+        """把运行时错误放回 pending，不调用 Planner 修改项目 Work 目标。"""
+
+        item = self.get(work_id)
+        if not item:
+            raise ValueError(f"未知 Work ID：{work_id}")
+        if item.status in {"succeeded", "skipped"}:
+            return
+        item.status = "pending"
+        item.error = reason.strip()[:4_000]
+        self.revision += 1
+        self.reason = f"{work_id} 发生运行时错误，已准备干净重试"
+
     def apply_replan(self, result: Any) -> None:
         """应用重规划，同时保证 succeeded/skipped 工作项不可被回滚。"""
 
@@ -228,6 +256,9 @@ class WorkLedger:
             current.execution_type = replacement.execution_type
             current.file_operations = (
                 replacement.file_operations or current.file_operations
+            )
+            current.validation_commands = (
+                replacement.validation_commands or current.validation_commands
             )
             current.status = "pending"
             current.error = ""

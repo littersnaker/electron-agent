@@ -149,6 +149,17 @@ export function isInteractiveRequestPayload(
   return Boolean(payload && "command" in payload && "prompt" in payload);
 }
 
+export function isMediaResultPayload(
+  value: unknown,
+): value is { content?: string; attachments?: Message["attachments"] } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "attachments" in value &&
+      Array.isArray((value as { attachments?: unknown }).attachments),
+  );
+}
+
 export function isWorkListSnapshotPayload(
   payload: StreamPacket["payload"],
 ): payload is WorkListSnapshotPayload {
@@ -237,4 +248,3 @@ export function interactiveWaitingMessage(request: InteractiveRequest): string {
   }
   return "终端正在等待你的选择。";
 }
-
