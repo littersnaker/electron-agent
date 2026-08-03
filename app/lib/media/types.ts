@@ -10,13 +10,17 @@ import type { TokenInfo } from "@/app/types/workspace";
 
 export interface MediaModelDefinition {
   id: string;
-  provider: "qwen";
+  provider: "qwen" | "doubao";
   model: string;
   name: string;
   description: string;
   modes: readonly MediaMode[];
   outputKind: "image" | "video";
-  protocol: "qwen-image-sync" | "dashscope-video-async";
+  protocol:
+    | "qwen-image-sync"
+    | "dashscope-video-async"
+    | "volcengine-image"
+    | "volcengine-video-async";
 }
 
 export interface MediaAttachmentInput {

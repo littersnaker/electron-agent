@@ -4,28 +4,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from backend.services.agent.domain_rules import plan_optimizer_rules
 from backend.services.agent.work_models import WorkItem
 
-_COMMERCE_TERMS = (
-    "电商",
-    "商城",
-    "商品",
-    "购物车",
-    "结算",
-    "订单",
-    "小程序",
-    "commerce",
-    "ecommerce",
-)
-_BROAD_TERMS = (
-    "完整",
-    "全部",
-    "整体",
-    "完善",
-    "完成代码修改",
-    "商城模块",
-    "电商模块",
-)
+
+def _load_commerce_terms() -> tuple[str, ...]:
+    """从配置读取电商领域触发词，避免业务词写死在代码里。"""
+
+    return tuple(
+        str(item)
+        for item in plan_optimizer_rules().get("commerceTerms") or ()
+    )
+
+
+def _load_broad_terms() -> tuple[str, ...]:
+    """从配置读取宽泛任务触发词。"""
+
+    return tuple(
+        str(item)
+        for item in plan_optimizer_rules().get("broadTerms") or ()
+    )
+
+
+_COMMERCE_TERMS = _load_commerce_terms()
+_BROAD_TERMS = _load_broad_terms()
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,58 +41,30 @@ class _DomainRule:
     acceptance: tuple[str, ...]
 
 
-_DOMAIN_RULES = (
-    _DomainRule(
-        key="catalog",
-        title="商品分类、列表与详情",
-        terms=("商品", "分类", "详情", "sku", "product", "catalog"),
-        path_terms=("product", "catalog", "category", "sku", "detail", "goods"),
-        acceptance=(
-            "首页或分类页能够展示统一数据源中的商品",
-            "商品详情支持 SKU 与数量选择",
-        ),
-    ),
-    _DomainRule(
-        key="cart",
-        title="购物车状态与交互",
-        terms=("购物车", "加购", "数量", "删除", "cart"),
-        path_terms=("cart", "basket"),
-        acceptance=(
-            "支持加入购物车、修改数量和删除商品",
-            "购物车状态与统一商品和 SKU 契约一致",
-        ),
-    ),
-    _DomainRule(
-        key="checkout",
-        title="结算与订单提交",
-        terms=("结算", "地址", "优惠券", "提交订单", "checkout", "payment"),
-        path_terms=("checkout", "settle", "address", "coupon", "payment", "order"),
-        acceptance=(
-            "结算页可读取购物车并创建模拟订单",
-            "提交过程覆盖加载、失败和成功反馈",
-        ),
-    ),
-    _DomainRule(
-        key="account",
-        title="订单记录与用户中心",
-        terms=("订单列表", "订单详情", "我的订单", "用户", "个人中心", "order list", "profile", "account"),
-        path_terms=("order", "profile", "account", "user", "mine"),
-        acceptance=(
-            "用户中心能够展示模拟用户与订单记录",
-            "订单列表和详情使用统一订单契约",
-        ),
-    ),
-    _DomainRule(
-        key="shell",
-        title="应用入口、路由与全局导航",
-        terms=("路由", "导航", "tabbar", "入口", "app config", "全局配置"),
-        path_terms=("app.config", "app.json", "route", "router", "tabbar", "navigation"),
-        acceptance=(
-            "新增页面已注册到项目现有路由或小程序配置",
-            "入口和导航不破坏已有页面",
-        ),
-    ),
-)
+def _load_domain_rules() -> tuple[_DomainRule, ...]:
+    """从配置读取电商功能域拆分规则，避免业务规则写死在代码里。"""
+
+    rules: list[_DomainRule] = []
+    for entry in plan_optimizer_rules().get("domainRules") or []:
+        if not isinstance(entry, dict):
+            continue
+        rules.append(
+            _DomainRule(
+                key=str(entry.get("key") or ""),
+                title=str(entry.get("title") or ""),
+                terms=tuple(str(item) for item in entry.get("terms") or ()),
+                path_terms=tuple(
+                    str(item) for item in entry.get("pathTerms") or ()
+                ),
+                acceptance=tuple(
+                    str(item) for item in entry.get("acceptance") or ()
+                ),
+            )
+        )
+    return tuple(rules)
+
+
+_DOMAIN_RULES = _load_domain_rules()
 
 
 def optimize_work_granularity(

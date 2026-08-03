@@ -1,82 +1,28 @@
-// 模块说明：负责 providers 核心服务与领域逻辑。
+// 模块说明：前端 LLM 供应商注册表直接读取 config/providers.json。
 import type {
   LlmProviderDefinition,
   LlmProviderId,
 } from "../types";
+import providerConfig from "../../../../config/providers.json";
 
 /**
- * Provider 公共注册表。
+ * Provider 公共注册表（唯一源文件：config/providers.json）。
  *
- * 新增供应商时，在此登记协议、默认地址、环境变量和请求头即可。
+ * 新增供应商时只改 JSON，前后端后端 catalog.py 同步读取同一文件。
  * API Key 本身不会出现在注册表中。
  */
-export const LLM_PROVIDER_CATALOG: readonly LlmProviderDefinition[] = [
-  {
-    id: "qwen",
-    name: "Qwen / DashScope",
-    environmentKey: "DASHSCOPE_API_KEY",
-    requestHeader: "x-llm-key-qwen",
-    endpointRequestHeader: "x-llm-base-url-qwen",
-    endpointEnvironmentKey: "DASHSCOPE_BASE_URL",
-    protocol: "openai-compatible",
-    defaultEndpoint:
-      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    placeholder: "sk-...",
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    environmentKey: "OPENAI_API_KEY",
-    requestHeader: "x-llm-key-openai",
-    endpointRequestHeader: "x-llm-base-url-openai",
-    endpointEnvironmentKey: "OPENAI_BASE_URL",
-    protocol: "openai-compatible",
-    defaultEndpoint: "https://api.openai.com/v1/chat/completions",
-    placeholder: "sk-...",
-  },
-  {
-    id: "gemini",
-    name: "Google Gemini",
-    environmentKey: "GEMINI_API_KEY",
-    requestHeader: "x-llm-key-gemini",
-    protocol: "gemini",
-    placeholder: "AIza...",
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    environmentKey: "DEEPSEEK_API_KEY",
-    requestHeader: "x-llm-key-deepseek",
-    endpointRequestHeader: "x-llm-base-url-deepseek",
-    endpointEnvironmentKey: "DEEPSEEK_BASE_URL",
-    protocol: "openai-compatible",
-    defaultEndpoint: "https://api.deepseek.com/chat/completions",
-    placeholder: "sk-...",
-  },
-  {
-    id: "glm",
-    name: "GLM / BigModel",
-    environmentKey: "GLM_API_KEY",
-    requestHeader: "x-llm-key-glm",
-    endpointRequestHeader: "x-llm-base-url-glm",
-    endpointEnvironmentKey: "GLM_BASE_URL",
-    protocol: "openai-compatible",
-    defaultEndpoint:
-      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    placeholder: "API Key",
-  },
-  {
-    id: "kimi",
-    name: "Kimi / Moonshot",
-    environmentKey: "KIMI_API_KEY",
-    requestHeader: "x-llm-key-kimi",
-    endpointRequestHeader: "x-llm-base-url-kimi",
-    endpointEnvironmentKey: "KIMI_BASE_URL",
-    protocol: "openai-compatible",
-    defaultEndpoint: "https://api.moonshot.cn/v1/chat/completions",
-    placeholder: "sk-...",
-  },
-];
+export const LLM_PROVIDER_CATALOG: readonly LlmProviderDefinition[] =
+  providerConfig.providers.map((entry) => ({
+    id: entry.id as LlmProviderId,
+    name: entry.name,
+    environmentKey: entry.environmentKeys[0] ?? "",
+    requestHeader: entry.requestHeader,
+    endpointRequestHeader: entry.endpointRequestHeader,
+    endpointEnvironmentKey: entry.endpointEnvironmentKey,
+    protocol: (entry.protocol ?? "openai-compatible") as LlmProviderDefinition["protocol"],
+    defaultEndpoint: entry.defaultEndpoint,
+    placeholder: entry.placeholder ?? "",
+  }));
 
 export const LLM_PROVIDER_IDS = LLM_PROVIDER_CATALOG.map(
   (provider) => provider.id,

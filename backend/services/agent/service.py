@@ -34,9 +34,16 @@ from backend.services.agent.pending import (
     save_pending_action,
 )
 from backend.services.agent.proposal import generate_proposal, proposal_to_json
+from backend.services.agent.plan_screen import (
+    refine_plan_works,
+    screen_plan_anomalies,
+)
 from backend.services.agent.filesystem_executor import parse_direct_filesystem_request
 from backend.services.agent.work_models import FileSystemOperation, WorkItem
-from backend.services.agent.workspace_tools import render_workspace_tree
+from backend.services.agent.workspace_tools import (
+    render_workspace_tree,
+    score_workspace_paths,
+)
 from backend.services.agent.trace import (
     TraceHandle,
     add_trace_event,
@@ -395,7 +402,59 @@ async def stream_code_agent(
                 initial_context=context_text,
                 preferred_model_id=preferred_model_id,
                 credentials=credentials,
+                candidate_files=score_workspace_paths(
+                    root,
+                    effective_user_text,
+                    limit=12,
+                ),
             )
+            anomalies = screen_plan_anomalies(root, prepared.plan.works)
+            if anomalies:
+                yield encode_sse(
+                    {
+                        "type": "AGENT_LIFECYCLE",
+                        "payload": lifecycle(
+                            role="high_level_planner",
+                            status="running",
+                            detail=(
+                                f"内容筛查发现 {len(anomalies)} 个 Work 的 targetFiles "
+                                "可疑，正在细分修正…"
+                            ),
+                        ),
+                    }
+                )
+                screen_usage, screen_model, applied_ids = await refine_plan_works(
+                    prepared.plan,
+                    anomalies,
+                    preferred_model_id,
+                    credentials,
+                )
+                prepared.usage = LlmUsage(
+                    prompt=prepared.usage.prompt + screen_usage.prompt,
+                    completion=prepared.usage.completion + screen_usage.completion,
+                    total=prepared.usage.total + screen_usage.total,
+                )
+                if screen_model:
+                    prepared.model_name = screen_model
+                if applied_ids:
+                    prepared.review_notes.append(
+                        "内容筛查细分：修正 "
+                        f"{len(applied_ids)} 个 Work 的 targetFiles"
+                        f"（{', '.join(applied_ids)}）"
+                    )
+                yield encode_sse(
+                    {
+                        "type": "AGENT_LIFECYCLE",
+                        "payload": lifecycle(
+                            role="high_level_planner",
+                            status="completed",
+                            detail=(
+                                f"已根据内容筛查细分修正 {len(anomalies)} 个 Work 的 "
+                                "targetFiles。"
+                            ),
+                        ),
+                    }
+                )
         if prepared.usage.total:
             yield usage_packet(
                 prepared.usage.prompt,

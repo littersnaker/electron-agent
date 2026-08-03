@@ -9,13 +9,12 @@ from typing import Any
 
 from backend.services.agent.harness.models import ProjectHarness
 from backend.services.agent.work_models import WorkItem
+from backend.services.agent.domain_rules import harness_rules
 from backend.services.workspace.indexer import iter_project_files
 from backend.utils.paths import is_probably_binary
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 _SKILL_HEADER = re.compile(r"^## Skill · ([^@\n]+)@[^\n]+$", re.MULTILINE)
-_UI_TERMS = ("ui", "界面", "页面", "小程序", "商城", "视觉", "apple", "组件")
-_COMMERCE_TERMS = ("电商", "商城", "商品", "购物车", "订单", "commerce", "ecommerce")
 _ENTRY_CANDIDATES = (
     "package.json",
     "src/app.tsx",
@@ -32,13 +31,16 @@ _MAX_SEED_FILES = 8
 _MAX_SEED_FILE_CHARS = 4_000
 _MAX_DISCOVERY_FILES = 4
 _TEXT_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".vue", ".json", ".py", ".scss", ".css"}
-_DOMAIN_PATH_HINTS = (
-    (("商品", "分类", "sku", "product"), ("product", "goods", "category", "catalog", "sku")),
-    (("购物车", "加购", "cart"), ("cart", "basket")),
-    (("结算", "地址", "优惠券", "checkout"), ("checkout", "settle", "address", "coupon")),
-    (("订单", "用户", "个人中心", "order"), ("order", "profile", "account", "user", "mine")),
-    (("路由", "导航", "入口", "tabbar"), ("route", "router", "app.config", "tabbar", "navigation")),
-)
+def _domain_path_hints() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """从配置读取功能域路径提示，避免业务词写死在代码里。"""
+
+    raw = harness_rules().get("domainPathHints") or []
+    return tuple(
+        (tuple(str(item) for item in entry.get("terms") or ()),
+         tuple(str(item) for item in entry.get("paths") or ()))
+        for entry in raw
+        if isinstance(entry, dict)
+    )
 
 
 def build_project_harness(
@@ -59,9 +61,13 @@ def build_project_harness(
     config_files = _config_files(root)
     skill_ids, skill_directives = _extract_skill_directives(runtime_context)
     normalized_request = request_text.lower()
+    rules = harness_rules()
+    ui_terms = tuple(str(item) for item in rules.get("uiTerms") or ())
+    commerce_terms = tuple(str(item) for item in rules.get("commerceTerms") or ())
+    commerce_task_kind = str(rules.get("commerceTaskKind") or "commerce-miniapp")
 
     # Runtime 尚未注入动态 Skill 时，仍使用同一份紧凑 UI 规范兜底，保证恢复任务行为一致。
-    if any(term in normalized_request for term in _UI_TERMS):
+    if any(term in normalized_request for term in ui_terms):
         if "apple-miniapp-ui" not in skill_ids:
             skill_ids.append("apple-miniapp-ui")
         skill_directives.append(
@@ -69,8 +75,8 @@ def build_project_harness(
             "并覆盖 loading、error、empty、success 状态。"
         )
     task_kind = (
-        "commerce-miniapp"
-        if any(term in normalized_request for term in _COMMERCE_TERMS)
+        commerce_task_kind
+        if any(term in normalized_request for term in commerce_terms)
         else "coding"
     )
     return ProjectHarness(
@@ -153,7 +159,7 @@ def _discover_related_files(
         token.lower()
         for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", searchable)
     }
-    for request_terms, path_terms in _DOMAIN_PATH_HINTS:
+    for request_terms, path_terms in _domain_path_hints():
         if any(term in searchable for term in request_terms):
             hints.update(path_terms)
     if not hints:

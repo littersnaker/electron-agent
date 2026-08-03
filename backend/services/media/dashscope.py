@@ -386,4 +386,12 @@ async def generate_media(
     api_base = resolve_media_api_base(explicit_base_url)
     if model["protocol"] == "qwen-image-sync":
         return await generate_image(body, api_key, api_base)
+    if model["protocol"] == "volcengine-image":
+        from backend.services.media.volcengine import generate_volcengine_image
+
+        return await generate_volcengine_image(body, api_key, api_base)
+    if model["protocol"] == "volcengine-video-async":
+        from backend.services.media.volcengine import generate_volcengine_video
+
+        return await generate_volcengine_video(body, api_key, api_base)
     return await generate_video(body, api_key, api_base)

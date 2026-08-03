@@ -284,6 +284,46 @@ async def test_validation_work_cannot_complete_without_successful_factory_check(
     assert accepted.kind == "success"
 
 
+@pytest.mark.asyncio
+async def test_page_work_with_data_loop_acceptance_can_complete(tmp_path) -> None:
+    """页面类 Work 的验收文案提到“数据闭环”不应被误判为工厂最终验收。"""
+
+    async def emit(_: str, __: dict[str, object]) -> None:
+        """测试中忽略生命周期事件。"""
+
+    async def checkpoint() -> None:
+        """测试中使用空 Checkpoint 回调。"""
+
+    state = WorkWorkerState()
+    work = WorkItem(
+        "W003",
+        "购物车页开发",
+        "开发购物车页面",
+        acceptance_criteria=["页面数据闭环与统一契约一致"],
+    )
+    handler = WorkActionHandler(
+        WorkActionEnvironment(
+            root=tmp_path,
+            request_text="开发购物车页面",
+            work=work,
+            state=state,
+            execution_mode="auto_edit",
+            coordinator=WorkspaceResourceCoordinator(),
+            emit=emit,
+            checkpoint=checkpoint,
+            slot=1,
+            agent_id="test-worker",
+        )
+    )
+
+    accepted = await handler.execute(
+        AgentAction("complete_work", work_id="W003", summary="页面已写入")
+    )
+
+    assert accepted.kind == "success"
+    assert not any("COMPLETE REJECTED" in item for item in state.transcript)
+
+
 def test_factory_validation_state_survives_checkpoint_round_trip() -> None:
     """Factory 最终验收状态必须能够随 Worker Checkpoint 保存和恢复。"""
 

@@ -1,0 +1,66 @@
+{
+  "US": {
+    "label": "美国站",
+    "locale": "en_US",
+    "currency": "USD",
+    "amazonDomain": "www.amazon.com",
+    "spApiMarketplaceId": "ATVPDKIKX0DER",
+    "countryName": "United States"
+  },
+  "CA": {
+    "label": "加拿大站",
+    "locale": "en_CA",
+    "currency": "CAD",
+    "amazonDomain": "www.amazon.ca",
+    "spApiMarketplaceId": "A2EUQ1WTGCTBG2",
+    "countryName": "Canada"
+  },
+  "UK": {
+    "label": "英国站",
+    "locale": "en_GB",
+    "currency": "GBP",
+    "amazonDomain": "www.amazon.co.uk",
+    "spApiMarketplaceId": "A1F83G8C2ARO7P",
+    "countryName": "United Kingdom"
+  },
+  "DE": {
+    "label": "德国站",
+    "locale": "de_DE",
+    "currency": "EUR",
+    "amazonDomain": "www.amazon.de",
+    "spApiMarketplaceId": "A1PA6795UKMFR9",
+    "countryName": "Germany"
+  },
+  "FR": {
+    "label": "法国站",
+    "locale": "fr_FR",
+    "currency": "EUR",
+    "amazonDomain": "www.amazon.fr",
+    "spApiMarketplaceId": "A13V1IB3VIYZZH",
+    "countryName": "France"
+  },
+  "IT": {
+    "label": "意大利站",
+    "locale": "it_IT",
+    "currency": "EUR",
+    "amazonDomain": "www.amazon.it",
+    "spApiMarketplaceId": "APJ6JRA9NG5V4",
+    "countryName": "Italy"
+  },
+  "ES": {
+    "label": "西班牙站",
+    "locale": "es_ES",
+    "currency": "EUR",
+    "amazonDomain": "www.amazon.es",
+    "spApiMarketplaceId": "A1RKKUPIHCS9HS",
+    "countryName": "Spain"
+  },
+  "JP": {
+    "label": "日本站",
+    "locale": "ja_JP",
+    "currency": "JPY",
+    "amazonDomain": "www.amazon.co.jp",
+    "spApiMarketplaceId": "A1VC38T7YXB528",
+    "countryName": "Japan"
+  }
+}

@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from backend.services.agent.domain_rules import default_factory_domain_id
+
 
 ActionKind = Literal[
     "search",
@@ -51,7 +53,7 @@ class AgentAction:
     operations: list[EditOperation] = field(default_factory=list)
     command: str = ""
     factory_mode: str = ""
-    factory_domain_id: str = "commerce-miniapp"
+    factory_domain_id: str = field(default_factory=default_factory_domain_id)
     factory_output_root: str = ""
     factory_mock_count: int = 12
     factory_overwrite: bool = False
@@ -206,11 +208,26 @@ def coerce_read_paths(value: object) -> list[str]:
     return list(dict.fromkeys(_clean_path(item) for item in raw if _clean_path(item)))
 
 
+def _pick_paths(raw: dict[str, Any]) -> object:
+    """兼容模型对路径字段的常见命名：paths / path / targetFiles / files。"""
+
+    for key in ("paths", "path", "targetFiles", "target_files", "files"):
+        if key in raw:
+            return raw[key]
+    return None
+
+
 def _parse_operations(raw: object) -> list[EditOperation]:
     """解析并校验一批编辑操作。"""
 
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("edit 动作必须包含非空 operations")
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise ValueError("edit 动作 operations 必须是数组")
+    if not raw:
+        # 空 operations 表示“目标已满足，无需修改”，由调用方决定语义，
+        # 不再作为硬性协议错误（批量直写提示词明确允许这种表达）。
+        return []
     operations: list[EditOperation] = []
     payload_size = 0
     for item in raw:
@@ -226,8 +243,12 @@ def _parse_operations(raw: object) -> list[EditOperation]:
         content = str(item.get("content") or "")
         old_text = str(item.get("oldText") or item.get("old_text") or "")
         new_text = str(item.get("newText") or item.get("new_text") or "")
-        if operation_type == "write" and not isinstance(item.get("content"), str):
-            raise ValueError(f"write 操作缺少 content：{path}")
+        if operation_type == "write":
+            content_value = item.get("content")
+            if not isinstance(content_value, str) or not content_value.strip():
+                raise ValueError(
+                    f"write 操作必须包含非空 content（禁止空文件/占位）：{path}"
+                )
         if operation_type == "replace" and not old_text:
             raise ValueError(f"replace 操作缺少 oldText：{path}")
 
@@ -275,7 +296,7 @@ def parse_agent_action(text: str) -> AgentAction:
         return AgentAction(action="search", work_id=work_id, query=query[:1000])
 
     if action == "read":
-        paths = coerce_read_paths(raw.get("paths", raw.get("path")))
+        paths = coerce_read_paths(_pick_paths(raw))
         if not paths:
             raise ValueError("read 动作必须包含 paths（非空相对路径数组）")
         offsets: dict[str, int] = {}
@@ -294,7 +315,7 @@ def parse_agent_action(text: str) -> AgentAction:
         return AgentAction(action="read", work_id=work_id, paths=paths, offsets=offsets)
 
     if action == "inspect":
-        paths = coerce_read_paths(raw.get("paths", raw.get("path")))
+        paths = coerce_read_paths(_pick_paths(raw))
         query = str(raw.get("query") or "").strip()[:1000]
         if not paths and not query:
             raise ValueError("inspect 动作必须包含 paths 或 query")
@@ -316,7 +337,9 @@ def parse_agent_action(text: str) -> AgentAction:
             work_id=work_id,
             factory_mode=mode,
             factory_domain_id=str(
-                raw.get("domainId") or raw.get("domain_id") or "commerce-miniapp"
+                raw.get("domainId")
+                or raw.get("domain_id")
+                or default_factory_domain_id()
             ).strip()[:100],
             factory_output_root=output_root[:1000],
             factory_mock_count=max(3, min(mock_count, 100)),

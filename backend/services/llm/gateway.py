@@ -486,7 +486,16 @@ class LlmGateway:
             or builtin_override
         )
         if override:
-            return (self._normalize_chat_endpoint(override),)
+            if not override.startswith(("https://", "http://")):
+                # 常见配置错误：把 API Key 填进了 Base URL 字段/环境变量。
+                # 忽略该覆盖并回退默认端点，避免拼出 "unknown url type"。
+                LOGGER.warning(
+                    "忽略无效的 %s Base URL 覆盖：必须以 http(s):// 开头"
+                    "（可能把 API Key 填进了 Base URL 字段）",
+                    provider.id,
+                )
+            else:
+                return (self._normalize_chat_endpoint(override),)
         return tuple(
             endpoint
             for endpoint in (provider.default_endpoint, *provider.fallback_endpoints)

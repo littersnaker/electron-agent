@@ -113,6 +113,25 @@ async def test_research_pipeline_collects_platform_sources(monkeypatch) -> None:
             }
         ]
 
+    async def fake_amazon(_query, _marketplace, _creds, _limit):
+        return [
+            {
+                "id": "amazon-B0TEST0001",
+                "title": "Amazon 商品",
+                "url": "https://www.amazon.com/dp/B0TEST0001",
+                "domain": "www.amazon.com",
+                "snippet": "",
+                "resultType": "shopping",
+                "position": 1,
+                "price": 29.9,
+                "currency": "USD",
+                "rating": 4.5,
+                "reviewCount": 120,
+                "merchant": "Amazon",
+                "provider": "amazon-public-page",
+            }
+        ], {"mode": "crawler"}
+
     monkeypatch.setattr(
         module,
         "fetch_tiktok_access_token",
@@ -120,6 +139,7 @@ async def test_research_pipeline_collects_platform_sources(monkeypatch) -> None:
     )
     monkeypatch.setattr(module, "search_tiktok_shop", fake_tiktok_search)
     monkeypatch.setattr(module, "search_1688", fake_1688)
+    monkeypatch.setattr(module, "search_amazon", fake_amazon)
 
     body = CommerceRequest(query="yoga mat")
     graph = build_research_graph(
@@ -162,7 +182,8 @@ async def test_research_pipeline_collects_platform_sources(monkeypatch) -> None:
     by_id = {item["id"]: item for item in sources}
     assert by_id["tiktok-shop"]["status"] == "collected"
     assert by_id["1688"]["status"] == "collected"
-    assert by_id["amazon"]["status"] == "unconfigured"
+    assert by_id["amazon"]["status"] == "collected"
     ids = {item["id"] for item in state["report"]["observations"]}
     assert "tiktok-T1" in ids
     assert "1688-P1" in ids
+    assert "amazon-B0TEST0001" in ids

@@ -55,6 +55,9 @@ export function credentialStoreToSnapshot(
       store[COMMERCE_STORAGE_KEYS.talorDataToken] ||
       store[COMMERCE_STORAGE_KEYS.legacySerpApi],
     keepaApiKey: store[COMMERCE_STORAGE_KEYS.keepaApiKey],
+    amazonClientId: store[COMMERCE_STORAGE_KEYS.amazonClientId],
+    amazonClientSecret: store[COMMERCE_STORAGE_KEYS.amazonClientSecret],
+    amazonRefreshToken: store[COMMERCE_STORAGE_KEYS.amazonRefreshToken],
     tiktokClientKey: store[COMMERCE_STORAGE_KEYS.tiktokClientKey],
     tiktokClientSecret: store[COMMERCE_STORAGE_KEYS.tiktokClientSecret],
     tiktokMerchantId: store[COMMERCE_STORAGE_KEYS.tiktokMerchantId],
@@ -91,6 +94,9 @@ export function snapshotToCredentialStore(
   const entries: Array<[string, string | undefined]> = [
     [COMMERCE_STORAGE_KEYS.talorDataToken, services.talorDataToken],
     [COMMERCE_STORAGE_KEYS.keepaApiKey, services.keepaApiKey],
+    [COMMERCE_STORAGE_KEYS.amazonClientId, services.amazonClientId],
+    [COMMERCE_STORAGE_KEYS.amazonClientSecret, services.amazonClientSecret],
+    [COMMERCE_STORAGE_KEYS.amazonRefreshToken, services.amazonRefreshToken],
     [COMMERCE_STORAGE_KEYS.tiktokClientKey, services.tiktokClientKey],
     [COMMERCE_STORAGE_KEYS.tiktokClientSecret, services.tiktokClientSecret],
     [COMMERCE_STORAGE_KEYS.tiktokMerchantId, services.tiktokMerchantId],

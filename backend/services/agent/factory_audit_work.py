@@ -12,6 +12,10 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
+from backend.services.agent.domain_rules import (
+    default_factory_domain_id,
+    factory_audit_rules,
+)
 from backend.services.agent.harness import ProjectHarness
 from backend.services.agent.loop_protocol import _parse_operations
 from backend.services.agent.loop_support import usage_add
@@ -33,15 +37,9 @@ MAX_AUDIT_FILES = 8
 MAX_AUDIT_FILE_CHARS = 4_000
 MAX_AUDIT_FILE_BYTES = 200_000
 
-_OUT_OF_SCOPE_TERMS = (
-    "页面",
-    "业务页面",
-    "目录之外",
-    "createCommerceDataSource",
-    "页面接入",
-    "组件",
-    "绑定",
-    "导入",
+_OUT_OF_SCOPE_TERMS = tuple(
+    str(item)
+    for item in factory_audit_rules().get("outOfScopeTerms") or ()
 )
 _PATH_PATTERN = re.compile(r"[\w./\\-]+\.(?:ts|tsx|js|jsx|vue|py)")
 
@@ -263,7 +261,7 @@ async def execute_factory_audit_work(
                 root=root,
                 arguments={
                     "request_text": request_text,
-                    "domain_id": "commerce-miniapp",
+                    "domain_id": default_factory_domain_id(),
                     "output_root": output_root,
                     "mock_count": 12,
                     "overwrite": False,

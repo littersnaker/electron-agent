@@ -25,6 +25,7 @@ from backend.services.commerce.analytics import (
 )
 from backend.services.commerce.listing import _draft, _keywords, _validate
 from backend.services.commerce.marketplaces import get_marketplace
+from backend.services.commerce.sources.amazon import search_amazon
 from backend.services.commerce.sources.ali1688 import search_1688
 from backend.services.commerce.sources.tiktokshop import (
     fetch_tiktok_access_token,
@@ -121,6 +122,19 @@ def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
                 for keyword in keywords
                 for engine in ("google", "google_shopping")
             )
+        # Amazon 始终作为并行来源：有 SP-API 凭据走官方 API，否则回退公开页爬虫。
+        sends.append(
+            Send(
+                "platform_source",
+                {
+                    "provider": "amazon",
+                    "query": body.query,
+                    "limit": max(4, min(body.sample_size // 2, 12)),
+                    "credentials": dict(state["credentials"]),
+                    "marketplace": marketplace,
+                },
+            )
+        )
         creds = state["credentials"]
         if creds.get("tiktok_client_key") and creds.get("tiktok_client_secret"):
             sends.append(
@@ -174,7 +188,14 @@ def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
         limit = payload["limit"]
         creds = payload["credentials"]
         try:
-            if provider == "tiktok-shop":
+            if provider == "amazon":
+                items, _diagnostic = await search_amazon(
+                    query,
+                    payload["marketplace"],
+                    creds,
+                    limit,
+                )
+            elif provider == "tiktok-shop":
                 token = await fetch_tiktok_access_token(
                     creds["tiktok_client_key"],
                     creds["tiktok_client_secret"],

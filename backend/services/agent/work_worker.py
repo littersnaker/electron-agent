@@ -40,13 +40,28 @@ from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.protocols import ProviderRequestError
 from backend.services.llm.types import LlmMessage
 from backend.tools.code_tools import execute_code_tool
+from backend.services.workspace.indexer import iter_project_files
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 CheckpointCallback = Callable[[], Awaitable[None]]
 LOGGER = logging.getLogger(__name__)
-MAX_INVALID_PROTOCOL_ROUNDS = 5
-MAX_BATCH_WRITE_FILES = 16
-MAX_BATCH_WRITE_CHARS = 64_000
+MAX_INVALID_PROTOCOL_ROUNDS = 3
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """读取整数环境变量并限制在安全区间，异常值回退默认。"""
+
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+MAX_BATCH_WRITE_FILES = _env_int("CODE_AGENT_BATCH_WRITE_FILES", 16, 1, 64)
+MAX_BATCH_WRITE_CHARS = _env_int(
+    "CODE_AGENT_BATCH_WRITE_CHARS", 64_000, 4_000, 1_000_000
+)
 
 
 async def _try_batch_write(
@@ -147,11 +162,28 @@ async def _try_batch_write(
         action = parse_agent_action(text)
     except ValueError:
         return None, "model_skipped"
-    if action.action != "edit" or not action.operations:
+    if action.action != "edit":
         state.append_transcript(
             "BATCH WRITE SKIPPED: 模型未返回批量 edit 动作，转入常规循环。"
         )
         return None, "model_skipped"
+    if not action.operations:
+        # 批量直写提示词允许“内容已满足验收标准的文件可以不包含 operation”，
+        # 此时空 operations 表示无需修改，直接成功收尾，避免被判协议错误。
+        state.append_transcript(
+            "BATCH WRITE COMPLETED: 目标文件已满足验收标准，无需修改。"
+        )
+        await checkpoint()
+        return (
+            WorkExecutionResult(
+                work.id,
+                True,
+                "目标文件已满足验收标准，无需修改",
+                "",
+                state,
+            ),
+            "no_changes",
+        )
     gate = guard_edit(
         root=root,
         work=work,
@@ -260,44 +292,36 @@ def _split_read_content(content: str) -> list[tuple[str, str]]:
     return sections
 
 
-_GENERATION_TERMS = (
-    "生成",
-    "创建",
-    "新建",
-    "新增",
-    "补齐",
-    "补全",
-    "完善",
-    "搭建",
-    "初始化",
-    "建立",
-    "写一个",
-    "写入",
-    "设计",
-    "样式",
-    "风格",
-    "主题",
-    "mock",
-    "契约",
-    "schema",
-    "template",
-    "generate",
-    "create",
-    "init",
-)
-
-
 def _is_generation_work(work: WorkItem, root: Path) -> bool:
-    """判断是否为“生成/补齐类”Work：意图关键词命中，或大部分目标文件尚不存在。"""
+    """按项目实际状态判断是否为“生成/补齐类”Work，不依赖标题关键词。
 
-    text = f"{work.title} {work.objective}".lower()
-    if any(term in text for term in _GENERATION_TERMS):
-        return True
+    - 有 targetFiles：目标文件大多尚不存在 → 批量写入快路径；
+      目标文件大多已存在 → 常规循环做精准修改。
+    - 无 targetFiles：只有空项目才走一键整站生成（空项目里“修改”无从谈起）；
+      非空项目交给常规循环，模型先读文件再决定新建或修改。
+    """
+
     targets = [path for path in work.target_files if path.strip()]
     if not targets:
-        return False
+        # Planner 没给 targetFiles 说明文件尚未创建：一律按“新建+全量写入”处理，
+        # 不再进多轮循环；是否从零整站生成由项目是否为空决定。
+        return True
     existing = sum(1 for path in targets if _exists(root, path))
     return existing <= len(targets) // 2
+
+
+def _is_greenfield_root(root: Path, *, max_source_files: int = 5) -> bool:
+    """判断项目目录是否基本为空（按可索引文件数，带上限避免大项目全量扫描）。"""
+
+    try:
+        count = 0
+        for _ in iter_project_files(root):
+            count += 1
+            if count > max_source_files:
+                return False
+        return True
+    except OSError:
+        return False
 
 
 def _exists(root: Path, path: str) -> bool:
@@ -358,6 +382,12 @@ _GENERATE_ALL_SYSTEM = """你是从零生成 Agent。项目为空，CURRENT WORK
 目标文件尚未创建。请一次性返回一个 edit 动作 JSON，用 operations(type=write) 创建全部需要的文件，
 每个文件给出完整内容。禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。"""
 
+_GENERATE_MISSING_SYSTEM = """你是新增文件生成 Agent。CURRENT WORK 定义了要创建的内容，
+目标文件尚不存在；项目里已有其他代码，请只创建缺失的新文件，不要重写已有文件。
+一次性返回一个 edit 动作 JSON，用 operations(type=write) 创建全部缺失文件，
+每个文件给出完整可运行内容；禁止空文件、占位符或分步填空。
+禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。"""
+
 
 async def _try_generate_all_files(
     *,
@@ -371,6 +401,7 @@ async def _try_generate_all_files(
     emit: EmitCallback,
     checkpoint: CheckpointCallback,
     slot: int,
+    system_prompt: str = _GENERATE_ALL_SYSTEM,
 ) -> WorkExecutionResult | None:
     """空 targetFiles 的生成类 Work：让模型一次性自命名创建全部文件。"""
 
@@ -398,7 +429,7 @@ async def _try_generate_all_files(
             preferred_model_id=preferred_model_id,
             credentials=credentials,
             messages=[
-                LlmMessage("system", _GENERATE_ALL_SYSTEM),
+                LlmMessage("system", system_prompt),
                 LlmMessage("user", user),
             ],
             temperature=0.1,
@@ -424,6 +455,9 @@ async def _try_generate_all_files(
         return None
     if action.action != "edit" or not action.operations:
         state.append_transcript("GENERATE ALL SKIPPED: 模型未返回创建动作")
+        return None
+    if any(operation.type != "write" for operation in action.operations):
+        state.append_transcript("GENERATE ALL SKIPPED: 一键生成只接受 write 新建操作")
         return None
     gate = guard_edit(
         root=root,
@@ -487,6 +521,36 @@ async def _try_generate_all_files(
     )
 
 
+async def _try_generate_missing_files(
+    *,
+    root: Path,
+    work: WorkItem,
+    preferred_model_id: str,
+    credentials: LlmCredentials,
+    execution_mode: ExecutionMode,
+    coordinator: WorkspaceResourceCoordinator,
+    state: WorkWorkerState,
+    emit: EmitCallback,
+    checkpoint: CheckpointCallback,
+    slot: int,
+) -> WorkExecutionResult | None:
+    """非空项目中的空 targetFiles 创建类 Work：一次性全量创建缺失文件。"""
+
+    return await _try_generate_all_files(
+        root=root,
+        work=work,
+        preferred_model_id=preferred_model_id,
+        credentials=credentials,
+        execution_mode=execution_mode,
+        coordinator=coordinator,
+        state=state,
+        emit=emit,
+        checkpoint=checkpoint,
+        slot=slot,
+        system_prompt=_GENERATE_MISSING_SYSTEM,
+    )
+
+
 async def _try_write_then_review(
     *,
     root: Path,
@@ -511,18 +575,33 @@ async def _try_write_then_review(
     targets = list(dict.fromkeys(path for path in work.target_files if path.strip()))
     generated_all = False
     if not targets:
-        generated = await _try_generate_all_files(
-            root=root,
-            work=work,
-            preferred_model_id=preferred_model_id,
-            credentials=credentials,
-            execution_mode=execution_mode,
-            coordinator=coordinator,
-            state=state,
-            emit=emit,
-            checkpoint=checkpoint,
-            slot=slot,
-        )
+        if not _is_greenfield_root(root):
+            # 非空项目：一次性创建缺失文件（不重写已有文件）。
+            generated = await _try_generate_missing_files(
+                root=root,
+                work=work,
+                preferred_model_id=preferred_model_id,
+                credentials=credentials,
+                execution_mode=execution_mode,
+                coordinator=coordinator,
+                state=state,
+                emit=emit,
+                checkpoint=checkpoint,
+                slot=slot,
+            )
+        else:
+            generated = await _try_generate_all_files(
+                root=root,
+                work=work,
+                preferred_model_id=preferred_model_id,
+                credentials=credentials,
+                execution_mode=execution_mode,
+                coordinator=coordinator,
+                state=state,
+                emit=emit,
+                checkpoint=checkpoint,
+                slot=slot,
+            )
         if generated is None:
             return None
         targets = list(state.changed_files)
@@ -861,7 +940,16 @@ def _worker_prompt(
   {retry_directive}
   - 文件版本冲突时重新 read 冲突文件；不得重做其他已成功 Work。
 - edit 就是写入/新建文件工具：operations.type=write 可创建文件，replace 可精确修改。
+- write 必须一次给出完整可运行内容；禁止空文件、占位符或分步填空；新建文件后不要反复
+  read 验证，路径正确就直接 complete_work。
+- 如果确认目标文件已满足验收标准或无法确定修改点，直接 complete_work 说明原因，
+  不要返回空 operations 的 edit。
+- 自动编辑模式无法运行命令：需要运行构建/测试才能验证的任务，做静态修复后应在
+  complete_work 中说明“需切换全自动模式运行验证命令”。
 - 敏感路径在目录树和工具层都会被过滤；收到 SECURITY SKIP 后不得重试该路径，改读 .env.example 或配置类型。
+- tabBar/小程序图标必须引用真实存在的 PNG 位图（iconPath 支持 png/jpg/jpeg，不支持 SVG）；
+  图标文件缺失时系统会自动补齐占位 PNG，你只需保证路径符合项目约定（Taro 相对 src，原生相对根目录），
+  不要写空路径，也不要伪造二进制图片文件。
 - 不读取密钥或越出项目；源码不超过 500 行；遵守中文注释、ESLint 和项目格式。
 - {run_rule}
 
@@ -992,6 +1080,28 @@ async def execute_work(
             )
 
         session_prompt = session.build_prompt()
+        worker_budget = session.budget.get("worker")
+        if (
+            worker_budget.consumed > 0
+            and worker_budget.remaining
+            < session_prompt.estimated_tokens + 2_000
+        ):
+            error = (
+                f"Worker Token 预算不足：剩余 {worker_budget.remaining} Tokens，"
+                f"下一轮预计输入约 {session_prompt.estimated_tokens} Tokens；"
+                "已在调用前停止，交由 Planner 重新规划。"
+            )
+            session.record_failure(action="token_budget", error=error)
+            state.runtime_failures += 1
+            await checkpoint()
+            return WorkExecutionResult(
+                work.id,
+                False,
+                "",
+                error,
+                state,
+                failure_kind="guard",
+            )
         next_attempt_iteration = state.attempt_iterations + 1
         attempt_note = (
             f" · 第 {state.attempt_number} 次尝试"
@@ -1115,11 +1225,17 @@ async def execute_work(
             else:
                 example = "参考工具目录中对应动作的示例 JSON"
             feedback = (
+                f"直接复制下面示例 JSON，只替换路径和 ID，不要改变结构：{example}\n"
                 f"PROTOCOL ERROR: {exc}\n"
                 f"上一轮输出（截断）：{bad_preview or '（空输出）'}\n"
-                f"正确格式示例：{example}\n"
                 "下一轮必须只返回一个合法 JSON 动作，不得附加 Markdown 或解释。"
             )
+            if "非空 operations" in error_text:
+                feedback += (
+                    "\n如果目标文件已满足验收标准或无法确定修改点，请直接返回 "
+                    '{"action":"complete_work","workId":"W001","summary":"说明原因"}，'
+                    "不要返回空 operations 的 edit。"
+                )
             if state.attempt_invalid_rounds >= 3:
                 feedback += (
                     "\n严重警告：已连续 3 次协议错误。下一轮请直接复制上面的示例并只替换"
@@ -1149,6 +1265,12 @@ async def execute_work(
         if action.action == "finish":
             state.append_transcript(
                 "FINISH REJECTED: 并行 Worker 必须使用 complete_work。"
+            )
+            continue
+        if action.action == "edit" and not action.operations:
+            state.append_transcript(
+                "EMPTY EDIT REJECTED: edit 必须包含 operations；"
+                "如果目标已满足或无法确定修改点，请用 complete_work 结束，不要返回空 edit。"
             )
             continue
 

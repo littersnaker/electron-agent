@@ -67,6 +67,65 @@ def test_read_accepts_comma_separated_string_paths() -> None:
     assert action.paths == ["src/a.ts", "src/b.ts"]
 
 
+def test_read_accepts_target_files_alias() -> None:
+    """模型把路径字段写成 targetFiles 或 files 时也应识别。"""
+
+    action = parse_agent_action(
+        '{"action":"read","workId":"W001","targetFiles":["src/mock/user.ts"]}'
+    )
+
+    assert action.action == "read"
+    assert action.paths == ["src/mock/user.ts"]
+
+    inspect = parse_agent_action(
+        '{"action":"inspect","workId":"W001","files":"src/mock/user.ts"}'
+    )
+
+    assert inspect.action == "inspect"
+    assert inspect.paths == ["src/mock/user.ts"]
+
+
+def test_edit_accepts_single_operation_object() -> None:
+    """operations 写成单个对象而不是数组时应自动包装。"""
+
+    action = parse_agent_action(
+        '{"action":"edit","workId":"W001","operations":'
+        '{"type":"write","path":"src/new.ts","content":"export const a = 1;"}}'
+    )
+
+    assert action.action == "edit"
+    assert len(action.operations) == 1
+    assert action.operations[0].type == "write"
+    assert action.operations[0].path == "src/new.ts"
+
+
+def test_write_rejects_empty_or_whitespace_content() -> None:
+    """write 空内容/占位内容必须报协议错误，避免生成空文件后空转。"""
+
+    with pytest.raises(ValueError, match="非空 content"):
+        parse_agent_action(
+            '{"action":"edit","workId":"W001","operations":'
+            '[{"type":"write","path":"src/a.ts","content":""}]}'
+        )
+
+    with pytest.raises(ValueError, match="非空 content"):
+        parse_agent_action(
+            '{"action":"edit","workId":"W001","operations":'
+            '[{"type":"write","path":"src/a.ts","content":"   "}]}'
+        )
+
+
+def test_edit_allows_empty_operations_as_no_change_signal() -> None:
+    """空 operations 的 edit 表示“目标已满足”，协议层应允许由调用方判定。"""
+
+    action = parse_agent_action(
+        '{"action":"edit","workId":"W001","summary":"已满足，无需修改","operations":[]}'
+    )
+
+    assert action.action == "edit"
+    assert action.operations == []
+
+
 def test_read_rejects_empty_paths() -> None:
     """没有可用路径的 read 动作仍必须报协议错误，不能静默执行。"""
 

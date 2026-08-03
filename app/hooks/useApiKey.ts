@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api-client";
 import {
+  type PersistedCredentialStore,
   credentialStoreToSnapshot,
   readLegacyLocalCredentialStore,
   snapshotToCredentialStore,
@@ -46,9 +47,17 @@ export function useApiKey() {
 
     const hydrateCredentials = async () => {
       const legacyStore = readLegacyLocalCredentialStore();
-      const electronStore = window.electronAPI?.credentials
-        ? await window.electronAPI.credentials.read().catch(() => ({}))
-        : {};
+      let electronReadOk = false;
+      let electronStore: PersistedCredentialStore = {};
+      if (window.electronAPI?.credentials) {
+        try {
+          electronStore = await window.electronAPI.credentials.read();
+          electronReadOk = true;
+        } catch {
+          // 读取失败时保持空对象，且绝不把空值回写覆盖加密凭证文件。
+          electronStore = {};
+        }
+      }
       // 已稳定保存的主进程记录优先；旧 Origin 中独有的字段用于一次性迁移。
       const mergedStore = { ...legacyStore, ...electronStore };
       const snapshot = credentialStoreToSnapshot(mergedStore);
@@ -60,8 +69,9 @@ export function useApiKey() {
       setCredentialsReady(true);
       writeLegacyLocalCredentialStore(mergedStore);
 
-      if (window.electronAPI?.credentials) {
-        // 覆盖写回可将旧 localStorage 中的 Key 迁移到稳定凭证文件。
+      if (window.electronAPI?.credentials && electronReadOk) {
+        // 覆盖写回可将旧 localStorage 中的 Key 迁移到稳定凭证文件；
+        // 只有主进程凭证读取成功才允许回写，避免失败时把空值覆盖掉真实 Key。
         void window.electronAPI.credentials.write(mergedStore).catch((error) => {
           console.warn("[Renderer] API Key 持久化迁移失败", error);
         });

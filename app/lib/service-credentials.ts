@@ -17,6 +17,11 @@ export interface AuxiliaryServiceCredentials {
   /** Keepa Data Access API key. */
   keepaApiKey?: string;
 
+  /** Amazon Selling Partner API 凭据（可选；未配置时回退公开页爬虫）。 */
+  amazonClientId?: string;
+  amazonClientSecret?: string;
+  amazonRefreshToken?: string;
+
   /** TikTok developer / TikTok Shop partner credentials. */
   tiktokClientKey?: string;
   tiktokClientSecret?: string;
@@ -40,6 +45,9 @@ export const COMMERCE_STORAGE_KEYS = {
   talorDataToken: "TALORDATA_API_TOKEN",
   legacySerpApi: "SERPAPI_API_KEY",
   keepaApiKey: "KEEPA_API_KEY",
+  amazonClientId: "AMAZON_SP_API_CLIENT_ID",
+  amazonClientSecret: "AMAZON_SP_API_CLIENT_SECRET",
+  amazonRefreshToken: "AMAZON_SP_API_REFRESH_TOKEN",
   tiktokClientKey: "TIKTOK_CLIENT_KEY",
   tiktokClientSecret: "TIKTOK_CLIENT_SECRET",
   tiktokMerchantId: "TIKTOK_MERCHANT_ID",
@@ -61,6 +69,9 @@ export const SERPAPI_STORAGE_KEY = COMMERCE_STORAGE_KEYS.legacySerpApi;
 export const COMMERCE_REQUEST_HEADERS = {
   talorDataToken: "x-commerce-talordata-token",
   keepaApiKey: "x-commerce-keepa-key",
+  amazonClientId: "x-commerce-amazon-client-id",
+  amazonClientSecret: "x-commerce-amazon-client-secret",
+  amazonRefreshToken: "x-commerce-amazon-refresh-token",
   tiktokClientKey: "x-commerce-tiktok-client-key",
   tiktokClientSecret: "x-commerce-tiktok-client-secret",
   tiktokMerchantId: "x-commerce-tiktok-merchant-id",
@@ -95,6 +106,15 @@ export function buildCommerceCredentialHeaders(
   const entries: Array<[string, string | undefined]> = [
     [COMMERCE_REQUEST_HEADERS.talorDataToken, talorDataToken],
     [COMMERCE_REQUEST_HEADERS.keepaApiKey, cleaned(credentials.keepaApiKey)],
+    [COMMERCE_REQUEST_HEADERS.amazonClientId, cleaned(credentials.amazonClientId)],
+    [
+      COMMERCE_REQUEST_HEADERS.amazonClientSecret,
+      cleaned(credentials.amazonClientSecret),
+    ],
+    [
+      COMMERCE_REQUEST_HEADERS.amazonRefreshToken,
+      cleaned(credentials.amazonRefreshToken),
+    ],
     [COMMERCE_REQUEST_HEADERS.tiktokClientKey, cleaned(credentials.tiktokClientKey)],
     [COMMERCE_REQUEST_HEADERS.tiktokClientSecret, cleaned(credentials.tiktokClientSecret)],
     [COMMERCE_REQUEST_HEADERS.tiktokMerchantId, cleaned(credentials.tiktokMerchantId)],
@@ -122,6 +142,15 @@ export function readCommerceCredentialsFromHeaders(
   return {
     talorDataToken: cleaned(headers.get(COMMERCE_REQUEST_HEADERS.talorDataToken) || undefined),
     keepaApiKey: cleaned(headers.get(COMMERCE_REQUEST_HEADERS.keepaApiKey) || undefined),
+    amazonClientId: cleaned(
+      headers.get(COMMERCE_REQUEST_HEADERS.amazonClientId) || undefined,
+    ),
+    amazonClientSecret: cleaned(
+      headers.get(COMMERCE_REQUEST_HEADERS.amazonClientSecret) || undefined,
+    ),
+    amazonRefreshToken: cleaned(
+      headers.get(COMMERCE_REQUEST_HEADERS.amazonRefreshToken) || undefined,
+    ),
     tiktokClientKey: cleaned(headers.get(COMMERCE_REQUEST_HEADERS.tiktokClientKey) || undefined),
     tiktokClientSecret: cleaned(headers.get(COMMERCE_REQUEST_HEADERS.tiktokClientSecret) || undefined),
     tiktokMerchantId: cleaned(headers.get(COMMERCE_REQUEST_HEADERS.tiktokMerchantId) || undefined),

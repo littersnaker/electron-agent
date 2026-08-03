@@ -1,0 +1,140 @@
+{
+  "defaultFactoryDomainId": "commerce-miniapp",
+  "harness": {
+    "uiTerms": [
+      "ui", "界面", "页面", "小程序", "商城", "视觉", "apple", "组件"
+    ],
+    "commerceTerms": [
+      "电商", "商城", "商品", "购物车", "订单", "commerce", "ecommerce"
+    ],
+    "commerceTaskKind": "commerce-miniapp",
+    "domainPathHints": [
+      {
+        "terms": ["商品", "分类", "sku", "product"],
+        "paths": ["product", "goods", "category", "catalog", "sku"]
+      },
+      {
+        "terms": ["购物车", "加购", "cart"],
+        "paths": ["cart", "basket"]
+      },
+      {
+        "terms": ["结算", "地址", "优惠券", "checkout"],
+        "paths": ["checkout", "settle", "address", "coupon"]
+      },
+      {
+        "terms": ["订单", "用户", "个人中心", "order"],
+        "paths": ["order", "profile", "account", "user", "mine"]
+      },
+      {
+        "terms": ["路由", "导航", "入口", "tabbar"],
+        "paths": ["route", "router", "app.config", "tabbar", "navigation"]
+      }
+    ]
+  },
+  "planOptimizer": {
+    "commerceTerms": [
+      "电商", "商城", "商品", "购物车", "结算", "订单", "小程序",
+      "commerce", "ecommerce"
+    ],
+    "broadTerms": [
+      "完整", "全部", "整体", "完善", "完成代码修改", "商城模块", "电商模块"
+    ],
+    "domainRules": [
+      {
+        "key": "catalog",
+        "title": "商品分类、列表与详情",
+        "terms": ["商品", "分类", "详情", "sku", "product", "catalog"],
+        "pathTerms": ["product", "catalog", "category", "sku", "detail", "goods"],
+        "acceptance": [
+          "首页或分类页能够展示统一数据源中的商品",
+          "商品详情支持 SKU 与数量选择"
+        ]
+      },
+      {
+        "key": "cart",
+        "title": "购物车状态与交互",
+        "terms": ["购物车", "加购", "数量", "删除", "cart"],
+        "pathTerms": ["cart", "basket"],
+        "acceptance": [
+          "支持加入购物车、修改数量和删除商品",
+          "购物车状态与统一商品和 SKU 契约一致"
+        ]
+      },
+      {
+        "key": "checkout",
+        "title": "结算与订单提交",
+        "terms": ["结算", "地址", "优惠券", "提交订单", "checkout", "payment"],
+        "pathTerms": ["checkout", "settle", "address", "coupon", "payment", "order"],
+        "acceptance": [
+          "结算页可读取购物车并创建模拟订单",
+          "提交过程覆盖加载、失败和成功反馈"
+        ]
+      },
+      {
+        "key": "account",
+        "title": "订单记录与用户中心",
+        "terms": ["订单列表", "订单详情", "我的订单", "用户", "个人中心", "order list", "profile", "account"],
+        "pathTerms": ["order", "profile", "account", "user", "mine"],
+        "acceptance": [
+          "用户中心能够展示模拟用户与订单记录",
+          "订单列表和详情使用统一订单契约"
+        ]
+      },
+      {
+        "key": "shell",
+        "title": "应用入口、路由与全局导航",
+        "terms": ["路由", "导航", "tabbar", "入口", "app config", "全局配置"],
+        "pathTerms": ["app.config", "app.json", "route", "router", "tabbar", "navigation"],
+        "acceptance": [
+          "新增页面已注册到项目现有路由或小程序配置",
+          "入口和导航不破坏已有页面"
+        ]
+      }
+    ]
+  },
+  "workRouter": {
+    "factoryAuditTerms": [
+      "审查", "审计", "补齐", "补全", "完整性", "一致性",
+      "review", "audit", "verify", "校验", "检查"
+    ],
+    "factoryTerms": [
+      "mock", "契约", "contract", "openapi", "数据源", "data source",
+      "api client", "software factory"
+    ],
+    "pageIntentTerms": [
+      "页面", "组件", "接入", "绑定", "路由", "界面",
+      "page", "component", "widget"
+    ]
+  },
+  "worklistReviewer": {
+    "factoryGenerateTerms": [
+      "mock", "契约", "contract", "openapi", "数据源", "data source", "api client"
+    ],
+    "generateTerms": ["生成", "generate", "创建"],
+    "pageIntentTerms": [
+      "页面", "组件", "接入", "绑定", "路由", "界面",
+      "page", "component", "widget"
+    ],
+    "validationOnlyTerms": [
+      "运行测试", "执行测试", "质量验证", "验证全部", "typecheck",
+      "lint 检查", "只验证"
+    ],
+    "editIntentTerms": [
+      "修复", "修改", "补齐", "接入", "编辑", "实现", "写入",
+      "fix", "edit", "implement"
+    ]
+  },
+  "factoryAudit": {
+    "outOfScopeTerms": [
+      "页面", "业务页面", "目录之外", "createCommerceDataSource",
+      "页面接入", "组件", "绑定", "导入"
+    ]
+  },
+  "completeWork": {
+    "factoryValidationIntentTerms": [
+      "factory validate",
+      "调用 factory validate",
+      "software factory 一致性校验"
+    ]
+  }
+}

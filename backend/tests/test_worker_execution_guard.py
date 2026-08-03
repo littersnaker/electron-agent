@@ -26,14 +26,41 @@ def test_limits_scale_with_target_file_count(monkeypatch) -> None:
     monkeypatch.delenv("CODE_AGENT_MAX_WORK_ITERATIONS", raising=False)
     monkeypatch.delenv("CODE_AGENT_MAX_CONTEXT_ACTIONS", raising=False)
     monkeypatch.delenv("CODE_AGENT_MAX_POST_WRITE_CONTEXT_ACTIONS", raising=False)
+    monkeypatch.delenv("CODE_AGENT_MAX_STALL_ROUNDS", raising=False)
     small = ExecutionLimits.from_environment(target_file_count=0)
     big = ExecutionLimits.from_environment(target_file_count=8)
 
     assert big.max_iterations >= small.max_iterations + 8
     assert big.max_context_actions > small.max_context_actions
     assert big.max_post_write_context_actions > small.max_post_write_context_actions
-    assert big.max_iterations <= 32
+    assert big.max_iterations <= 24
     assert big.max_context_actions <= 12
+
+
+def test_stall_stop_after_no_progress_rounds() -> None:
+    """连续多轮无实质进展时应停止，避免空转烧 Token。"""
+
+    state = WorkWorkerState(attempt_iterations=5, last_progress_iteration=1)
+    guard = WorkExecutionGuard(state, _limits())
+
+    decision = guard.before_model_call()
+
+    assert not decision.allowed
+    assert decision.stop
+    assert "无实质进展" in decision.error
+
+
+def test_run_success_counts_as_progress() -> None:
+    """运行/完成类动作成功应视为实质进展，刷新停滞计数。"""
+
+    state = WorkWorkerState(attempt_iterations=3)
+    guard = WorkExecutionGuard(state, _limits())
+    action = AgentAction(action="run", command="pnpm lint")
+
+    guard.record(action, "continue")
+
+    assert state.last_progress_iteration == 3
+    assert state.write_actions == 0
 
 
 def test_duplicate_read_is_rejected_without_reexecuting_tool() -> None:

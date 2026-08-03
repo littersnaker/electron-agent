@@ -2,36 +2,18 @@
 import { createIdleAgents } from "../components/AgentPanel";
 import type { AgentInstance, AgentKind } from "../components/AgentPanel";
 import type { Message, SessionMode, WorkspaceProject } from "../constants/page-constants";
+import agentRoutingConfig from "../../config/agent-routing.json";
 
 export const MAX_CONTEXT_MESSAGES = 24;
 
-const AGENT_KIND_ALIASES: Record<string, AgentKind> = {
-  orchestrator: "orchestrator",
-  coordinator: "orchestrator",
-  manager: "orchestrator",
-  planner: "planner",
-  plan: "planner",
-  researcher: "researcher",
-  research: "researcher",
-  search: "researcher",
-  coder: "coder",
-  coding: "coder",
-  developer: "coder",
-  reviewer: "reviewer",
-  review: "reviewer",
-  tester: "reviewer",
-  terminal: "terminal",
-  shell: "terminal",
-  command: "terminal",
-  media: "media",
-  image: "media",
-  video: "media",
-  draw: "media",
-  commerce: "commerce",
-  market: "commerce",
-  amazon: "commerce",
-  ecommerce: "commerce",
-};
+const AGENT_KIND_ALIASES = agentRoutingConfig.aliases as Record<
+  string,
+  AgentKind
+>;
+const AGENT_INTENTS = agentRoutingConfig.intents as Array<{
+  agent: AgentKind;
+  keywords: string[];
+}>;
 
 export function buildWelcomeMessages(
   mode: SessionMode,
@@ -60,40 +42,14 @@ export function normalizeAgentKind(value?: string): AgentKind {
 export function inferAgentKind(text: string): AgentKind {
   const normalized = text.toLowerCase();
 
-  if (/amazon|commerce|market|电商|跨境|选品|竞品|市场研究/.test(normalized)) {
-    return "commerce";
-  }
-
-  if (/media|image|video|draw|生图|改图|视频|绘图|海报/.test(normalized)) {
-    return "media";
-  }
-
-  if (
-    /terminal|shell|command|run_terminal|终端|命令|npm|pnpm|yarn|test|build/.test(
-      normalized,
-    )
-  ) {
-    return "terminal";
-  }
-
-  if (/review|diff|check|lint|verify|审查|检查|验证|测试/.test(normalized)) {
-    return "reviewer";
-  }
-
-  if (
-    /apply|write|edit|change|patch|propose|代码|修改|写入|创建文件/.test(
-      normalized,
-    )
-  ) {
-    return "coder";
-  }
-
-  if (/search|read|list|index|find|检索|搜索|读取|目录|索引/.test(normalized)) {
-    return "researcher";
-  }
-
-  if (/plan|analy|task|规划|计划|分析|拆解/.test(normalized)) {
-    return "planner";
+  for (const intent of AGENT_INTENTS) {
+    if (
+      intent.keywords.some((keyword) =>
+        normalized.includes(keyword.toLowerCase()),
+      )
+    ) {
+      return intent.agent;
+    }
   }
 
   return "orchestrator";

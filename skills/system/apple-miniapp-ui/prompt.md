@@ -5,3 +5,5 @@
 3. 页面必须覆盖 loading、error、empty、success 四种状态，并兼顾安全区、长文本和小屏设备。
 4. 商品卡片、SKU、购物车、订单等业务 UI 必须消费统一类型和 Data Source，不得在页面重复硬编码 Mock 数组。
 5. 修改后运行项目已有 lint、typecheck、test 或 build；不得为了追求视觉效果破坏现有路由、状态管理和可访问性。
+6. tabBar/导航图标必须引用真实存在的 PNG 位图（iconPath 支持 png/jpg/jpeg，不支持 SVG）；
+   图标文件缺失时系统会自动补齐占位 PNG，不要写空路径，也不要手动伪造二进制图片文件。
