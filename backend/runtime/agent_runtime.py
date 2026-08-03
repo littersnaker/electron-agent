@@ -1,0 +1,251 @@
+"""统一 Agent Runtime Core。"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator
+
+from backend.evaluation import RuntimeEvaluator
+from backend.memory import MemoryRouter
+from backend.models import ModelRouter
+from backend.runtime.agent_executor import AgentExecutor
+from backend.runtime.agent_registry import AgentRegistry
+from backend.runtime.context import ContextManager
+from backend.runtime.contracts import RuntimeRequest
+from backend.runtime.task_manager import TaskManager
+from backend.skills import SkillRegistry
+from backend.tools.code_tools import register_code_tools
+
+LOGGER = logging.getLogger(__name__)
+
+
+class AgentRuntime:
+    """统一加载 Agent、Memory、Skill、Context、Model 与执行器。"""
+
+    def __init__(
+        self,
+        *,
+        agent_registry: AgentRegistry,
+        skill_registry: SkillRegistry,
+        memory_router: MemoryRouter | None = None,
+        context_manager: ContextManager | None = None,
+        model_router: ModelRouter | None = None,
+        executor: AgentExecutor | None = None,
+        task_manager: TaskManager | None = None,
+        evaluator: RuntimeEvaluator | None = None,
+    ) -> None:
+        """保存各系统依赖，并创建幂等初始化锁。"""
+
+        self._agents = agent_registry
+        self._skills = skill_registry
+        self._memory = memory_router or MemoryRouter()
+        self._context = context_manager or ContextManager()
+        self._models = model_router or ModelRouter()
+        self._executor = executor or AgentExecutor()
+        self._tasks = task_manager or TaskManager()
+        self._evaluator = evaluator or RuntimeEvaluator()
+        self._initialized = False
+        self._initialize_lock = asyncio.Lock()
+
+    async def initialize(self) -> None:
+        """幂等加载 Agent、Skill 和内置工具目录。"""
+
+        if self._initialized:
+            return
+        async with self._initialize_lock:
+            if self._initialized:
+                return
+
+            # 配置扫描和工具注册均为本地操作；全部成功后再标记初始化完成。
+            self._agents.load()
+            self._skills.load()
+            register_code_tools()
+            self._initialized = True
+            LOGGER.info(
+                "Agent Runtime 初始化完成：agents=%s skills=%s",
+                len(self._agents.catalog()),
+                len(self._skills.catalog()),
+            )
+
+    async def execute_stream(self, request: RuntimeRequest) -> AsyncIterator[str]:
+        """按照统一流程执行 Agent，并持续返回业务层流式事件。"""
+
+        await self.initialize()
+        registered = self._agents.get(request.agent_id)
+        task = await self._tasks.create(
+            agent_id=registered.config.id,
+            session_id=request.session_id,
+            project_id=request.project_id,
+        )
+        await self._tasks.update(task.id, status="running")
+        started_at = self._evaluator.begin()
+        event_count = 0
+        result_summary = ""
+
+        try:
+            # Memory 作用域优先使用项目，其次使用会话；global 会由 Store 自动补充。
+            scopes = tuple(
+                item
+                for item in (request.project_id.strip(), request.session_id.strip())
+                if item
+            )
+            memories = await self._memory.search(
+                memory_types=registered.config.memory,
+                query=request.user_text,
+                scope_ids=scopes,
+                top_k=8,
+            )
+            fixed_skills = self._skills.resolve(registered.config.skills)
+            # 兼容测试替身和旧版 SkillRegistry：只有实现动态匹配接口时才启用。
+            matcher = getattr(self._skills, "match", None)
+            dynamic_skills = (
+                matcher(
+                    request.user_text,
+                    exclude_ids=registered.config.skills,
+                    limit=2,
+                )
+                if callable(matcher)
+                else []
+            )
+            # 动态 Skill 只在标签命中时加入，避免普通代码任务承担无关 UI Prompt。
+            skills = [*fixed_skills, *dynamic_skills]
+            context = self._context.build(
+                messages=request.messages,
+                memories=memories,
+                skills=skills,
+                metadata={
+                    "runtimeTaskId": task.id,
+                    "agentId": registered.config.id,
+                    "planner": registered.config.planner,
+                },
+            )
+            model = self._models.select(
+                preferred_model_id=request.preferred_model_id,
+                task_text=request.user_text,
+                context_tokens=context.estimated_tokens,
+                requires_reasoning=any(skill.requires_reasoning for skill in skills),
+            )
+            await self._tasks.update(
+                task.id,
+                metadata={
+                    "model": model.model_id,
+                    "modelReason": model.reason,
+                    "complexity": model.complexity,
+                    "skillIds": list(context.skill_ids),
+                    "memoryIds": list(context.memory_ids),
+                    "estimatedContextTokens": context.estimated_tokens,
+                },
+            )
+
+            async for event in self._executor.stream(
+                agent=registered.adapter,
+                request=request,
+                context=context,
+                model=model,
+            ):
+                event_count += 1
+                await self._tasks.update(task.id, event_increment=1)
+                yield event
+                if isinstance(event, str) and event.startswith("data: "):
+                    try:
+                        parsed = json.loads(event[len("data: ") :])
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(parsed, dict) and parsed.get("type") == "TEXT":
+                        result_summary = str(parsed.get("content") or "")[:4_000]
+
+            evaluation = self._evaluator.finish(
+                started_at=started_at,
+                event_count=event_count,
+                status="completed",
+            )
+            await self._tasks.update(
+                task.id,
+                status="completed",
+                metadata={"evaluation": evaluation.to_json()},
+            )
+            await self._save_execution_memory(
+                request=request,
+                status="completed",
+                event_count=event_count,
+                task_id=task.id,
+                result_summary=result_summary,
+            )
+        except Exception as exc:
+            evaluation = self._evaluator.finish(
+                started_at=started_at,
+                event_count=event_count,
+                status="failed",
+            )
+            await self._tasks.update(
+                task.id,
+                status="failed",
+                error_message=str(exc),
+                metadata={"evaluation": evaluation.to_json()},
+            )
+            await self._save_execution_memory(
+                request=request,
+                status="failed",
+                event_count=event_count,
+                task_id=task.id,
+                error_message=str(exc),
+                result_summary=result_summary,
+            )
+            raise
+        finally:
+            await self._tasks.discard_finished()
+
+    async def execute(self, request: RuntimeRequest) -> list[str]:
+        """收集完整事件列表，供非流式调用方和测试使用。"""
+
+        events: list[str] = []
+        async for event in self.execute_stream(request):
+            events.append(event)
+        return events
+
+    def catalog(self) -> dict[str, object]:
+        """返回 Agent、Skill 和 Tool 的统一诊断目录。"""
+
+        from backend.tools.gateway import TOOL_GATEWAY
+
+        return {
+            "agents": self._agents.catalog(),
+            "skills": self._skills.catalog(),
+            "tools": TOOL_GATEWAY.catalog(),
+        }
+
+    async def task_snapshot(self) -> list[dict[str, object]]:
+        """返回当前进程内 Runtime 任务快照。"""
+
+        return await self._tasks.snapshot()
+
+    async def _save_execution_memory(
+        self,
+        *,
+        request: RuntimeRequest,
+        status: str,
+        event_count: int,
+        task_id: str,
+        error_message: str = "",
+        result_summary: str = "",
+    ) -> None:
+        """保存执行摘要；Memory 故障只记录日志，不覆盖已经完成的业务结果。"""
+
+        try:
+            await self._memory.save_execution_summary(
+                session_id=request.session_id,
+                project_id=request.project_id,
+                agent_id=request.agent_id,
+                request_text=request.user_text,
+                status=status,
+                event_count=event_count,
+                result_summary=result_summary,
+                metadata={
+                    "runtimeTaskId": task_id,
+                    "errorMessage": error_message[:1_000],
+                },
+            )
+        except Exception:
+            LOGGER.exception("保存 Runtime Episodic Memory 失败")

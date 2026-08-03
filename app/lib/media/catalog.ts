@@ -72,6 +72,16 @@ export const MEDIA_MODEL_CATALOG: readonly MediaModelDefinition[] = [
     protocol: "dashscope-video-async",
   },
   {
+    id: "qwen:happyhorse-1.1-i2v",
+    provider: "qwen",
+    model: "happyhorse-1.1-i2v",
+    name: "HappyHorse 1.1 图生视频",
+    description: "截图中的首帧/首尾帧图生视频模型。",
+    modes: ["image-to-video"],
+    outputKind: "video",
+    protocol: "dashscope-video-async",
+  },
+  {
     id: "qwen:happyhorse-1.1-r2v",
     provider: "qwen",
     model: "happyhorse-1.1-r2v",

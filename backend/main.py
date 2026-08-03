@@ -23,6 +23,10 @@ from backend.api.router import api_router
 from backend.core.config import get_settings
 from backend.core.logging import configure_console_encoding, configure_logging
 from backend.core.timezones import PACIFIC_TIMEZONE, timezone_source
+<<<<<<< HEAD
+=======
+from backend.runtime.bootstrap import RUNTIME
+>>>>>>> changePython
 from backend.services.llm.custom_models import initialize_custom_models
 from backend.services.llm.gateway import GATEWAY
 from backend.services.workspace.database import initialize_database
@@ -38,7 +42,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     await initialize_database()
     await initialize_custom_models()
+<<<<<<< HEAD
     LOGGER.info("FastAPI 后端已完成数据库和自定义模型初始化")
+=======
+    await RUNTIME.initialize()
+    LOGGER.info("FastAPI 后端已完成数据库、自定义模型和 Agent Runtime 初始化")
+>>>>>>> changePython
     LOGGER.info("时区支持来源：%s", timezone_source(PACIFIC_TIMEZONE))
     try:
         yield

@@ -1,5 +1,8 @@
 // 模块说明：负责 derive 用户界面组件。
-import type { AgentLifecycleEventPayload } from "../../types/workspace";
+import type {
+  AgentLifecycleEventPayload,
+  WorkListSnapshotPayload,
+} from "../../types/workspace";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance } from "../AgentPanel";
 import type {
@@ -145,14 +148,16 @@ function lifecycleStatusToPlanningStatus(
   [...events].sort(compareLifecycleEvents).forEach((event) => {
     latestByAgent.set(event.agentId, event);
   });
-  const statuses = Array.from(latestByAgent.values()).map(
-    (event) => event.status,
+  const statuses = Array.from(latestByAgent.values()).map((event) =>
+    event.status.toUpperCase(),
   );
 
-  if (statuses.some((status) => status === "FAILED")) return "error";
+  if (statuses.some((status) => ["FAILED", "ERROR"].includes(status))) {
+    return "error";
+  }
   if (
     statuses.some(
-      (status) => status !== "COMPLETED" && status !== "FAILED",
+      (status) => !["COMPLETED", "FAILED", "ERROR"].includes(status),
     )
   ) {
     return "active";
@@ -289,7 +294,13 @@ function isSuccessfulTerminalRun(
   const hasFailure =
     agents.some((agent) => agent.status === "error") ||
     activities.some((activity) => activity.status === "error") ||
+<<<<<<< HEAD
     lifecycleEvents.some((event) => event.status === "FAILED");
+=======
+    lifecycleEvents.some((event) =>
+      ["FAILED", "ERROR"].includes(event.status.toUpperCase()),
+    );
+>>>>>>> changePython
 
   return hasRunEvidence && !hasRunningWork && !hasFailure;
 }
@@ -396,6 +407,31 @@ export function buildPlanningSummary(
     overallProgress: Math.round(
       stages.reduce((total, stage) => total + stage.progress, 0) /
         Math.max(stages.length, 1),
+    ),
+  };
+}
+/**
+ * 从后端完整 WorkList 快照重新计算真实进度。
+ * 不直接信任传入百分比，避免旧后端或乱序 SSE 让右侧进度倒退/虚高。
+ */
+export function buildWorkListProgress(snapshot: WorkListSnapshotPayload | null) {
+  if (!snapshot || snapshot.total <= 0) return null;
+  const finished = snapshot.items.filter((item) =>
+    ["succeeded", "skipped"].includes(item.status),
+  ).length;
+  const failed = snapshot.items.filter((item) => item.status === "failed").length;
+  const runningItems = snapshot.items.filter((item) => item.status === "running");
+  const running = runningItems[0];
+  return {
+    finished,
+    total: snapshot.items.length,
+    failed,
+    running,
+    runningItems,
+    activeWorkIds: snapshot.scheduler?.activeWorkIds || runningItems.map((item) => item.id),
+    maxParallel: snapshot.scheduler?.maxParallel || 1,
+    overallProgress: Math.round(
+      (finished / Math.max(snapshot.items.length, 1)) * 100,
     ),
   };
 }

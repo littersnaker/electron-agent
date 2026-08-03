@@ -156,8 +156,17 @@ async def probe_model(
         credentials = resolve_credentials(request)
         for model in candidates:
             try:
+<<<<<<< HEAD
                 await GATEWAY.probe(model_id=model.id, credentials=credentials)
                 latency_ms = round((perf_counter() - started) * 1000)
+=======
+                _model, network_ms = await GATEWAY.probe(
+                    model_id=model.id,
+                    credentials=credentials,
+                )
+                # 只展示纯网络延迟（收到响应头），不包含模型生成时间。
+                latency_ms = round(network_ms)
+>>>>>>> changePython
                 credential_source = credentials.source(model.provider)
                 source_note = (
                     "（正在使用应用内置百炼兜底）"

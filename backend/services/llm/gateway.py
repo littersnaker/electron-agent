@@ -6,10 +6,18 @@
 
 from __future__ import annotations
 
+<<<<<<< HEAD
+=======
+import asyncio
+>>>>>>> changePython
 import logging
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+<<<<<<< HEAD
+=======
+from time import monotonic
+>>>>>>> changePython
 
 from backend.core.builtin_credentials import get_builtin_value
 from backend.services.llm.availability import AVAILABILITY
@@ -28,6 +36,10 @@ from backend.services.llm.custom_models import (
     list_custom_model_definitions,
 )
 from backend.services.llm.protocols import LlmProtocolClient, ProviderRequestError
+<<<<<<< HEAD
+=======
+from backend.services.llm.token_usage import ensure_usage
+>>>>>>> changePython
 from backend.services.llm.types import LlmChunk, LlmMessage, LlmUsage
 
 LOGGER = logging.getLogger(__name__)
@@ -184,15 +196,31 @@ class LlmGateway:
         credentials: LlmCredentials,
         messages: list[LlmMessage],
         temperature: float = 0.2,
+        timeout_seconds: float | None = None,
+        stall_timeout_seconds: float | None = None,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
+<<<<<<< HEAD
         """收集完整响应；Auto 在没有收到任何内容时允许降级。"""
 
+=======
+        """收集完整响应；Auto 在没有收到任何内容时允许降级。
+
+        ``timeout_seconds`` 控制单次模型调用的总时长上限；``stall_timeout_seconds``
+        控制“没有新数据”的卡死阈值。默认只杀卡死流，不杀慢速但持续输出的长生成。
+        """
+
+>>>>>>> changePython
         candidates = self.resolve_candidates(
             preferred_model_id,
             credentials,
             messages,
         )
         automatic = (preferred_model_id or AUTO_MODEL_ID).strip() == AUTO_MODEL_ID
+<<<<<<< HEAD
+=======
+        total_budget = max(1.0, timeout_seconds or 900.0)
+        stall_budget = max(0.5, stall_timeout_seconds or 90.0)
+>>>>>>> changePython
         failures: list[ProviderFailure] = []
         blocked_routes: set[tuple[str, str]] = set()
 
@@ -204,11 +232,20 @@ class LlmGateway:
             reasoning_parts: list[str] = []
             usage = LlmUsage()
             try:
+<<<<<<< HEAD
                 async for chunk in self._stream_model(
+=======
+                async for chunk in self._stream_with_deadline(
+>>>>>>> changePython
                     model=model,
                     credentials=credentials,
                     messages=messages,
                     temperature=temperature,
+<<<<<<< HEAD
+=======
+                    total_budget=total_budget,
+                    stall_budget=stall_budget,
+>>>>>>> changePython
                 ):
                     if chunk.reasoning_delta:
                         reasoning_parts.append(chunk.reasoning_delta)
@@ -219,6 +256,12 @@ class LlmGateway:
                 result = "".join(text_parts).strip() or "".join(
                     reasoning_parts
                 ).strip()
+<<<<<<< HEAD
+=======
+                # Moonshot 等兼容端点的流式响应可能不返回 usage。此处使用
+                # 本地估算补齐统计，保证 Token Budget 与前端用量始终可用。
+                usage = ensure_usage(usage, messages=messages, output_text=result)
+>>>>>>> changePython
                 AVAILABILITY.mark_success(model, credentials)
                 return result, usage, model
             except ProviderRequestError as exc:
@@ -239,6 +282,7 @@ class LlmGateway:
 
         raise ValueError(self._format_failures(failures))
 
+<<<<<<< HEAD
     async def probe(
         self,
         *,
@@ -253,6 +297,23 @@ class LlmGateway:
         messages = [LlmMessage("user", "只回复 OK")]
         async for _chunk in self.stream(
             preferred_model_id=model.id,
+=======
+    async def _stream_with_deadline(
+        self,
+        *,
+        model: ModelDefinition,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float,
+        total_budget: float,
+        stall_budget: float,
+    ) -> AsyncIterator[LlmChunk]:
+        """流式读取模型输出：卡住才中断，慢速长生成不误杀。"""
+
+        deadline = monotonic() + total_budget
+        iterator = self._stream_model(
+            model=model,
+>>>>>>> changePython
             credentials=credentials,
             messages=messages,
             temperature=0.0,
@@ -295,7 +356,119 @@ class LlmGateway:
             endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
             messages=messages,
             temperature=temperature,
+        ).__aiter__()
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise ProviderRequestError(
+                    f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
+                    scope="provider",
+                )
+            try:
+                chunk = await asyncio.wait_for(
+                    anext(iterator),
+                    timeout=min(stall_budget, remaining),
+                )
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                raise ProviderRequestError(
+                    f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
+                    scope="provider",
+                )
+            yield chunk
+
+    async def probe(
+        self,
+        *,
+        model_id: str,
+        credentials: LlmCredentials,
+    ) -> tuple[ModelDefinition, float]:
+        """验证 Key/端点/模型名，并返回到响应头的纯网络延迟（毫秒）。
+
+        纯网络延迟只等待 HTTP 响应头，不包含模型生成时间；完整流仍会读完，
+        确保供应商端不会因提前取消而误报。
+        """
+
+        model = get_custom_model_definition(model_id) or get_model(model_id)
+        if not model:
+            raise ValueError(f"未识别的模型：{model_id}")
+        provider = get_provider(model.provider)
+        api_key = credentials.get(model.provider)
+        if not api_key:
+            raise ValueError(f"未配置 {provider.name} API Key")
+        endpoints = self._provider_endpoints(
+            provider,
+            model.base_url or credentials.get_endpoint(model.provider),
+        )
+        network_ms = 0.0
+        last_error: ProviderRequestError | None = None
+        for endpoint in endpoints:
+            try:
+                network_ms = await self._protocols.measure_connectivity(
+                    model=model,
+                    endpoint=endpoint,
+                    api_key=api_key,
+                )
+                break
+            except ProviderRequestError as exc:
+                last_error = exc
+                can_try_region = (
+                    exc.status_code is None or exc.status_code in {401, 403, 404}
+                )
+                if not can_try_region or endpoint == endpoints[-1]:
+                    raise
+        if last_error is not None:
+            raise last_error
+        messages = [LlmMessage("user", "只回复 OK")]
+        async for _chunk in self.stream(
+            preferred_model_id=model.id,
+            credentials=credentials,
+            messages=messages,
+            temperature=0.0,
         ):
+<<<<<<< HEAD
+=======
+            # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
+            pass
+        AVAILABILITY.mark_success(model, credentials)
+        return model, max(0.0, network_ms)
+
+    async def _stream_model(
+        self,
+        *,
+        model: ModelDefinition,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float,
+    ) -> AsyncIterator[LlmChunk]:
+        """按供应商协议执行一次模型请求，并处理同供应商区域端点回退。"""
+
+        provider = get_provider(model.provider)
+        api_key = credentials.get(model.provider)
+        if not api_key:
+            raise ValueError(f"未配置 {provider.name} API Key")
+
+        if provider.protocol == "gemini":
+            async for chunk in self._protocols.stream_gemini(
+                model=model,
+                api_key=api_key,
+                messages=messages,
+                temperature=temperature,
+                endpoint_base=model.base_url,
+            ):
+                yield chunk
+            return
+
+        async for chunk in self._stream_openai_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
+            messages=messages,
+            temperature=temperature,
+        ):
+>>>>>>> changePython
             yield chunk
 
     async def _stream_openai_provider(
@@ -311,6 +484,10 @@ class LlmGateway:
         """依次尝试供应商区域端点；收到内容后绝不切换端点。"""
 
         endpoints = self._provider_endpoints(provider, endpoint_override)
+<<<<<<< HEAD
+=======
+        request_temperature = self._request_temperature(provider, model, temperature)
+>>>>>>> changePython
         last_error: ProviderRequestError | None = None
         for index, endpoint in enumerate(endpoints):
             emitted = False
@@ -320,7 +497,11 @@ class LlmGateway:
                     endpoint=endpoint,
                     api_key=api_key,
                     messages=messages,
+<<<<<<< HEAD
                     temperature=temperature,
+=======
+                    temperature=request_temperature,
+>>>>>>> changePython
                 ):
                     emitted = True
                     yield chunk
@@ -350,6 +531,32 @@ class LlmGateway:
             scope="provider",
         )
 
+<<<<<<< HEAD
+=======
+
+    def _request_temperature(
+        self,
+        provider: ProviderDefinition,
+        model: ModelDefinition,
+        requested: float,
+    ) -> float | None:
+        """按供应商模型约束决定是否发送 temperature。
+
+        Kimi K2.5/K2.6 的思考模式固定为 1.0，非思考模式固定为 0.6。应用
+        当前没有显式发送 thinking，因此最稳妥的兼容方式是省略 temperature，
+        让平台使用该模型的合法默认值。其他模型保持业务层传入值。
+        """
+
+        model_name = model.model.strip().lower()
+        if provider.id == "kimi" and (
+            model_name.startswith("kimi-k2.6")
+            or model_name.startswith("kimi-k2.5")
+            or model_name.startswith("kimi-k2-thinking")
+        ):
+            return None
+        return max(0.0, min(float(requested), 1.0 if provider.id == "kimi" else 2.0))
+
+>>>>>>> changePython
     def _provider_endpoints(
         self,
         provider: ProviderDefinition,

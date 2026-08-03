@@ -13,6 +13,10 @@ import {
 } from "../utilities/attachment-input";
 import { useComposerDrop } from "../hooks/use-composer-drop";
 import ModelSelector from "./ModelSelector";
+<<<<<<< HEAD
+=======
+import CodeAgentModeSelector from "./CodeAgentModeSelector";
+>>>>>>> changePython
 import { CommerceControls } from "./chat-composer/commerce-controls";
 import { AttachmentList } from "./chat-composer/attachment-list";
 import {
@@ -54,6 +58,11 @@ export function ChatComposer({
   models,
   selectedModel,
   onSelectModel,
+<<<<<<< HEAD
+=======
+  codeAgentMode = "auto_edit",
+  onCodeAgentModeChange,
+>>>>>>> changePython
   onCreateCustomModel,
   onUpdateCustomModel,
   onDeleteCustomModel,
@@ -403,6 +412,16 @@ export function ChatComposer({
           </div>
 
           <div className="flex items-center gap-2">
+<<<<<<< HEAD
+=======
+            {mode === "code" && onCodeAgentModeChange && (
+              <CodeAgentModeSelector
+                value={codeAgentMode}
+                onChange={onCodeAgentModeChange}
+                disabled={disabled}
+              />
+            )}
+>>>>>>> changePython
             <ModelSelector
               models={models}
               selectedModel={selectedModel}

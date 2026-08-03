@@ -18,7 +18,11 @@
     "backend:check": "python -m compileall -q backend scripts/build-python-backend.py scripts/embed_builtin_credentials.py scripts/sync_model_catalog.py scripts/show_model_routes.py scripts/clean_dev_runtime.py",
     "backend:test": "python -m pytest backend/tests -q",
     "backend:build": "python scripts/build-python-backend.py",
+<<<<<<< HEAD
     "verify": "pnpm models:sync && pnpm source:check && pnpm planning:test && pnpm typecheck && pnpm electron:typecheck && pnpm backend:check && pnpm backend:test && pnpm build",
+=======
+    "verify": "pnpm models:sync && pnpm quality && pnpm planning:test && pnpm typecheck && pnpm electron:typecheck && pnpm backend:check && pnpm backend:test && pnpm build",
+>>>>>>> changePython
     "electron:prepare": "tsx scripts/build-electron.ts",
     "electron:prepare-icons": "tsx scripts/prepare-electron-icons.ts",
     "release:clean": "tsx scripts/clean-release.ts",
@@ -34,9 +38,21 @@
     "models:watch": "python scripts/sync_model_catalog.py --watch",
     "electron:watch": "cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 BACKEND_DEV_URL=http://127.0.0.1:3100 ELECTRON_DEV_STRICT=1 tsx scripts/dev-electron.ts",
     "models:list": "python scripts/show_model_routes.py",
+<<<<<<< HEAD
     "planning:test": "tsx scripts/task-planning-progress.test.ts"
+=======
+    "planning:test": "tsx scripts/task-planning-progress.test.ts",
+    "lint": "eslint app electron scripts main.tsx vite.config.ts",
+    "lint:fix": "pnpm lint --fix",
+    "format": "prettier --write \"app/**/*.{ts,tsx}\" \"electron/**/*.ts\" \"scripts/**/*.ts\" \"*.{ts,mjs,json}\"",
+    "format:check": "prettier --check \"app/**/*.{ts,tsx}\" \"electron/**/*.ts\" \"scripts/**/*.ts\" \"*.{ts,mjs,json}\"",
+    "python:lint": "ruff check backend",
+    "python:format:check": "black --check backend",
+    "quality": "pnpm lint && pnpm format:check && pnpm python:lint && pnpm python:format:check && pnpm source:check"
+>>>>>>> changePython
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^24.10.0",
@@ -48,8 +64,13 @@
     "electron": "37.3.1",
     "electron-builder": "^26.0.12",
     "esbuild": "^0.27.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
     "pdfjs-dist": "^5.7.284",
     "png-to-ico": "^3.0.2",
+    "prettier": "^3.7.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
@@ -59,6 +80,7 @@
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.1",
     "vite": "^7.2.4",
     "wait-on": "^9.0.3"
   },

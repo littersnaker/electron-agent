@@ -102,7 +102,61 @@ CREATE TABLE IF NOT EXISTS custom_models (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+<<<<<<< HEAD
 """
+=======
+
+CREATE TABLE IF NOT EXISTS agent_checkpoints (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    agent_kind TEXT NOT NULL,
+    route TEXT NOT NULL,
+    status TEXT NOT NULL,
+    resumable INTEGER NOT NULL DEFAULT 1,
+    request_json TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session_updated
+ON agent_checkpoints(session_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_memories (
+      id TEXT PRIMARY KEY,
+      memory_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      expires_at TEXT
+  );
+  
+  CREATE INDEX IF NOT EXISTS idx_agent_memories_lookup
+  ON agent_memories(memory_type, scope_id, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS project_completed_works (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id TEXT NOT NULL,
+      work_id TEXT NOT NULL,
+      title_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      acceptance_json TEXT NOT NULL DEFAULT '[]',
+      target_files_json TEXT NOT NULL DEFAULT '[]',
+      changed_files_json TEXT NOT NULL DEFAULT '[]',
+      priority INTEGER NOT NULL DEFAULT 100,
+      completed_at TEXT NOT NULL
+  );
+  
+  CREATE INDEX IF NOT EXISTS idx_completed_works_lookup
+  ON project_completed_works(project_id, title_key, completed_at DESC);
+  """
+>>>>>>> changePython
 
 
 class AsyncCursor:

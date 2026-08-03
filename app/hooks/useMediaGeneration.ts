@@ -19,6 +19,7 @@ import {
 } from "../lib/llm/client-request";
 import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
 import type { TokenInfo } from "../types/workspace";
+import type { CheckpointFinishResult } from "../types/checkpoints";
 import type { AgentCoordinator } from "./useAgentCoordinator";
 
 interface UseMediaGenerationOptions {
@@ -54,6 +55,19 @@ interface MediaGenerateResponse {
     reason?: string;
   };
   error?: string;
+}
+
+export interface MediaRunOptions {
+  checkpointId?: string;
+  resumeExistingRun?: boolean;
+  attachmentOverride?: AttachedFile | null;
+  modelOverride?: string;
+  typographyPolicyOverride?: TypographyPolicy;
+  imageEditFidelityOverride?: ImageEditFidelity;
+  enableQualityGuardOverride?: boolean;
+  onCheckpointFinish?: (
+    result: CheckpointFinishResult,
+  ) => void | Promise<void>;
 }
 
 function requiresAttachment(mode: MediaMode): boolean {
@@ -242,7 +256,11 @@ export function useMediaGeneration({
   );
 
   const submit = useCallback(
-    async (promptText: string, mode: MediaMode) => {
+    async (
+      promptText: string,
+      mode: MediaMode,
+      options: MediaRunOptions = {},
+    ) => {
       if (
         !activeSession ||
         activeSession.mode !== "qa" ||
@@ -253,9 +271,13 @@ export function useMediaGeneration({
       }
 
       const prompt = promptText.trim();
-      if (!prompt && !attachedFile) return;
+      const effectiveAttachment =
+        options.attachmentOverride === undefined
+          ? attachedFile
+          : options.attachmentOverride;
+      if (!prompt && !effectiveAttachment) return;
 
-      const attachmentError = validateAttachmentForMode(mode, attachedFile);
+      const attachmentError = validateAttachmentForMode(mode, effectiveAttachment);
       if (attachmentError) {
         const errorHistory: Message[] = [
           ...messages,
@@ -267,6 +289,10 @@ export function useMediaGeneration({
             ? prompt.slice(0, 18) || "媒体生成"
             : activeSession.title;
         await replaceSessionMessages(activeSession, errorHistory, title);
+        await options.onCheckpointFinish?.({
+          status: "failed",
+          error: attachmentError,
+        });
         return;
       }
 
@@ -274,11 +300,17 @@ export function useMediaGeneration({
       const userMessage: Message = {
         role: "user",
         content: visiblePrompt,
-        attachments: toMessageAttachment(attachedFile),
+        attachments: toMessageAttachment(effectiveAttachment),
       };
+      const resumeExistingRun = options.resumeExistingRun === true;
+      const lastMessage = messages[messages.length - 1];
+      const baseMessages =
+        resumeExistingRun && lastMessage?.role === "assistant"
+          ? messages.slice(0, -1)
+          : messages;
       const optimisticHistory: Message[] = [
-        ...messages,
-        userMessage,
+        ...baseMessages,
+        ...(resumeExistingRun ? [] : [userMessage]),
         { role: "assistant", content: "" },
       ];
       const title =
@@ -311,23 +343,37 @@ export function useMediaGeneration({
 
       const controller = new AbortController();
       abortRef.current = controller;
+      let checkpointResult: CheckpointFinishResult = { status: "completed" };
+      const requestModel = options.modelOverride || selectedModel;
+      const requestTypographyPolicy =
+        options.typographyPolicyOverride || typographyPolicy;
+      const requestImageEditFidelity =
+        options.imageEditFidelityOverride || imageEditFidelity;
+      const requestQualityGuard =
+        options.enableQualityGuardOverride ?? enableQualityGuard;
 
       try {
         const response = await apiFetch("/api/media/generate", {
           method: "POST",
           headers: buildLlmRequestHeaders(
             apiKeys,
+<<<<<<< HEAD
             selectedModel,
+=======
+            requestModel,
+>>>>>>> changePython
             endpointOverrides,
           ),
           body: JSON.stringify({
             prompt: visiblePrompt,
             mode,
-            modelId: selectedModel,
-            typographyPolicy,
-            imageEditFidelity,
-            enableQualityGuard,
-            attachment: buildMediaAttachmentPayload(attachedFile)?.[0],
+            modelId: requestModel,
+            typographyPolicy: requestTypographyPolicy,
+            imageEditFidelity: requestImageEditFidelity,
+            enableQualityGuard: requestQualityGuard,
+            attachment: buildMediaAttachmentPayload(effectiveAttachment)?.[0],
+            sessionId: activeSession.id,
+            checkpointId: options.checkpointId || "",
           }),
           signal: controller.signal,
         });
@@ -368,6 +414,12 @@ export function useMediaGeneration({
       } catch (error) {
         stopProgressTimer();
         const aborted = error instanceof DOMException && error.name === "AbortError";
+        checkpointResult = aborted
+          ? { status: "interrupted", error: "用户停止或应用中断" }
+          : {
+              status: "failed",
+              error: error instanceof Error ? error.message : "媒体生成失败",
+            };
         const message = aborted
           ? "已停止生成。"
           : `⚠️ ${error instanceof Error ? error.message : "媒体生成失败"}`;
@@ -382,6 +434,9 @@ export function useMediaGeneration({
         abortRef.current = null;
         setIsGenerating(false);
         setStatus("");
+        if (options.onCheckpointFinish) {
+          await options.onCheckpointFinish(checkpointResult);
+        }
       }
     },
     [
@@ -415,3 +470,5 @@ export function useMediaGeneration({
     reset,
   };
 }
+
+export type MediaGenerationController = ReturnType<typeof useMediaGeneration>;

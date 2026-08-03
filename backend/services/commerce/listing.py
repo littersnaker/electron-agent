@@ -104,65 +104,40 @@ def _validate(draft: dict[str, Any], keywords: list[dict[str, Any]]) -> dict[str
 
 
 async def stream_listing(body: CommerceRequest) -> AsyncIterator[str]:
-    """生成 Listing Demo，并通过 SSE 输出现有界面所需事件。"""
+    """通过 LangGraph 生成 Listing Demo，并输出现有界面所需 SSE 事件。"""
 
-    marketplace = get_marketplace(body.marketplace)
-    yield _progress("intent", 8, "正在理解商品 Brief、目标站点和事实边界…")
-    category = resolve_category(body.query)
-    yield _progress("category", 22, "已识别类目词和站点语言。")
-    yield _progress("collect", 35, "当前迁移版使用离线 Demo，不调用 Seller Central 写入接口。")
+    from backend.services.commerce.langgraph import build_listing_graph
 
-    facts = [
-        {
-            "id": "brief",
-            "label": "用户商品 Brief",
-            "value": body.query,
-            "source": "user",
-            "confidence": 100,
-            "requiresConfirmation": False,
-        }
-    ]
-    mock_erp = {
-        "sourceName": "Mock ERP Adapter",
-        "sku": "DEMO-SKU-PENDING",
-        "brand": "待确认品牌",
-        "productName": category["categoryName"],
-        "productType": category["categoryNameEn"],
-        "facts": facts,
-        "assumptions": ["SKU、品牌、材质、尺寸、认证和性能参数均需人工补充。"],
-        "readyForPublish": False,
-    }
-    yield _progress("erp", 50, "已构建模拟 ERP 档案，并标记所有待确认事实。")
-    keywords = _keywords(body.query, category)
-    yield _progress("keywords", 66, "已完成核心词、属性词和后台搜索词分配。")
-    draft = _draft(body.query, keywords)
-    yield _progress("draft", 82, "已生成标题、五点描述、产品描述和后台搜索词。")
-    validation = _validate(draft, keywords)
-    yield _progress("validate", 94, "已检查字段长度、关键词覆盖和事实安全。")
-
-    report = {
-        "version": 1,
-        "mode": "listing-demo",
-        "generatedAt": datetime.now(UTC).isoformat(),
+    graph = build_listing_graph(body)
+    initial: dict[str, object] = {
         "query": body.query,
-        "marketplace": body.marketplace,
-        "marketplaceLabel": marketplace.label,
-        "locale": marketplace.locale,
-        "category": category,
-        "mockErp": mock_erp,
-        "keywords": keywords,
-        "draft": draft,
-        "validation": validation,
-        "competitors": [],
-        "source": {
-            "provider": "demo-market",
-            "sampleSize": 0,
-            "isDemo": True,
-            "description": "离线 Listing Demo；未连接 Seller Central 或真实 ERP。",
-            "warnings": ["此结果不可直接发布，所有商品事实必须人工复核。"],
-        },
-        "warnings": ["Listing 模式当前为安全演示流程，不会写入任何电商平台。"],
+        "marketplace": {},
+        "category": {},
+        "mock_erp": {},
+        "keywords": [],
+        "draft": {},
+        "validation": {},
+        "report": {},
+        "retries": 0,
     }
-    yield sse_packet("COMMERCE_LISTING", report)
-    yield sse_packet("USAGE", {"promptTokens": 0, "completionTokens": 0, "totalTokens": 0})
-    yield _progress("done", 100, "Listing Demo 已完成。")
+    async for step in graph.astream(initial, stream_mode="updates"):
+        for node, update in step.items():
+            if node == "intent":
+                yield _progress("intent", 8, "正在理解商品 Brief、目标站点和事实边界…")
+                yield _progress("category", 22, "已识别类目词和站点语言。")
+            elif node == "collect":
+                yield _progress("collect", 35, "当前迁移版使用离线 Demo，不调用 Seller Central 写入接口。")
+                yield _progress("erp", 50, "已构建模拟 ERP 档案，并标记所有待确认事实。")
+            elif node == "keywords":
+                yield _progress("keywords", 66, "已完成核心词、属性词和后台搜索词分配。")
+            elif node == "draft":
+                yield _progress("draft", 82, "已生成标题、五点描述、产品描述和后台搜索词。")
+            elif node == "validate":
+                yield _progress("validate", 94, "已检查字段长度、关键词覆盖和事实安全。")
+            elif node == "report":
+                yield sse_packet("COMMERCE_LISTING", update["report"])
+                yield sse_packet(
+                    "USAGE",
+                    {"promptTokens": 0, "completionTokens": 0, "totalTokens": 0},
+                )
+                yield _progress("done", 100, "Listing Demo 已完成。")

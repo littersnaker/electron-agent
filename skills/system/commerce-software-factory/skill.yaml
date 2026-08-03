@@ -1,0 +1,31 @@
+id: commerce-software-factory
+name: Commerce Software Factory
+version: 1.0.0
+description: 从电商需求统一生成领域模型、数据库、OpenAPI、Mock 与前端数据源，并要求接入真实页面后验收。
+prompt:
+  file: prompt.md
+tools:
+  - workspace.search
+  - workspace.read
+  - code.inspect
+  - workspace.edit
+  - workspace.run
+  - software_factory.plan
+  - software_factory.generate
+  - software_factory.validate
+memory:
+  - project
+  - task
+permissions:
+  filesystem:
+    read: true
+    write: true
+  shell:
+    execute: true
+requires_reasoning: true
+tags:
+  - 电商小程序
+  - domain-model
+  - mock-data
+  - api-contract
+  - frontend-binding

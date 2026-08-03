@@ -165,7 +165,9 @@ export function toMessageAttachment(
   return attachment ? toMessageAttachments([attachment]) : undefined;
 }
 
-export type SessionMode = "qa" | "code" | "commerce";
+export type SessionMode = "qa" | "code" | "commerce" | "media";
+
+export type CodeAgentExecutionMode = "suggest" | "auto_edit" | "full_auto";
 
 export type ChatSession = {
   id: string;

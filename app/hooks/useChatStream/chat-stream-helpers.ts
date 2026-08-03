@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   AttachedFile,
   ChatSession,
+  CodeAgentExecutionMode,
   Message,
   WorkspaceProject,
 } from "../../constants/page-constants";
@@ -14,6 +15,7 @@ import type {
   AgentLifecycleEventPayload,
   InteractiveRequest,
   StreamPacket,
+  WorkListSnapshotPayload,
 } from "../../types/workspace";
 import type { AgentCoordinator } from "../useAgentCoordinator";
 
@@ -28,6 +30,15 @@ export type PersistSession = (
 export interface SubmitPromptOptions {
   /** 交互卡片回复属于内部控制消息，不显示内部协议文本。 */
   suppressVisibleUserMessage?: boolean;
+  /** 恢复中断任务时复用已有用户消息，避免重复插入。 */
+  resumeExistingRun?: boolean;
+  checkpointId?: string;
+  resumeCheckpointId?: string;
+  modelOverride?: string;
+  codeAgentModeOverride?: CodeAgentExecutionMode;
+  onCheckpointFinish?: (
+    result: import("../../types/checkpoints").CheckpointFinishResult,
+  ) => void | Promise<void>;
 }
 
 export interface UseChatStreamOptions {
@@ -40,6 +51,7 @@ export interface UseChatStreamOptions {
   apiKeys: LlmCredentials;
   endpointOverrides: LlmEndpointOverrides;
   selectedModel: string;
+  codeAgentMode: CodeAgentExecutionMode;
   attachedFiles: readonly AttachedFile[];
   isParsingFile: boolean;
   clearAfterSubmit: () => void;
@@ -135,4 +147,104 @@ export function isInteractiveRequestPayload(
   payload: StreamPacket["payload"],
 ): payload is InteractiveRequest {
   return Boolean(payload && "command" in payload && "prompt" in payload);
+}
+
+export function isMediaResultPayload(
+  value: unknown,
+): value is { content?: string; attachments?: Message["attachments"] } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "attachments" in value &&
+      Array.isArray((value as { attachments?: unknown }).attachments),
+  );
+}
+
+export function isWorkListSnapshotPayload(
+  payload: StreamPacket["payload"],
+): payload is WorkListSnapshotPayload {
+  return Boolean(
+    payload &&
+      "revision" in payload &&
+      "items" in payload &&
+      "overallProgress" in payload &&
+      Array.isArray(payload.items),
+  );
+}
+
+export function describeWorkListSnapshot(
+  snapshot: WorkListSnapshotPayload,
+): string {
+  const activeWorks = snapshot.items.filter((item) => item.status === "running");
+  if (activeWorks.length > 1) {
+    return `并行执行 ${activeWorks.length} 个 Work：${activeWorks
+      .map((item) => item.id)
+      .join(", ")}`;
+  }
+  const activeWork = activeWorks[0];
+  return activeWork ? `${activeWork.id} · ${activeWork.title}` : snapshot.reason;
+}
+
+/** 构造终端或审批交互的内部协议文本，避免在 Hook 中重复拼接。 */
+export function buildInteractiveReplyPrompt(
+  request: InteractiveRequest,
+  mode: "auto" | "llm" | "user",
+  fallbackAnswer: string,
+  answer?: string,
+): string {
+  const normalizedAnswer =
+    mode === "user"
+      ? (answer ?? fallbackAnswer).replace(/\r?\n/g, "")
+      : answer;
+  const reply =
+    mode === "user"
+      ? `answer=${normalizedAnswer === "" ? "__ENTER__" : normalizedAnswer}`
+      : normalizedAnswer
+        ? `answer=${normalizedAnswer}`
+        : "";
+  return [`[INTERACTIVE_REPLY] id=${request.id} mode=${mode}`, reply]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** 把交互等待状态同步到右侧 Agent 面板。 */
+export function applyInteractiveRequestAgents(
+  request: InteractiveRequest,
+  agents: AgentCoordinator,
+): void {
+  if (request.source === "file_create_confirmation") {
+    agents.updateAgent("orchestrator", {
+      status: "running",
+      progress: 38,
+      currentTask: "等待确认是否新建缺失文件",
+    });
+    return;
+  }
+  if (request.source === "risk_approval" || request.source === "mcp_tool_approval") {
+    agents.updateAgent("orchestrator", {
+      status: "running",
+      progress: 70,
+      currentTask: "等待用户批准高风险操作",
+    });
+    return;
+  }
+  agents.updateAgent("terminal", {
+    status: "running",
+    progress: 72,
+    currentTask: "等待用户提供终端交互输入",
+  });
+}
+
+/** 返回交互暂停时写入会话的可见说明。 */
+export function interactiveWaitingMessage(request: InteractiveRequest): string {
+  if (request.source === "file_create_confirmation") {
+    return "需要你确认是否新建缺失文件后才能继续。";
+  }
+  if (request.source === "risk_approval") {
+    return "检测到高风险工作区写入，需要你批准后才能继续。";
+  }
+  if (request.source === "mcp_tool_approval") {
+    return "MCP 工具需要你批准后才能执行。";
+  }
+  return "终端正在等待你的选择。";
 }

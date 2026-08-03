@@ -1,6 +1,10 @@
 // 模块说明：维护 workspace 共享类型定义。
 import type { AgentKind, AgentStatus } from "../components/AgentPanel";
-import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
+import type {
+  ChatSession,
+  MessageAttachment,
+  WorkspaceProject,
+} from "../constants/page-constants";
 import type { CommerceProgressEvent, CommerceResearchReport } from "../lib/commerce/types";
 import type { AmazonListingDemoReport } from "../lib/commerce/listing/types";
 
@@ -95,7 +99,77 @@ export interface AgentLifecycleEventPayload {
   sequence?: number;
   detail: string;
   toolName?: string;
+  currentFiles?: string[];
   createdAt: string;
+}
+
+
+export type WorkItemStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface WorkListItemPayload {
+  id: string;
+  title: string;
+  objective: string;
+  acceptanceCriteria: string[];
+  dependencies: string[];
+  priority?: number;
+  targetFiles?: string[];
+  serialGroup?: string;
+  status: WorkItemStatus;
+  attempts: number;
+  summary: string;
+  error: string;
+  changedFiles: string[];
+  commands: string[];
+}
+
+/** Code Agent 执行过程中的 Token 与 Work 状态指标。 */
+export interface ExecutionMetricsPayload {
+  totalTokens: number;
+  activeTokens: number;
+  compressedTokens: number;
+  cleanedTokens: number;
+  completedWorks: number;
+  failedWorks: number;
+  retryCount: number;
+}
+
+/** Patch、验证、回归和质量门的最终审查指标。 */
+export interface ExecutionQualityPayload {
+  changes: number;
+  risk: "low" | "medium" | "high";
+  riskScore: number;
+  validationPassed: boolean;
+  validationExecuted: boolean;
+  regression: boolean;
+  apiContractChanged: boolean;
+  codeGatePassed: boolean;
+}
+
+/** Code Agent 后端提供的 WorkList 唯一真实快照。 */
+export interface WorkListSnapshotPayload {
+  revision: number;
+  reason: string;
+  total: number;
+  pending: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  overallProgress: number;
+  scheduler?: {
+    mode: "dependency_graph" | string;
+    maxParallel: number;
+    activeWorkIds: string[];
+  };
+  metrics?: ExecutionMetricsPayload;
+  quality?: ExecutionQualityPayload;
+  items: WorkListItemPayload[];
 }
 
 export type StreamPacketType =
@@ -105,9 +179,11 @@ export type StreamPacketType =
   | "USAGE"
   | "INTERACTIVE_REQUEST"
   | "AGENT_LIFECYCLE"
+  | "WORKLIST_UPDATE"
   | "COMMERCE_PROGRESS"
   | "COMMERCE_REPORT"
   | "COMMERCE_LISTING"
+  | "MEDIA_RESULT"
   | "AGENT_START"
   | "AGENT_STATUS"
   | "AGENT_PROGRESS"
@@ -120,8 +196,10 @@ export interface StreamPacket {
   payload?:
     | InteractiveRequest
     | AgentLifecycleEventPayload
+    | WorkListSnapshotPayload
     | CommerceProgressEvent
     | CommerceResearchReport
-    | AmazonListingDemoReport;
+    | AmazonListingDemoReport
+    | { content?: string; attachments?: MessageAttachment[] };
   agent?: AgentEventPayload;
 }

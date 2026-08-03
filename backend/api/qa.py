@@ -1,7 +1,9 @@
-"""普通 QA Agent 流式接口。"""
+"""QA Agent 旧导入路径兼容层。
 
-from __future__ import annotations
+新代码请从 ``backend.api.qa`` 导入路由；保留本文件是为了平滑迁移已有扩展。
+"""
 
+<<<<<<< HEAD
 import base64
 import re
 from collections.abc import AsyncIterator
@@ -130,3 +132,8 @@ async def post_qa(body: ChatRequest, request: Request):
 
     preferred = request.headers.get("x-llm-model-id", AUTO_MODEL_ID).strip()
     return create_sse_response(_qa_stream(body=body, request=request, preferred_model_id=preferred))
+=======
+from backend.api.qa import router
+
+__all__ = ["router"]
+>>>>>>> changePython

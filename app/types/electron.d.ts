@@ -12,6 +12,10 @@ interface ElectronUiPreferences {
   selectedChatModel?: string;
   selectedMediaModel?: string;
   builtinPlugins?: Record<string, boolean>;
+<<<<<<< HEAD
+=======
+  codeAgentMode?: "suggest" | "auto_edit" | "full_auto";
+>>>>>>> changePython
 }
 
 interface ElectronWindowControls {
