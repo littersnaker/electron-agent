@@ -30,6 +30,7 @@
     "source:check": "python scripts/check-source-rules.py",
     "electron:launch": "pnpm dev",
     "dev:clean": "python scripts/clean_dev_runtime.py",
+    "models:sync": "python scripts/sync_model_catalog.py",
     "electron:watch": "cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 BACKEND_DEV_URL=http://127.0.0.1:3100 ELECTRON_DEV_STRICT=1 tsx scripts/dev-electron.ts",
     "models:list": "python scripts/show_model_routes.py",
     "planning:test": "tsx scripts/task-planning-progress.test.ts",
