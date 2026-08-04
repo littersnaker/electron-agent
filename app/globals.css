@@ -20,6 +20,15 @@
   --accent-glow: rgba(10, 132, 255, 0.22);
   color-scheme: light;
 }
+
+[data-theme="dark"] {
+  --accent-from: var(--accent-blue-gradient-start);
+  --accent-via: var(--accent-blue);
+  --accent-to: var(--accent-blue-gradient-end);
+  --accent: var(--accent-blue);
+  --accent-glow: var(--accent-blue-glow);
+}
+
 .custom-title-bar{
   /* 可拖拽 */
   -webkit-app-region: drag;
@@ -150,4 +159,112 @@ body {
   padding: 0.15em 0.4em;
   border-radius: 5px;
   font-size: 0.88em;
+}
+
+/* Vite 迁移后由全局样式文件接管原 page.tsx 中的 styled-jsx。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+body {
+  margin: 0;
+  background: var(--app-bg);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.theme-transition {
+  isolation: isolate;
+}
+
+/*
+ * 主题切换期间暂停页面内部大量 transition。
+ * 否则每一张图片外框、玻璃卡片和按钮都会分别参与颜色插值，
+ * 图片较多时会产生大量重绘。真正的视觉动画统一交给根视图快照完成。
+ */
+html.theme-transition-running *,
+html.theme-transition-running *::before,
+html.theme-transition-running *::after {
+  transition-property: none !important;
+}
+
+/*
+ * View Transition 会把旧主题和新主题各保存成一张合成层快照。
+ * 只裁切新主题快照即可形成圆弧扩散效果，避免逐个重绘聊天图片。
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2;
+}
+
+html[data-theme-transition="to-dark"]::view-transition-new(root) {
+  animation: theme-reveal-from-top-left 560ms cubic-bezier(0.22, 0.82, 0.2, 1) both;
+}
+
+html[data-theme-transition="to-light"]::view-transition-new(root) {
+  animation: theme-reveal-from-bottom-right 560ms cubic-bezier(0.22, 0.82, 0.2, 1) both;
+}
+
+@keyframes theme-reveal-from-top-left {
+  from {
+    clip-path: circle(0 at 0 0);
+  }
+  to {
+    clip-path: circle(150vmax at 0 0);
+  }
+}
+
+@keyframes theme-reveal-from-bottom-right {
+  from {
+    clip-path: circle(0 at 100% 100%);
+  }
+  to {
+    clip-path: circle(150vmax at 100% 100%);
+  }
+}
+
+/* 隔离媒体卡片的绘制区域，减少主题切换和滚动时的大面积重绘。 */
+.message-media-card {
+  contain: paint style;
+}
+
+.message-media {
+  backface-visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 1ms !important;
+  }
 }

@@ -35,16 +35,16 @@ function SessionGlyph({
   const isMedia = sessionMode === "qa" && isMediaMode(composerMode);
 
   const background = isCode
-    ? "rgba(10,132,255,0.13)"
+    ? "var(--accent-blue-soft-strong)"
     : isCommerce
-      ? "rgba(10,132,255,0.13)"
+      ? "var(--accent-blue-soft-strong)"
       : isMedia
         ? "rgba(191,90,242,0.14)"
         : "rgba(191,90,242,0.12)";
   const color = isCode
-    ? "#64b5ff"
+    ? "var(--accent-blue-hover)"
     : isCommerce
-      ? "#64b5ff"
+      ? "var(--accent-blue-hover)"
       : isMedia
         ? "#bf5af2"
         : "#d6a5ff";
@@ -90,8 +90,8 @@ function resolveHeaderText(
 
   if (activeSession?.mode === "commerce") {
     return {
-      title: "Cross-border Market Intelligence Agent",
-      subtitle: "公开市场研究 · 多来源覆盖 · PDF 情报报告",
+      title: "Commerce Agent",
+      subtitle: "市场研究 · Amazon Listing Demo · 多来源数据",
     };
   }
 

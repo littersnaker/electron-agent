@@ -1,0 +1,14 @@
+id: commerce
+name: Commerce Agent
+adapter: commerce_agent
+planner: commerce_workflow
+skills:
+  - commerce-agent
+tools: []
+memory:
+  - episodic
+  - semantic
+  - task
+output_schema: sse_stream
+metadata:
+  migration: runtime_native

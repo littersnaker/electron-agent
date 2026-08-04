@@ -103,7 +103,7 @@ export default function WindowControls() {
         type="button"
         aria-label="最小化窗口"
         onClick={() => controls.minimize()}
-        className={`${commonButtonClass} hover:bg-[var(--glass-hover)]`}
+        className={`${commonButtonClass} hover:bg-(--glass-hover) cursor-pointer`}
       >
         <MinimizeIcon />
       </button>
@@ -111,7 +111,7 @@ export default function WindowControls() {
         type="button"
         aria-label={maximized ? "还原窗口" : "最大化窗口"}
         onClick={() => void controls.toggleMaximize()}
-        className={`${commonButtonClass} border-l hover:bg-[var(--glass-hover)]`}
+        className={`${commonButtonClass} border-l hover:bg-(--glass-hover) cursor-pointer`}
         style={{ borderColor: "var(--border)" }}
       >
         <MaximizeIcon maximized={maximized} />
@@ -120,7 +120,7 @@ export default function WindowControls() {
         type="button"
         aria-label="关闭窗口"
         onClick={() => controls.close()}
-        className={`${commonButtonClass} border-l hover:bg-[#ff5f57] hover:text-white`}
+        className={`${commonButtonClass} border-l hover:bg-[#ff5f57] hover:text-white cursor-pointer`}
         style={{ borderColor: "var(--border)" }}
       >
         <CloseIcon />

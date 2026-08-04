@@ -1,7 +1,6 @@
 // 模块说明：负责 ChatSidebar 用户界面组件。
 import type { MouseEvent } from "react";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
-
 interface ChatSidebarProps {
   sessions: ChatSession[];
   projects: WorkspaceProject[];
@@ -9,23 +8,27 @@ interface ChatSidebarProps {
   isStreaming: boolean;
   createQaSession: () => void;
   createCommerceSession: () => void;
+  createMediaSession: () => void;
   createCodeSession: (projectId: string) => void;
   addProject: () => void;
   codePluginEnabled: boolean;
   commercePluginEnabled: boolean;
+  mediaPluginEnabled: boolean;
   onOpenPluginCenter: () => void;
   reindexProject: (projectId: string) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string, event: MouseEvent) => void;
 }
-
 const COLORS = {
   text: "var(--text-primary)",
   textMuted: "var(--text-secondary)",
   textSubtle: "var(--text-tertiary)",
   material: "var(--glass)",
   materialStrong: "var(--glass-hover)",
-  materialHover: "var(--glass-hover)",
+  selection: "var(--selection-bg-strong)",
+  selectionText: "var(--selection-text)",
+  selectionIndicator: "var(--selection-indicator)",
+  selectionShadow: "var(--selection-shadow)",
   border: "var(--border)",
   blue: "var(--accent-blue)",
   green: "var(--accent-green)",
@@ -121,19 +124,16 @@ function SessionItem({
   | "deleteSession"
 > & { session: ChatSession }) {
   const active = session.id === activeSessionId;
-  const activeColor = COLORS.blue;
 
   return (
     <button
       type="button"
       onClick={() => switchSession(session.id)}
-      className="group flex w-full items-center gap-2 rounded-[11px] px-2.5 py-2 text-left transition-all duration-150"
+      className="group flex w-full items-center gap-2 rounded-[11px] px-2.5 py-2 text-left transition-all duration-150 cursor-pointer"
       style={{
-        color: active ? COLORS.text : COLORS.textMuted,
-        background: active ? COLORS.materialHover : "transparent",
-        boxShadow: active
-          ? "inset 0 1px 0 rgba(255,255,255,0.035)"
-          : "none",
+        color: active ? COLORS.selectionText : COLORS.textMuted,
+        background: active ? COLORS.selection : "transparent",
+        boxShadow: active ? COLORS.selectionShadow : "none",
       }}
       onMouseEnter={(event) => {
         if (!active) event.currentTarget.style.background = COLORS.material;
@@ -145,7 +145,9 @@ function SessionItem({
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full transition-colors"
         style={{
-          background: active ? activeColor : "rgba(255,255,255,0.18)",
+          background: active
+            ? COLORS.selectionIndicator
+            : "rgba(255,255,255,0.18)",
         }}
       />
       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
@@ -209,6 +211,9 @@ export default function ChatSidebar(props: ChatSidebarProps) {
   const commerceSessions = props.sessions.filter(
     (session) => session.mode === "commerce",
   );
+  const mediaSessions = props.sessions.filter(
+    (session) => session.mode === "media",
+  );
 
   return (
     <aside
@@ -243,8 +248,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           style={{
             background:
               "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
-            boxShadow:
-              "0 8px 20px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.2)",
+            boxShadow: "var(--primary-button-shadow)",
           }}
         >
           <PlusIcon />
@@ -255,7 +259,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             type="button"
             onClick={props.onOpenPluginCenter}
             disabled={props.isStreaming}
-            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-40"
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-40 cursor-pointer"
             style={{
               background: COLORS.material,
               borderColor: COLORS.border,
@@ -269,7 +273,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             type="button"
             onClick={props.addProject}
             disabled={props.isStreaming || !props.codePluginEnabled}
-            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-35"
+            className="flex h-9 items-center justify-center gap-2 rounded-[11px] border text-[11px] font-medium transition-all active:scale-[0.985] disabled:opacity-35 cursor-pointer"
             style={{
               background: COLORS.material,
               borderColor: COLORS.border,
@@ -304,8 +308,8 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
             style={{
               background:
-                "linear-gradient(145deg, rgba(10,132,255,0.13), rgba(10,132,255,0.045))",
-              borderColor: "rgba(10,132,255,0.20)",
+                "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
+              borderColor: "var(--accent-blue-border)",
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
             }}
             title="新建跨境市场情报研究"
@@ -313,9 +317,9 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             <span
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
               style={{
-                background: "rgba(10,132,255,0.13)",
-                borderColor: "rgba(10,132,255,0.22)",
-                color: "#64b5ff",
+                background: "var(--accent-blue-soft-strong)",
+                borderColor: "var(--accent-blue-border-strong)",
+                color: "var(--accent-blue-hover)",
               }}
             >
               <CommerceIcon className="h-[18px] w-[18px]" />
@@ -336,7 +340,10 @@ export default function ChatSidebar(props: ChatSidebarProps) {
             </span>
             <span
               className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-              style={{ background: "rgba(10,132,255,0.12)", color: "#64b5ff" }}
+              style={{
+                background: "var(--accent-blue-soft-strong)",
+                color: "var(--accent-blue-hover)",
+              }}
             >
               <PlusIcon className="h-3.5 w-3.5" />
             </span>
@@ -358,6 +365,85 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           )}
         </section>
 
+          </>
+        )}
+
+        {props.mediaPluginEnabled && (
+          <>
+            <section className="mb-5">
+              <div
+                className="mb-2 flex items-center justify-between px-2"
+                style={{ color: COLORS.textSubtle }}
+              >
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  <span>🎬</span>
+                  AI 漫剧
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={props.createMediaSession}
+                disabled={props.isStreaming}
+                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
+                style={{
+                  background:
+                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
+                  borderColor: "var(--accent-blue-border)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
+                }}
+                title="新建 AI 漫剧会话"
+              >
+                <span
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border text-[16px]"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    borderColor: "var(--accent-blue-border-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  🎬
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span
+                    className="block text-[12px] font-semibold tracking-[-0.01em]"
+                    style={{ color: COLORS.text }}
+                  >
+                    AI 漫剧工作室
+                  </span>
+                  <span
+                    className="mt-0.5 block truncate text-[9px]"
+                    style={{ color: COLORS.textSubtle }}
+                  >
+                    剧本 → 分镜确认 → 出图 → 视频 → 合并
+                  </span>
+                </span>
+                <span
+                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  <PlusIcon className="h-3.5 w-3.5" />
+                </span>
+              </button>
+
+              {mediaSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  {mediaSessions.map((session) => (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      activeSessionId={props.activeSessionId}
+                      isStreaming={props.isStreaming}
+                      switchSession={props.switchSession}
+                      deleteSession={props.deleteSession}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         )}
 

@@ -149,6 +149,9 @@ export function AssistantMessageRow({
             >
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                urlTransform={(url: string) =>
+                  /^(https?:|data:image\/)/i.test(url) ? url : ""
+                }
                 disallowedElements={[
                   "script",
                   "iframe",
@@ -174,8 +177,11 @@ export function AssistantMessageRow({
         >
           {finalText.trim() ? (
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              disallowedElements={[
+                remarkPlugins={[remarkGfm]}
+                urlTransform={(url: string) =>
+                  /^(https?:|data:image\/)/i.test(url) ? url : ""
+                }
+                disallowedElements={[
                 "script",
                 "iframe",
                 "object",
@@ -200,7 +206,7 @@ export function AssistantMessageRow({
                     target="_blank"
                     rel="noreferrer"
                     className="underline decoration-current/30 underline-offset-4 transition-colors hover:decoration-current/70"
-                    style={{ color: "#64b5ff" }}
+                    style={{ color: "var(--accent-blue-hover)" }}
                   >
                     {children}
                   </a>

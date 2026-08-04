@@ -8,8 +8,6 @@ type ThemeVariables = CSSProperties & Record<`--${string}`, string>;
 export const THEME_STORAGE_KEY = "AGENT_WORKSPACE_THEME_LIGHT_DEFAULT_V2";
 
 const sharedVariables: ThemeVariables = {
-  "--accent-blue": "#0a84ff",
-  "--accent-blue-hover": "#409cff",
   "--accent-purple": "#bf5af2",
   "--accent-green": "#30d158",
   "--accent-red": "#ff453a",
@@ -19,10 +17,19 @@ const sharedVariables: ThemeVariables = {
 
 const darkVariables: ThemeVariables = {
   ...sharedVariables,
+  "--accent-blue": "#a1a1aa",
+  "--accent-blue-hover": "#d4d4d8",
+  "--accent-blue-soft": "rgba(255, 255, 255, 0.075)",
+  "--accent-blue-soft-strong": "rgba(255, 255, 255, 0.12)",
+  "--accent-blue-border": "rgba(255, 255, 255, 0.14)",
+  "--accent-blue-border-strong": "rgba(255, 255, 255, 0.2)",
+  "--accent-blue-glow": "rgba(0, 0, 0, 0.3)",
+  "--accent-blue-gradient-start": "#5c5c63",
+  "--accent-blue-gradient-end": "#3f3f46",
   "--app-bg": "#09090b",
   "--app-bg-secondary": "#111114",
-  "--app-glow-blue": "rgba(10, 132, 255, 0.11)",
-  "--app-glow-purple": "rgba(191, 90, 242, 0.07)",
+  "--app-glow-blue": "rgba(255, 255, 255, 0.028)",
+  "--app-glow-purple": "rgba(255, 255, 255, 0.012)",
   "--text-primary": "#f5f5f7",
   "--text-secondary": "rgba(235, 235, 245, 0.67)",
   "--text-tertiary": "rgba(235, 235, 245, 0.4)",
@@ -33,14 +40,24 @@ const darkVariables: ThemeVariables = {
   "--glass-solid": "rgba(29, 29, 32, 0.96)",
   "--glass-hover": "rgba(255, 255, 255, 0.085)",
   "--glass-active": "rgba(255, 255, 255, 0.11)",
+  "--selection-bg": "rgba(255, 255, 255, 0.085)",
+  "--selection-bg-strong": "rgba(255, 255, 255, 0.13)",
+  "--selection-border": "rgba(255, 255, 255, 0.15)",
+  "--selection-text": "#f5f5f7",
+  "--selection-indicator": "#a1a1aa",
+  "--selection-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.075)",
   "--glass-black": "rgba(0, 0, 0, 0.26)",
   "--border": "rgba(255, 255, 255, 0.085)",
   "--border-strong": "rgba(255, 255, 255, 0.14)",
   "--sidebar-bg": "rgba(20, 20, 23, 0.74)",
   "--titlebar-bg": "rgba(15, 15, 18, 0.78)",
   "--composer-bg": "rgba(28, 28, 31, 0.8)",
-  "--message-user-start": "#168dff",
-  "--message-user-end": "#0879eb",
+  "--message-user-start": "#52525b",
+  "--message-user-end": "#3f3f46",
+  "--message-user-shadow":
+    "0 10px 28px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.12)",
+  "--primary-button-shadow":
+    "0 8px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14)",
   "--shadow-soft": "0 18px 50px rgba(0, 0, 0, 0.22)",
   "--shadow-card": "0 24px 70px rgba(0, 0, 0, 0.34)",
   "--shadow-float": "0 34px 100px rgba(0, 0, 0, 0.48)",
@@ -50,6 +67,15 @@ const darkVariables: ThemeVariables = {
 
 const lightVariables: ThemeVariables = {
   ...sharedVariables,
+  "--accent-blue": "#0a84ff",
+  "--accent-blue-hover": "#409cff",
+  "--accent-blue-soft": "rgba(10, 132, 255, 0.08)",
+  "--accent-blue-soft-strong": "rgba(10, 132, 255, 0.13)",
+  "--accent-blue-border": "rgba(10, 132, 255, 0.2)",
+  "--accent-blue-border-strong": "rgba(10, 132, 255, 0.28)",
+  "--accent-blue-glow": "rgba(10, 132, 255, 0.22)",
+  "--accent-blue-gradient-start": "#168dff",
+  "--accent-blue-gradient-end": "#0071e3",
   "--app-bg": "#eef1f6",
   "--app-bg-secondary": "#f8f9fb",
   "--app-glow-blue": "rgba(10, 132, 255, 0.15)",
@@ -64,6 +90,12 @@ const lightVariables: ThemeVariables = {
   "--glass-solid": "rgba(250, 250, 252, 0.96)",
   "--glass-hover": "rgba(255, 255, 255, 0.82)",
   "--glass-active": "rgba(255, 255, 255, 0.94)",
+  "--selection-bg": "rgba(10, 132, 255, 0.09)",
+  "--selection-bg-strong": "rgba(10, 132, 255, 0.13)",
+  "--selection-border": "rgba(10, 132, 255, 0.28)",
+  "--selection-text": "#0071e3",
+  "--selection-indicator": "#0a84ff",
+  "--selection-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.5)",
   "--glass-black": "rgba(43, 43, 48, 0.055)",
   "--border": "rgba(15, 23, 42, 0.09)",
   "--border-strong": "rgba(15, 23, 42, 0.15)",
@@ -72,6 +104,10 @@ const lightVariables: ThemeVariables = {
   "--composer-bg": "rgba(255, 255, 255, 0.66)",
   "--message-user-start": "#168dff",
   "--message-user-end": "#0071e3",
+  "--message-user-shadow":
+    "0 10px 28px rgba(10, 132, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.18)",
+  "--primary-button-shadow":
+    "0 8px 20px rgba(10, 132, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
   "--shadow-soft": "0 18px 50px rgba(65, 72, 92, 0.1)",
   "--shadow-card": "0 24px 70px rgba(65, 72, 92, 0.15)",
   "--shadow-float": "0 34px 100px rgba(65, 72, 92, 0.2)",
@@ -86,10 +122,14 @@ export function getThemeVariables(theme: ThemeMode): ThemeVariables {
 export function resolveInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
 
+  const electronTheme = window.electronAPI?.initialTheme;
+  if (electronTheme === "dark" || electronTheme === "light") {
+    return electronTheme;
+  }
+
   const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (saved === "dark" || saved === "light") return saved;
 
-  // 新安装和从旧版本升级时统一从浅色启动，用户主动切换后再持久化选择。
   return "light";
 }
 
@@ -100,12 +140,9 @@ export function persistTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
 
-  const electronWindow = window as typeof window & {
-    electronAPI?: {
-      setTheme?: (nextTheme: ThemeMode) => void;
-    };
-  };
-
-  // 同步 Electron 原生标题栏覆盖层。普通浏览器环境中这段会自动跳过。
-  electronWindow.electronAPI?.setTheme?.(theme);
+  // 同步 Electron 原生主题、启动缓存和 SQLite。普通浏览器会自动跳过。
+  const electronRequest = window.electronAPI?.setTheme(theme);
+  void electronRequest?.catch((error: unknown) => {
+    console.warn("Electron 主题持久化失败", error);
+  });
 }

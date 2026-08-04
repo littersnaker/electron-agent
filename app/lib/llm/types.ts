@@ -118,11 +118,18 @@ export interface LlmStreamChunk {
 /** 每个 Provider 的 Key 都是可选的，Auto Router 只使用已配置项。 */
 export type LlmCredentials = Partial<Record<LlmProviderId, string>>;
 
+/** 用户可覆盖 OpenAI-compatible Provider 的 Base URL。 */
+export type LlmEndpointOverrides = Partial<Record<LlmProviderId, string>>;
+
 export interface LlmProviderDefinition {
   id: LlmProviderId;
   name: string;
   environmentKey: string;
   requestHeader: string;
+  /** Renderer 发送 Base URL 覆盖时使用的受限请求头。 */
+  endpointRequestHeader?: string;
+  /** 用于 Electron 持久化和构建时注入的环境变量名。 */
+  endpointEnvironmentKey?: string;
   protocol: "openai-compatible" | "gemini";
   defaultEndpoint?: string;
   placeholder: string;
@@ -143,6 +150,12 @@ export interface LlmModelDefinition {
   speed: number;
   costEfficiency: number;
   enabledByDefault?: boolean;
+  /** false 表示该模型不进入 Auto Router 主候选链。 */
+  autoSelect?: boolean;
+  /** true 表示模型只作为 Auto Router 的后备候选。 */
+  fallbackSelect?: boolean;
+  /** Auto Router 数值越小越优先；最近成功模型仍会临时置顶。 */
+  autoPriority?: number;
   /** false 表示该模型需要独立媒体生成接口，不能进入 Chat/Gateway 路由。 */
   chatCompatible?: boolean;
 }

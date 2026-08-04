@@ -20,8 +20,8 @@ export default function ThemeToggle({
     <button
       type="button"
       onClick={onToggle}
-      className={`theme-toggle group relative flex shrink-0 items-center rounded-full border transition-all duration-300 active:scale-[0.96] ${
-        compact ? "h-8 w-[58px] px-1" : "h-9 w-[66px] px-1.5"
+      className={`theme-toggle group relative cursor-pointer flex shrink-0 items-center rounded-full border transition-all duration-300 active:scale-[0.96] ${
+        compact ? "h-8 w-14.5 px-1" : "h-9 w-16.5 px-1.5"
       }`}
       style={{
         background: "var(--glass)",

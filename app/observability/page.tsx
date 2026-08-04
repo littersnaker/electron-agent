@@ -1,8 +1,8 @@
 // 模块说明：负责 page 页面或应用入口逻辑。
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "../lib/api-client";
 
 interface TraceSummary {
   id: string;
@@ -106,7 +106,7 @@ export default function ObservabilityPage() {
     setLoadingList(true);
     setErrorMessage("");
     try {
-      const response = await fetch("/api/agent/observability?limit=50", {
+      const response = await apiFetch("/api/agent/observability?limit=50", {
         cache: "no-store",
       });
       if (!response.ok) {
@@ -127,7 +127,7 @@ export default function ObservabilityPage() {
     setLoadingDetail(true);
     setErrorMessage("");
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/agent/observability?traceId=${encodeURIComponent(traceId)}`,
         { cache: "no-store" },
       );
@@ -162,12 +162,12 @@ export default function ObservabilityPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link
+            <a
               href="/"
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
             >
               返回工作台
-            </Link>
+            </a>
             <button
               type="button"
               onClick={() => void loadTraces()}

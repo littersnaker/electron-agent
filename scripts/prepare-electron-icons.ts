@@ -1,25 +1,27 @@
-/// <reference types="node" />
-import fs from "fs";
-import path from "path";
+/**
+ * 模块职责：根据 PNG 主图标生成 Windows 安装包需要的 ICO 文件。
+ */
+import fs from "node:fs";
+import path from "node:path";
 import pngToIco from "png-to-ico";
 
-const rootDir = process.cwd();
-const sourcePngPath = path.join(rootDir, "public", "icon.png");
-const targetIcoPath = path.join(rootDir, "public", "icon.ico");
+const rootDirectory = process.cwd();
+const sourcePngPath = path.join(rootDirectory, "public", "icon.png");
+const targetIcoPath = path.join(rootDirectory, "public", "icon.ico");
 
-async function prepareElectronIcons() {
+/**
+ * 检查 PNG 图标并转换为 ICO；转换失败时让构建立即停止。
+ */
+async function prepareElectronIcons(): Promise<void> {
   if (!fs.existsSync(sourcePngPath)) {
-    throw new Error(`未找到图标源文件: ${sourcePngPath}`);
+    throw new Error(`未找到图标源文件：${sourcePngPath}`);
   }
-
   const icoBuffer = await pngToIco(sourcePngPath);
   fs.writeFileSync(targetIcoPath, icoBuffer);
-
-  console.log(`[icons] 已同步 Windows 安装包图标: ${path.relative(rootDir, targetIcoPath)}`);
-  console.log(`[icons] 当前统一图标源: ${path.relative(rootDir, sourcePngPath)}`);
+  console.log(`Windows 图标已生成：${path.relative(rootDirectory, targetIcoPath)}`);
 }
 
-prepareElectronIcons().catch((error) => {
-  console.error("[icons] 图标预处理失败:", error);
+prepareElectronIcons().catch((error: unknown) => {
+  console.error("图标预处理失败：", error);
   process.exit(1);
 });

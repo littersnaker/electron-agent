@@ -1,37 +1,38 @@
 "use client";
 /**
  * 模块职责：聊天流式请求、SSE 消费和会话状态协调。
- * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toMessageAttachments } from "../../constants/page-constants";
 import type { AttachedFile, Message } from "../../constants/page-constants";
 import { buildRetrievedAttachment } from "../../lib/rag/attachment-rag";
-import {
-  buildImageAttachmentsPayload,
-  buildLlmRequestHeaders,
-} from "../../lib/llm/client-request";
+import { buildImageAttachmentsPayload, buildLlmRequestHeaders } from "../../lib/llm/client-request";
+import { apiFetch } from "../../lib/api-client";
 import type {
   AgentLifecycleEventPayload,
   InteractiveRequest,
   StreamPacket,
   TokenInfo,
   ToolActivity,
+  WorkListSnapshotPayload,
 } from "../../types/workspace";
 import { inferAgentKind, MAX_CONTEXT_MESSAGES } from "../../utilities/agent-runtime";
 import {
+  applyInteractiveRequestAgents,
+  buildInteractiveReplyPrompt,
   buildRequestUserContent,
   buildVisibleUserContent,
+  describeWorkListSnapshot,
   isAgentLifecyclePayload,
   isInteractiveRequestPayload,
+  isMediaResultPayload,
+  isWorkListSnapshotPayload,
+  interactiveWaitingMessage,
   readResponseError,
   validateCodeWorkspace,
 } from "./chat-stream-helpers";
-import type {
-  SubmitPromptOptions,
-  UseChatStreamOptions,
-} from "./chat-stream-helpers";
-
+import type { SubmitPromptOptions, UseChatStreamOptions } from "./chat-stream-helpers";
+import { useChatCheckpointBinding } from "./chat-checkpoint-binding";
 export function useChatStream({
   activeSession,
   activeProject,
@@ -40,7 +41,9 @@ export function useChatStream({
   setSessions,
   persistSession,
   apiKeys,
+  endpointOverrides,
   selectedModel,
+  codeAgentMode,
   attachedFiles,
   isParsingFile,
   clearAfterSubmit,
@@ -50,34 +53,30 @@ export function useChatStream({
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [agentStatus, setAgentStatus] = useState("");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
-  const [agentLifecycleEvents, setAgentLifecycleEvents] = useState<
-    AgentLifecycleEventPayload[]
-  >([]);
-  const [interactiveRequest, setInteractiveRequest] =
-    useState<InteractiveRequest | null>(null);
+  const [agentLifecycleEvents, setAgentLifecycleEvents] =
+    useState<AgentLifecycleEventPayload[]>([]);
+  const [workListSnapshot, setWorkListSnapshot] =
+    useState<WorkListSnapshotPayload | null>(null);
+  const [interactiveRequest, setInteractiveRequest] = useState<InteractiveRequest | null>(null);
   const [interactiveAnswer, setInteractiveAnswer] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const finalTextRef = useRef("");
-  /** 一旦收到真实 lifecycle，就不再用 STATUS/TOOL_STATUS 文案反推 Agent。 */
+  const mediaAttachmentsRef = useRef<Message["attachments"] | undefined>(undefined);
   const hasLifecycleRef = useRef(false);
-
-  // Effect 只负责组件卸载清理，不在 Effect 中同步 setState。
+  const checkpointBinding = useChatCheckpointBinding();
   useEffect(() => () => abortRef.current?.abort(), []);
-
-  const stop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
-
+  const stop = useCallback(() => abortRef.current?.abort(), []);
   const resetTransient = useCallback(() => {
     setToolActivities([]);
     setAgentStatus("");
     setTokenInfo(null);
     setAgentLifecycleEvents([]);
+    setWorkListSnapshot(null);
     setInteractiveRequest(null);
     setInteractiveAnswer("");
+    mediaAttachmentsRef.current = undefined;
     hasLifecycleRef.current = false;
   }, []);
-
   const submitPrompt = useCallback(
     async (
       promptText: string,
@@ -87,25 +86,26 @@ export function useChatStream({
       if (!activeSession || isStreaming || isParsingFile) return;
       // Commerce 会话必须走独立 /api/commerce/research，禁止意外落入 QA Route。
       if (activeSession.mode === "commerce") return;
-
       const prompt = promptText.trim();
       if (!prompt && fileOverride.length === 0) return;
-
       const visibleUserContent = buildVisibleUserContent(prompt, fileOverride);
+      checkpointBinding.capture(options);
       const visibleAttachments = toMessageAttachments(fileOverride);
       const suppressVisibleUserMessage =
         options.suppressVisibleUserMessage === true;
-      const visibleBaseMessages =
-        suppressVisibleUserMessage &&
-        interactiveRequest &&
-        messages[messages.length - 1]?.role === "assistant"
+      const resumeExistingRun = options.resumeExistingRun === true;
+      const lastMessage = messages[messages.length - 1];
+      const visibleBaseMessages = resumeExistingRun && lastMessage?.role === "assistant"
+        ? messages.slice(0, -1)
+        : suppressVisibleUserMessage &&
+            interactiveRequest &&
+            lastMessage?.role === "assistant"
           ? messages.slice(0, -1)
           : messages;
       const workspaceError = validateCodeWorkspace(
         activeSession,
         activeProject,
       );
-
       if (workspaceError) {
         const visibleErrorUserMessage: Message[] = suppressVisibleUserMessage
           ? []
@@ -131,7 +131,6 @@ export function useChatStream({
           title,
           messages: errorHistory,
         };
-
         setMessages(errorHistory);
         setSessions((current) =>
           current.map((session) =>
@@ -140,9 +139,9 @@ export function useChatStream({
         );
         void persistSession(activeSession, errorHistory, title);
         clearAfterSubmit();
+        await options.onCheckpointFinish?.({ status: "failed", error: workspaceError });
         return;
       }
-
       /**
        * RAG 只在提交瞬间执行一次。
        * 页面输入变化不会反复切片或检索，原始附件也不会被修改。
@@ -151,9 +150,10 @@ export function useChatStream({
         buildRetrievedAttachment(attachment, prompt),
       ).filter((attachment): attachment is AttachedFile => Boolean(attachment));
       const requestUserContent = buildRequestUserContent(prompt, retrievedFiles);
-      const visibleUserMessages: Message[] = suppressVisibleUserMessage
-        ? []
-        : [
+      const visibleUserMessages: Message[] =
+        suppressVisibleUserMessage || resumeExistingRun
+          ? []
+          : [
             {
               role: "user",
               content: visibleUserContent,
@@ -165,11 +165,13 @@ export function useChatStream({
         ...visibleUserMessages,
         { role: "assistant", content: "" },
       ];
-      const requestMessages = [
-        ...messages.map(({ role, content }) => ({ role, content })),
-        { role: "user" as const, content: requestUserContent },
-      ];
-      const title = suppressVisibleUserMessage
+      const requestMessages = resumeExistingRun
+        ? visibleBaseMessages.map(({ role, content }) => ({ role, content }))
+        : [
+            ...messages.map(({ role, content }) => ({ role, content })),
+            { role: "user" as const, content: requestUserContent },
+          ];
+      const title = suppressVisibleUserMessage || resumeExistingRun
         ? activeSession.title
         : activeSession.title === "新对话"
           ? prompt.slice(0, 18) || fileOverride[0]?.name || "新对话"
@@ -179,7 +181,6 @@ export function useChatStream({
         title,
         messages: visibleHistory,
       };
-
       setSessions((current) =>
         current.map((session) =>
           session.id === activeSession.id ? optimisticSession : session,
@@ -188,7 +189,6 @@ export function useChatStream({
       setMessages(visibleHistory);
       void persistSession(activeSession, visibleHistory, title);
       clearAfterSubmit();
-
       setIsStreaming(true);
       setToolActivities([]);
       agents.beginRun();
@@ -199,54 +199,66 @@ export function useChatStream({
       );
       setTokenInfo(null);
       setAgentLifecycleEvents([]);
+    setWorkListSnapshot(null);
       hasLifecycleRef.current = false;
       setInteractiveAnswer("");
-
       let nextInteractiveRequest: InteractiveRequest | null = null;
+      let checkpointResult: import("../../types/checkpoints").CheckpointFinishResult = {
+        status: "completed",
+      };
       finalTextRef.current = "";
       const abortController = new AbortController();
       abortRef.current = abortController;
-
+      const requestModel = options.modelOverride || selectedModel;
       try {
-        const response = await fetch(
-          activeSession.mode === "code" ? "/api/chat" : "/api/qa",
+        const endpoint =
+          activeSession.mode === "code"
+            ? "/api/chat"
+            : activeSession.mode === "media"
+              ? "/api/media/chat"
+              : "/api/qa";
+        const response = await apiFetch(
+          endpoint,
           {
             method: "POST",
-            headers: buildLlmRequestHeaders(apiKeys, selectedModel),
+            headers: buildLlmRequestHeaders(
+              apiKeys,
+              requestModel,
+              endpointOverrides,
+            ),
             body: JSON.stringify({
               messages: requestMessages.slice(-MAX_CONTEXT_MESSAGES),
               attachments: buildImageAttachmentsPayload(fileOverride),
               sessionId: activeSession.id,
               workingDir: activeProject?.rootPath || "",
               projectId: activeProject?.id || "",
+              selectedModel: requestModel,
+              agentMode: activeSession.mode === "code"
+                ? options.codeAgentModeOverride || codeAgentMode
+                : undefined,
+              checkpointId: options.checkpointId || "",
+              resumeCheckpointId: options.resumeCheckpointId || "",
             }),
             signal: abortController.signal,
           },
         );
-
         if (!response.ok || !response.body) {
           throw new Error(await readResponseError(response));
         }
-
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || "";
-
           for (const line of lines) {
             if (!line.startsWith("data:")) continue;
-
             try {
               const packet = JSON.parse(line.slice(5).trim()) as StreamPacket;
               const streamContent = packet.content;
-
               if (packet.type === "TEXT" && typeof streamContent === "string") {
                 finalTextRef.current += streamContent;
                 setAgentStatus("");
@@ -257,7 +269,6 @@ export function useChatStream({
                 ]);
                 continue;
               }
-
               if (
                 packet.type === "TOOL_STATUS" &&
                 typeof streamContent === "string"
@@ -294,7 +305,6 @@ export function useChatStream({
                 });
                 continue;
               }
-
               if (
                 packet.type === "STATUS" &&
                 typeof streamContent === "string" &&
@@ -309,7 +319,14 @@ export function useChatStream({
                 }
                 continue;
               }
-
+              if (
+                packet.type === "WORKLIST_UPDATE" &&
+                isWorkListSnapshotPayload(packet.payload)
+              ) {
+                setWorkListSnapshot(packet.payload);
+                setAgentStatus(describeWorkListSnapshot(packet.payload));
+                continue;
+              }
               if (
                 packet.type === "AGENT_LIFECYCLE" &&
                 isAgentLifecyclePayload(packet.payload)
@@ -329,7 +346,6 @@ export function useChatStream({
                 );
                 continue;
               }
-
               if (
                 packet.type === "AGENT_START" ||
                 packet.type === "AGENT_STATUS" ||
@@ -344,7 +360,6 @@ export function useChatStream({
                 );
                 continue;
               }
-
               if (
                 packet.type === "USAGE" &&
                 streamContent &&
@@ -353,7 +368,6 @@ export function useChatStream({
                 setTokenInfo(streamContent);
                 continue;
               }
-
               if (
                 packet.type === "INTERACTIVE_REQUEST" &&
                 isInteractiveRequestPayload(packet.payload)
@@ -361,28 +375,16 @@ export function useChatStream({
                 nextInteractiveRequest = packet.payload;
                 setInteractiveRequest(packet.payload);
                 setInteractiveAnswer("");
-                if (packet.payload.source === "file_create_confirmation") {
-                  agents.updateAgent("orchestrator", {
-                    status: "running",
-                    progress: 38,
-                    currentTask: "等待确认是否新建缺失文件",
-                  });
-                } else if (
-                  packet.payload.source === "risk_approval" ||
-                  packet.payload.source === "mcp_tool_approval"
-                ) {
-                  agents.updateAgent("orchestrator", {
-                    status: "running",
-                    progress: 70,
-                    currentTask: "等待用户批准高风险操作",
-                  });
-                } else {
-                  agents.updateAgent("terminal", {
-                    status: "running",
-                    progress: 72,
-                    currentTask: "等待用户提供终端交互输入",
-                  });
+                applyInteractiveRequestAgents(packet.payload, agents);
+              }
+              if (
+                packet.type === "MEDIA_RESULT" &&
+                isMediaResultPayload(packet)
+              ) {
+                if (packet.content) {
+                  finalTextRef.current ||= packet.content;
                 }
+                mediaAttachmentsRef.current = packet.attachments;
               }
             } catch {
               // 忽略不完整的 SSE 帧，等待下一段数据补齐。
@@ -390,7 +392,14 @@ export function useChatStream({
           }
         }
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
+        const aborted = error instanceof DOMException && error.name === "AbortError";
+        checkpointResult = aborted
+          ? { status: "interrupted", error: "用户停止或应用中断" }
+          : {
+              status: "failed",
+              error: error instanceof Error ? error.message : "模型请求失败",
+            };
+        if (!aborted) {
           const message =
             error instanceof Error ? error.message : "模型请求失败";
           finalTextRef.current ||= `⚠️ ${message}`;
@@ -420,28 +429,24 @@ export function useChatStream({
           ),
         );
         agents.finalizeAgents(nextInteractiveRequest);
-
-        const waitingMessage =
-          nextInteractiveRequest?.source === "file_create_confirmation"
-            ? "需要你确认是否新建缺失文件后才能继续。"
-            : nextInteractiveRequest?.source === "risk_approval"
-              ? "检测到高风险工作区写入，需要你批准后才能继续。"
-              : nextInteractiveRequest?.source === "mcp_tool_approval"
-                ? "MCP 工具需要你批准后才能执行。"
-                : "终端正在等待你的选择。";
         const answer =
           finalTextRef.current ||
-          (nextInteractiveRequest ? waitingMessage : "已停止生成。");
+          (nextInteractiveRequest
+            ? interactiveWaitingMessage(nextInteractiveRequest)
+            : "已停止生成。");
         const finalHistory: Message[] = [
           ...visibleHistory.slice(0, -1),
-          { role: "assistant", content: answer },
+          {
+            role: "assistant",
+            content: answer,
+            attachments: mediaAttachmentsRef.current,
+          },
         ];
         const finalSession = {
           ...activeSession,
           title,
           messages: finalHistory,
         };
-
         setMessages(finalHistory);
         setSessions((current) =>
           current.map((session) =>
@@ -449,11 +454,13 @@ export function useChatStream({
           ),
         );
         void persistSession(activeSession, finalHistory, title);
-
         abortRef.current = null;
         setIsStreaming(false);
         setAgentStatus("");
         setInteractiveRequest(nextInteractiveRequest);
+        await checkpointBinding.finalize(
+          options, checkpointResult, answer, Boolean(nextInteractiveRequest),
+        );
       }
     },
     [
@@ -462,49 +469,47 @@ export function useChatStream({
       agents,
       apiKeys,
       attachedFiles,
+      checkpointBinding,
       clearAfterSubmit,
+      endpointOverrides,
       isParsingFile,
       isStreaming,
       interactiveRequest,
       messages,
       persistSession,
       selectedModel,
+      codeAgentMode,
       setMessages,
       setSessions,
     ],
   );
-
   const handleInteractiveReply = useCallback(
     async (mode: "auto" | "llm" | "user", answer?: string) => {
       if (!interactiveRequest || isStreaming) return;
-
-      const normalizedAnswer =
-        mode === "user"
-          ? (answer ?? interactiveAnswer).replace(/\r?\n/g, "")
-          : answer;
-      const prompt = [
-        `[INTERACTIVE_REPLY] id=${interactiveRequest.id} mode=${mode}`,
-        mode === "user"
-          ? `answer=${normalizedAnswer === "" ? "__ENTER__" : normalizedAnswer}`
-          : normalizedAnswer
-            ? `answer=${normalizedAnswer}`
-            : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-
+      const prompt = buildInteractiveReplyPrompt(
+        interactiveRequest,
+        mode,
+        interactiveAnswer,
+        answer,
+      );
       setInteractiveAnswer("");
-      await submitPrompt(prompt, [], { suppressVisibleUserMessage: true });
+      await submitPrompt(prompt, [], checkpointBinding.replyOptions());
     },
-    [interactiveAnswer, interactiveRequest, isStreaming, submitPrompt],
+    [
+      checkpointBinding,
+      interactiveAnswer,
+      interactiveRequest,
+      isStreaming,
+      submitPrompt,
+    ],
   );
-
   return {
     isStreaming,
     toolActivities,
     agentStatus,
     tokenInfo,
     agentLifecycleEvents,
+    workListSnapshot,
     interactiveRequest,
     interactiveAnswer,
     setInteractiveAnswer,
@@ -514,5 +519,4 @@ export function useChatStream({
     resetTransient,
   };
 }
-
 export type ChatStreamController = ReturnType<typeof useChatStream>;

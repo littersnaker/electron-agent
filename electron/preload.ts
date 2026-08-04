@@ -1,32 +1,61 @@
+/**
+ * 模块职责：通过 contextBridge 向 React 暴露最小化的安全 Electron API。
+ */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-
-type AppTheme = "dark" | "light";
+import type { AppTheme, AppUiPreferences } from "./app-preferences";
 
 type MaximizedChangeListener = (maximized: boolean) => void;
+type CredentialStore = Record<string, string>;
+
+/** 从 Electron additionalArguments 中读取指定参数。 */
+function readAdditionalArgument(prefix: string): string {
+  const argument = process.argv.find((item) => item.startsWith(prefix));
+  return argument ? argument.slice(prefix.length) : "";
+}
+
+/** 读取 FastAPI 地址。 */
+function readBackendBaseUrl(): string {
+  return readAdditionalArgument("--backend-url=");
+}
+
+/** 读取主进程在页面加载前确定的主题。 */
+function readInitialTheme(): AppTheme {
+  return readAdditionalArgument("--app-theme=") === "dark" ? "dark" : "light";
+}
 
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
+  backendBaseUrl: readBackendBaseUrl(),
+  initialTheme: readInitialTheme(),
   selectFolder: () => ipcRenderer.invoke("dialog:openDirectory"),
-  /** 将 Commerce Agent 生成的打印 HTML 交给主进程导出为真实 PDF。 */
   exportCommerceReportPdf: (payload: {
     html: string;
     suggestedFileName: string;
   }) => ipcRenderer.invoke("commerce:exportPdf", payload),
-  setTheme: (theme: AppTheme) => ipcRenderer.send("window:setTheme", theme),
+  setTheme: (theme: AppTheme) => ipcRenderer.invoke("window:setTheme", theme),
+  credentials: {
+    read: (): Promise<CredentialStore> => ipcRenderer.invoke("credentials:read"),
+    write: (values: CredentialStore): Promise<CredentialStore> =>
+      ipcRenderer.invoke("credentials:write", values),
+  },
+  preferences: {
+    read: (): Promise<AppUiPreferences> =>
+      ipcRenderer.invoke("preferences:read"),
+    write: (values: AppUiPreferences): Promise<AppUiPreferences> =>
+      ipcRenderer.invoke("preferences:write", values),
+  },
   windowControls: {
     minimize: () => ipcRenderer.send("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
     close: () => ipcRenderer.send("window:close"),
     isMaximized: () => ipcRenderer.invoke("window:isMaximized"),
     onMaximizedChange: (callback: MaximizedChangeListener) => {
-      const listener = (_event: IpcRendererEvent, maximized: boolean) => {
+      const listener = (_event: IpcRendererEvent, maximized: boolean): void => {
         callback(maximized);
       };
-
       ipcRenderer.on("window:maximized-changed", listener);
-      return () => {
+      return () =>
         ipcRenderer.removeListener("window:maximized-changed", listener);
-      };
     },
   },
   versions: {

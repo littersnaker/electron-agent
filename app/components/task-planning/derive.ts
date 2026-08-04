@@ -1,5 +1,8 @@
 // 模块说明：负责 derive 用户界面组件。
-import type { AgentLifecycleEventPayload } from "../../types/workspace";
+import type {
+  AgentLifecycleEventPayload,
+  WorkListSnapshotPayload,
+} from "../../types/workspace";
 import type { ToolActivity } from "../AssistantMessageRow";
 import type { AgentInstance } from "../AgentPanel";
 import type {
@@ -9,9 +12,23 @@ import type {
   PlanningSummary,
 } from "./types";
 
-function matchesActivity(activity: ToolActivity, keys: string[]): boolean {
+function matchesActivity(
+  activity: ToolActivity,
+  definition: PlanningStageDefinition,
+): boolean {
+  // Commerce 进度事件携带稳定 stageId 时优先精确匹配，不再依赖中文文案猜测。
+  if (
+    activity.stageId &&
+    definition.activityStageIds?.includes(activity.stageId)
+  ) {
+    return true;
+  }
+
+  // 旧会话、媒体任务和 Code Agent 继续使用兼容性的文案关键字匹配。
   const normalized = activity.label.toLocaleLowerCase();
-  return keys.some((key) => normalized.includes(key.toLocaleLowerCase()));
+  return definition.activityKeys.some((key) =>
+    normalized.includes(key.toLocaleLowerCase()),
+  );
 }
 
 function resolveDirectStatus(
@@ -23,7 +40,7 @@ function resolveDirectStatus(
     definition.agentTypes.includes(agent.type),
   );
   const relatedActivities = activities.filter((activity) =>
-    matchesActivity(activity, definition.activityKeys),
+    matchesActivity(activity, definition),
   );
 
   if (
@@ -131,14 +148,16 @@ function lifecycleStatusToPlanningStatus(
   [...events].sort(compareLifecycleEvents).forEach((event) => {
     latestByAgent.set(event.agentId, event);
   });
-  const statuses = Array.from(latestByAgent.values()).map(
-    (event) => event.status,
+  const statuses = Array.from(latestByAgent.values()).map((event) =>
+    event.status.toUpperCase(),
   );
 
-  if (statuses.some((status) => status === "FAILED")) return "error";
+  if (statuses.some((status) => ["FAILED", "ERROR"].includes(status))) {
+    return "error";
+  }
   if (
     statuses.some(
-      (status) => status !== "COMPLETED" && status !== "FAILED",
+      (status) => !["COMPLETED", "FAILED", "ERROR"].includes(status),
     )
   ) {
     return "active";
@@ -202,7 +221,7 @@ function buildLifecycleStages(
             : 0,
       detail,
       activityCount: activities.filter((activity) =>
-        matchesActivity(activity, definition.activityKeys),
+        matchesActivity(activity, definition),
       ).length,
       iteration,
     };
@@ -214,7 +233,7 @@ function resolveProgress(
   definition: PlanningStageDefinition,
   agents: AgentInstance[],
 ): number {
-  if (status === "completed" || status === "error") return 100;
+  if (["completed", "skipped", "error"].includes(status)) return 100;
   if (status === "idle" || status === "queued") return 0;
 
   const relatedProgress = agents
@@ -237,9 +256,9 @@ function resolveDetail(
   agentStatus?: string,
 ): string {
   const latestActivity = [...activities]
-    .filter((activity) => matchesActivity(activity, definition.activityKeys))
+    .filter((activity) => matchesActivity(activity, definition))
     .sort((left, right) => right.startedAt - left.startedAt)[0];
-  if (latestActivity) return latestActivity.label;
+  if (latestActivity) return latestActivity.detail || latestActivity.label;
 
   const activeTask = agents
     .filter((agent) => definition.agentTypes.includes(agent.type))
@@ -248,6 +267,67 @@ function resolveDetail(
   if (activeTask) return activeTask;
   if (status === "active" && agentStatus?.trim()) return agentStatus.trim();
   return definition.description;
+}
+
+/**
+ * 判断当前一轮任务是否已经真正结束。
+ *
+ * 这里不能只看 isStreaming：交互确认弹窗出现时 SSE 已结束，但 Agent 仍处于
+ * running 状态，流程并没有完成。只有存在本轮执行痕迹、没有运行中节点且没有
+ * 错误时，才把未触发阶段收束为 skipped。
+ */
+function isSuccessfulTerminalRun(
+  agents: AgentInstance[],
+  activities: ToolActivity[],
+  lifecycleEvents: AgentLifecycleEventPayload[],
+  isStreaming: boolean,
+): boolean {
+  if (isStreaming) return false;
+
+  const hasRunEvidence =
+    agents.some((agent) => ["completed", "error"].includes(agent.status)) ||
+    activities.length > 0 ||
+    lifecycleEvents.length > 0;
+  const hasRunningWork =
+    agents.some((agent) => ["running", "thinking"].includes(agent.status)) ||
+    activities.some((activity) => activity.status === "running");
+  const hasFailure =
+    agents.some((agent) => agent.status === "error") ||
+    activities.some((activity) => activity.status === "error") ||
+    lifecycleEvents.some((event) =>
+      ["FAILED", "ERROR"].includes(event.status.toUpperCase()),
+    );
+
+  return hasRunEvidence && !hasRunningWork && !hasFailure;
+}
+
+/**
+ * 成功结束后，把本轮没有触发的可选阶段标记为“已跳过”。
+ *
+ * 普通问答通常只需要 Orchestrator，不会运行代码修改、工程验证等阶段。旧逻辑
+ * 仍把这些阶段保留为 queued/idle，最终只显示 3/8（38%）。使用 skipped 后，
+ * 既能保持“这些步骤没有执行”的事实，也能让整轮任务正确收束到 100%。
+ */
+function finalizeSuccessfulStages(
+  stages: PlanningStageView[],
+  agents: AgentInstance[],
+  activities: ToolActivity[],
+  lifecycleEvents: AgentLifecycleEventPayload[],
+  isStreaming: boolean,
+): PlanningStageView[] {
+  if (!isSuccessfulTerminalRun(agents, activities, lifecycleEvents, isStreaming)) {
+    return stages;
+  }
+
+  return stages.map((stage) => {
+    if (stage.status === "completed") return stage;
+    return {
+      ...stage,
+      status: "skipped" as const,
+      progress: 100,
+      detail: `本轮未触发“${stage.title}”，任务结束时已自动跳过`,
+    };
+  });
 }
 
 /**
@@ -270,14 +350,21 @@ export function buildPlanningStages(
     lifecycleEvents,
     isStreaming,
   );
-  if (lifecycleStages) return lifecycleStages;
+  if (lifecycleStages) {
+    return finalizeSuccessfulStages(
+      lifecycleStages,
+      agents,
+      activities,
+      lifecycleEvents,
+      isStreaming,
+    );
+  }
 
   const directStatuses = definitions.map((definition) =>
     resolveDirectStatus(definition, agents, activities),
   );
   const statuses = normalizeFallbackStatuses(directStatuses, isStreaming);
-
-  return definitions.map((definition, index) => ({
+  const fallbackStages = definitions.map((definition, index) => ({
     ...definition,
     status: statuses[index],
     progress: resolveProgress(statuses[index], definition, agents),
@@ -289,10 +376,18 @@ export function buildPlanningStages(
       agentStatus,
     ),
     activityCount: activities.filter((activity) =>
-      matchesActivity(activity, definition.activityKeys),
+      matchesActivity(activity, definition),
     ).length,
     iteration: 0,
   }));
+
+  return finalizeSuccessfulStages(
+    fallbackStages,
+    agents,
+    activities,
+    lifecycleEvents,
+    isStreaming,
+  );
 }
 
 export function buildPlanningSummary(
@@ -300,11 +395,39 @@ export function buildPlanningSummary(
 ): PlanningSummary {
   return {
     active: stages.find((stage) => stage.status === "active"),
-    completed: stages.filter((stage) => stage.status === "completed").length,
+    completed: stages.filter((stage) =>
+      ["completed", "skipped"].includes(stage.status),
+    ).length,
+    skipped: stages.filter((stage) => stage.status === "skipped").length,
     failed: stages.some((stage) => stage.status === "error"),
     overallProgress: Math.round(
       stages.reduce((total, stage) => total + stage.progress, 0) /
         Math.max(stages.length, 1),
+    ),
+  };
+}
+/**
+ * 从后端完整 WorkList 快照重新计算真实进度。
+ * 不直接信任传入百分比，避免旧后端或乱序 SSE 让右侧进度倒退/虚高。
+ */
+export function buildWorkListProgress(snapshot: WorkListSnapshotPayload | null) {
+  if (!snapshot || snapshot.total <= 0) return null;
+  const finished = snapshot.items.filter((item) =>
+    ["succeeded", "skipped"].includes(item.status),
+  ).length;
+  const failed = snapshot.items.filter((item) => item.status === "failed").length;
+  const runningItems = snapshot.items.filter((item) => item.status === "running");
+  const running = runningItems[0];
+  return {
+    finished,
+    total: snapshot.items.length,
+    failed,
+    running,
+    runningItems,
+    activeWorkIds: snapshot.scheduler?.activeWorkIds || runningItems.map((item) => item.id),
+    maxParallel: snapshot.scheduler?.maxParallel || 1,
+    overallProgress: Math.round(
+      (finished / Math.max(snapshot.items.length, 1)) * 100,
     ),
   };
 }

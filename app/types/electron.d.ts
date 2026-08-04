@@ -8,6 +8,13 @@ interface CommercePdfPayload {
   suggestedFileName: string;
 }
 
+interface ElectronUiPreferences {
+  selectedChatModel?: string;
+  selectedMediaModel?: string;
+  builtinPlugins?: Record<string, boolean>;
+  codeAgentMode?: "suggest" | "auto_edit" | "full_auto";
+}
+
 interface ElectronWindowControls {
   minimize: () => void;
   toggleMaximize: () => Promise<boolean>;
@@ -16,15 +23,29 @@ interface ElectronWindowControls {
   onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
 }
 
+interface ElectronCredentialApi {
+  read: () => Promise<Record<string, string>>;
+  write: (values: Record<string, string>) => Promise<Record<string, string>>;
+}
+
+interface ElectronPreferenceApi {
+  read: () => Promise<ElectronUiPreferences>;
+  write: (values: ElectronUiPreferences) => Promise<ElectronUiPreferences>;
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       platform: string;
+      backendBaseUrl: string;
+      initialTheme: ElectronAppTheme;
       selectFolder: () => Promise<string | null>;
       exportCommerceReportPdf: (
         payload: CommercePdfPayload,
       ) => Promise<{ canceled: boolean; filePath?: string }>;
-      setTheme: (theme: ElectronAppTheme) => void;
+      setTheme: (theme: ElectronAppTheme) => Promise<ElectronAppTheme>;
+      credentials: ElectronCredentialApi;
+      preferences: ElectronPreferenceApi;
       versions: {
         node: string;
         chrome: string;

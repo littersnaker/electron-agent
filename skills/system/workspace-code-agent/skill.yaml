@@ -1,0 +1,31 @@
+id: workspace-code-agent
+name: Workspace Code Agent
+version: 1.0.0
+description: 在真实项目文件上执行搜索、分析、修改和验证。
+prompt:
+  file: prompt.md
+tools:
+  - workspace.search
+  - workspace.read
+  - code.inspect
+  - workspace.edit
+  - workspace.filesystem
+  - workspace.run
+  - software_factory.plan
+  - software_factory.generate
+  - software_factory.validate
+memory:
+  - project
+  - task
+permissions:
+  filesystem:
+    read: true
+    write: true
+  shell:
+    execute: true
+requires_reasoning: true
+tags:
+  - 代码
+  - 重构
+  - code
+  - refactor

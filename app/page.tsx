@@ -1,13 +1,15 @@
 // 模块说明：负责 page 页面或应用入口逻辑。
 /* eslint-disable react-hooks/immutability */
 "use client";
-
-import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import AgentPanel from "./components/AgentPanel";
+import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
+import TaskPlanningPanel from "./components/TaskPlanningPanel";
+import PluginCenter from "./components/plugins/PluginCenter";
 import ApiKeyModal from "./components/ApiKeyModal";
-import ChatComposer from "./components/ChatComposer";
+import { ChatComposer } from "./components/ChatComposer";
+import CheckpointResumeBar from "./components/CheckpointResumeBar";
 import ChatList from "./components/ChatList";
 import ChatSidebar from "./components/ChatSidebar";
 import CustomTitleBar from "./components/CustomTitleBar";
@@ -15,11 +17,11 @@ import WorkspaceHeader from "./components/WorkspaceHeader";
 import {
   AVAILABLE_CHAT_MODELS,
   getAvailableMediaModelOptions,
+  getCustomModelOptions,
 } from "./constants/modelList";
 import type {
   ComposerMode,
   ImageEditFidelity,
-  MediaMode,
   SessionMode,
   TypographyPolicy,
 } from "./constants/page-constants";
@@ -27,29 +29,19 @@ import { getThemeVariables } from "./constants/theme";
 import { useAgentCoordinator } from "./hooks/useAgentCoordinator";
 import { useApiKey } from "./hooks/useApiKey";
 import { useChatStream } from "./hooks/useChatStream";
+import { useCodeAgentMode } from "./hooks/useCodeAgentMode";
+import { useCheckpointedAgentRuns } from "./hooks/useCheckpointedAgentRuns";
 import { useComposer } from "./hooks/useComposer";
 import { useCommerceResearch } from "./hooks/useCommerceResearch";
+import { useCustomModels } from "./hooks/useCustomModels";
 import { useMediaGeneration } from "./hooks/useMediaGeneration";
+import { useModelSelection } from "./hooks/useModelSelection";
 import { usePluginManager } from "./hooks/usePluginManager";
 import { useThemeMode } from "./hooks/useThemeMode";
 import { useWorkspaceController } from "./hooks/useWorkspaceController";
-import { AUTO_MODEL_ID } from "./lib/llm/model-catalog";
-import { DEFAULT_MEDIA_MODEL_ID } from "./lib/media/catalog";
 import type { CommerceMarketplaceCode } from "./lib/commerce/types";
+import { AUTO_MODEL_ID } from "./lib/llm/registry/models";
 import type { BuiltinPluginId } from "./lib/plugins/types";
-
-// 插件专属 UI 使用动态分包；核心 QA 首屏不会同步加载这些面板。
-const TaskPlanningPanel = dynamic(() => import("./components/TaskPlanningPanel"), {
-  ssr: false,
-});
-const InteractiveRequestPanel = dynamic(
-  () => import("./components/InteractiveRequestPanel"),
-  { ssr: false },
-);
-const PluginCenter = dynamic(() => import("./components/plugins/PluginCenter"), {
-  ssr: false,
-});
-
 /**
  * Multi-agent 工作台页面入口。
  *
@@ -59,10 +51,14 @@ const PluginCenter = dynamic(() => import("./components/plugins/PluginCenter"), 
  */
 export default function Home() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
-  const [selectedChatModel, setSelectedChatModel] = useState(AUTO_MODEL_ID);
-  const [selectedMediaModel, setSelectedMediaModel] = useState(
-    DEFAULT_MEDIA_MODEL_ID,
-  );
+  const {
+    selectedChatModel,
+    selectedMediaModel,
+    setSelectedChatModel,
+    setSelectedMediaModel,
+  } = useModelSelection();
+  const customModels = useCustomModels();
+  const { codeAgentMode, setCodeAgentMode } = useCodeAgentMode();
   const [typographyPolicy, setTypographyPolicy] =
     useState<TypographyPolicy>("avoid-generated-text");
   const [imageEditFidelity, setImageEditFidelity] =
@@ -77,23 +73,40 @@ export default function Home() {
   const plugins = usePluginManager();
   const codePluginEnabled = plugins.isEnabled("code-agent");
   const commercePluginEnabled = plugins.isEnabled("commerce-research");
+  const mediaPluginEnabled = plugins.isEnabled("media-agent");
   const workspace = useWorkspaceController({
     includeCode: codePluginEnabled,
     includeCommerce: commercePluginEnabled,
+    includeMedia: mediaPluginEnabled,
   });
   const agentCoordinator = useAgentCoordinator();
-
   const effectiveComposerMode: ComposerMode =
     workspace.activeSession?.mode === "code" ||
-    workspace.activeSession?.mode === "commerce"
+    workspace.activeSession?.mode === "commerce" ||
+    workspace.activeSession?.mode === "media"
       ? "chat"
       : composerMode;
-
   const availableModels = useMemo(() => {
-    if (effectiveComposerMode === "chat") return AVAILABLE_CHAT_MODELS;
+    if (effectiveComposerMode === "chat") {
+      return [
+        ...AVAILABLE_CHAT_MODELS,
+        ...getCustomModelOptions(customModels.models),
+      ];
+    }
     return getAvailableMediaModelOptions(effectiveComposerMode);
-  }, [effectiveComposerMode]);
-
+  }, [customModels.models, effectiveComposerMode]);
+  useEffect(() => {
+    if (!customModels.loaded || !selectedChatModel.startsWith("custom:")) return;
+    const stillExists = customModels.models.some(
+      (model) => model.id === selectedChatModel,
+    );
+    if (!stillExists) setSelectedChatModel(AUTO_MODEL_ID);
+  }, [
+    customModels.loaded,
+    customModels.models,
+    selectedChatModel,
+    setSelectedChatModel,
+  ]);
   const resolvedMediaModel =
     availableModels.find((model) => model.id === selectedMediaModel)?.id ||
     availableModels[0]?.id ||
@@ -102,7 +115,6 @@ export default function Home() {
     effectiveComposerMode === "chat"
       ? selectedChatModel
       : resolvedMediaModel;
-
   const chat = useChatStream({
     activeSession: workspace.activeSession,
     activeProject: workspace.activeProject,
@@ -111,13 +123,14 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     selectedModel: selectedChatModel,
+    codeAgentMode,
     attachedFiles: composer.attachedFiles,
     isParsingFile: composer.isParsingFile,
     clearAfterSubmit: composer.clearAfterSubmit,
     agents: agentCoordinator,
   });
-
   const media = useMediaGeneration({
     activeSession: workspace.activeSession,
     messages: workspace.messages,
@@ -125,6 +138,7 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     selectedModel: resolvedMediaModel,
     attachedFile: composer.attachedFiles[0] || null,
     typographyPolicy,
@@ -134,7 +148,6 @@ export default function Home() {
     clearAfterSubmit: composer.clearAfterSubmit,
     agents: agentCoordinator,
   });
-
   const commerce = useCommerceResearch({
     activeSession: workspace.activeSession,
     messages: workspace.messages,
@@ -142,13 +155,21 @@ export default function Home() {
     setSessions: workspace.setSessions,
     persistSession: workspace.persistSession,
     apiKeys: apiKey.apiKeys,
+    endpointOverrides: apiKey.endpointOverrides,
     serviceKeys: apiKey.serviceKeys,
     selectedModel: selectedChatModel,
     marketplace: commerceMarketplace,
     clearAfterSubmit: composer.clearAfterSubmit,
     agents: agentCoordinator,
   });
-
+  const checkpointRuns = useCheckpointedAgentRuns({
+    sessionId: workspace.activeSession?.id, sessionMode: workspace.activeSession?.mode,
+    input: composer.input, attachments: composer.attachedFiles,
+    selectedModel, composerMode: effectiveComposerMode, codeAgentMode,
+    commerceWorkflowMode: commerce.workflowMode, commerceMarketplace,
+    typographyPolicy, imageEditFidelity, enableQualityGuard,
+    chat, media, commerce,
+  });
   const isBusy =
     chat.isStreaming || media.isGenerating || commerce.isResearching;
   const activeStatus =
@@ -165,7 +186,6 @@ export default function Home() {
     workspace.activeSession?.mode === "commerce"
       ? commerce.toolActivities
       : chat.toolActivities;
-
   const resetConversationUi = () => {
     composer.resetComposer();
     chat.resetTransient();
@@ -187,10 +207,16 @@ export default function Home() {
       setShowPluginCenter(true);
       return;
     }
+    if (mode === "media" && !mediaPluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
 
     const session = await workspace.createSession(mode, projectId);
     if (session) resetConversationUi();
-    if (mode === "code" || mode === "commerce") setComposerMode("chat");
+    if (mode === "code" || mode === "commerce" || mode === "media") {
+      setComposerMode("chat");
+    }
   };
 
   const handleSwitchSession = (id: string) => {
@@ -261,17 +287,7 @@ export default function Home() {
     }
   };
 
-  const handleSubmit = () => {
-    if (workspace.activeSession?.mode === "commerce") {
-      void commerce.submitPrompt(composer.input);
-      return;
-    }
-    if (effectiveComposerMode === "chat") {
-      void chat.submitPrompt(composer.input);
-      return;
-    }
-    void media.submit(composer.input, effectiveComposerMode as MediaMode);
-  };
+  const handleSubmit = () => void checkpointRuns.submit();
 
   return (
     <main
@@ -289,6 +305,7 @@ export default function Home() {
       {apiKey.showKeyModal && (
         <ApiKeyModal
           initialKeys={apiKey.apiKeys}
+          initialEndpoints={apiKey.endpointOverrides}
           initialServiceKeys={apiKey.serviceKeys}
           onSave={apiKey.handleSaveKeys}
           onClose={apiKey.closeKeyModal}
@@ -321,12 +338,14 @@ export default function Home() {
           isStreaming={isBusy}
           createQaSession={() => void handleCreateSession("qa")}
           createCommerceSession={() => void handleCreateSession("commerce")}
+          createMediaSession={() => void handleCreateSession("media")}
           createCodeSession={(projectId: string) =>
             void handleCreateSession("code", projectId)
           }
           addProject={() => void handleAddProject()}
           codePluginEnabled={codePluginEnabled}
           commercePluginEnabled={commercePluginEnabled}
+          mediaPluginEnabled={mediaPluginEnabled}
           onOpenPluginCenter={() => setShowPluginCenter(true)}
           reindexProject={(projectId: string) =>
             void workspace.reindexProject(projectId)
@@ -374,8 +393,16 @@ export default function Home() {
                 />
 
                 <div className="shrink-0 pt-2">
-                  {codePluginEnabled &&
-                    workspace.activeSession?.mode === "code" &&
+                  {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (
+                    <CheckpointResumeBar
+                      checkpoint={checkpointRuns.checkpoint}
+                      disabled={checkpointRuns.loading}
+                      onResume={() => void checkpointRuns.resume(checkpointRuns.checkpoint!)}
+                      onDiscard={() => void checkpointRuns.discard()}
+                    />
+                  ) : null}
+                  {(workspace.activeSession?.mode === "code" ||
+                    workspace.activeSession?.mode === "media") &&
                     chat.interactiveRequest &&
                     !isBusy && (
                     <InteractiveRequestPanel
@@ -394,6 +421,8 @@ export default function Home() {
                   <ChatComposer
                     mode={workspace.activeSession?.mode}
                     commerceMarketplace={commerceMarketplace}
+                    commerceWorkflowMode={commerce.workflowMode}
+                    onCommerceWorkflowModeChange={commerce.setWorkflowMode}
                     onCommerceMarketplaceChange={setCommerceMarketplace}
                     commerceDataSourceState={apiKey.commerceDataSourceState}
                     onOpenServiceSettings={apiKey.openKeyModal}
@@ -417,6 +446,26 @@ export default function Home() {
                     models={availableModels}
                     selectedModel={selectedModel}
                     onSelectModel={handleSelectModel}
+                    codeAgentMode={codeAgentMode}
+                    onCodeAgentModeChange={setCodeAgentMode}
+                    onCreateCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? async (input) => {
+                            const created = await customModels.createModel(input);
+                            setSelectedChatModel(created.id);
+                          }
+                        : undefined
+                    }
+                    onUpdateCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? customModels.updateModel
+                        : undefined
+                    }
+                    onDeleteCustomModel={
+                      effectiveComposerMode === "chat"
+                        ? customModels.deleteModel
+                        : undefined
+                    }
                     onSubmit={handleSubmit}
                   />
                 </div>
@@ -431,11 +480,18 @@ export default function Home() {
                       ? []
                       : chat.agentLifecycleEvents
                   }
+                  workListSnapshot={
+                    workspace.activeSession?.mode === "code"
+                      ? chat.workListSnapshot
+                      : null
+                  }
                   agentStatus={activeStatus}
                   isStreaming={isBusy}
                   workflowMode={
                     workspace.activeSession?.mode === "commerce"
-                      ? "commerce"
+                      ? `commerce-${commerce.workflowMode}`
+                      : workspace.activeSession?.mode === "media"
+                        ? "media"
                       : effectiveComposerMode
                   }
                 />
@@ -450,31 +506,6 @@ export default function Home() {
         </section>
       </div>
 
-      <style jsx global>{`
-        * {
-          scrollbar-width: thin;
-          scrollbar-color: var(--scrollbar-thumb) transparent;
-        }
-        *::-webkit-scrollbar { width: 8px; height: 8px; }
-        *::-webkit-scrollbar-track { background: transparent; }
-        *::-webkit-scrollbar-thumb {
-          background: var(--scrollbar-thumb);
-          border: 2px solid transparent;
-          background-clip: padding-box;
-          border-radius: 999px;
-        }
-        body {
-          margin: 0;
-          background: var(--app-bg);
-          transition: background-color 300ms var(--ease-apple);
-        }
-        button, input, textarea { font: inherit; }
-        .theme-transition {
-          transition:
-            background 300ms var(--ease-apple),
-            color 260ms var(--ease-apple);
-        }
-      `}</style>
     </main>
   );
 }

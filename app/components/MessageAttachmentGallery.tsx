@@ -1,12 +1,13 @@
 // 模块说明：负责 MessageAttachmentGallery 用户界面组件。
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
+import { memo } from "react";
 import type { MessageAttachment } from "../constants/page-constants";
 import {
   isImageMimeType,
   isVideoMimeType,
 } from "../constants/page-constants";
+import { buildApiUrl } from "../lib/api-client";
 
 interface MessageAttachmentGalleryProps {
   attachments?: MessageAttachment[];
@@ -18,16 +19,21 @@ function buildDownloadUrl(attachment: MessageAttachment): string {
   if (!attachment.url) return "";
 
   const name = attachment.downloadName || attachment.name;
-  return `/api/media/download?url=${encodeURIComponent(
-    attachment.url,
-  )}&name=${encodeURIComponent(name)}`;
+  if (attachment.url?.startsWith("/api/")) {
+    return buildApiUrl(attachment.url);
+  }
+  return buildApiUrl(
+    `/api/media/download?url=${encodeURIComponent(
+      attachment.url,
+    )}&name=${encodeURIComponent(name)}`,
+  );
 }
 
 /**
  * 用户上传素材和 AI 生成结果共用一个展示组件。
  * 生成图片使用 Data URL，能够长期保存在本地会话；视频使用同源下载代理。
  */
-export default function MessageAttachmentGallery({
+function MessageAttachmentGallery({
   attachments = [],
   compact = false,
 }: MessageAttachmentGalleryProps) {
@@ -36,7 +42,8 @@ export default function MessageAttachmentGallery({
   return (
     <div className={`grid gap-3 ${compact ? "mb-2" : "mt-3"}`}>
       {attachments.map((attachment, index) => {
-        const source = attachment.dataUrl || attachment.url || "";
+        const rawSource = attachment.dataUrl || attachment.url || "";
+        const source = attachment.dataUrl ? rawSource : buildApiUrl(rawSource);
         const image =
           attachment.assetKind === "image" ||
           isImageMimeType(attachment.type);
@@ -48,7 +55,7 @@ export default function MessageAttachmentGallery({
         return (
           <div
             key={`${attachment.name}-${index}-${source.slice(0, 24)}`}
-            className="overflow-hidden rounded-[14px] border"
+            className="message-media-card overflow-hidden rounded-[14px] border"
             style={{
               background: compact ? "rgba(0,0,0,0.1)" : "var(--glass-soft)",
               borderColor: compact
@@ -60,7 +67,10 @@ export default function MessageAttachmentGallery({
               <img
                 src={source}
                 alt={attachment.name}
-                className="block max-h-[480px] w-full object-contain"
+                className="message-media block max-h-[480px] w-full object-contain"
+                loading="lazy"
+                decoding="async"
+                draggable={false}
               />
             )}
 
@@ -69,7 +79,7 @@ export default function MessageAttachmentGallery({
                 src={source}
                 controls
                 preload="metadata"
-                className="block max-h-[480px] w-full bg-black object-contain"
+                className="message-media block max-h-[480px] w-full bg-black object-contain"
               />
             )}
 
@@ -117,3 +127,8 @@ export default function MessageAttachmentGallery({
     </div>
   );
 }
+
+/**
+ * 附件内容通常包含大尺寸图片或视频，使用 memo 避免父级主题状态变化时重复渲染。
+ */
+export default memo(MessageAttachmentGallery);

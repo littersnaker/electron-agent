@@ -1,0 +1,11 @@
+id: media
+name: Media Agent
+adapter: media_agent
+planner: media_pipeline
+skills: []
+tools: []
+memory:
+  - episodic
+output_schema: sse_stream
+metadata:
+  migration: runtime_native

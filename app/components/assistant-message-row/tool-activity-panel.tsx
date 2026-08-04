@@ -12,6 +12,10 @@ export interface ToolActivity {
   status: ToolActivityStatus;
   startedAt: number;
   endedAt?: number;
+  /** 当前阶段的实时说明；未提供时继续使用工具元数据说明。 */
+  detail?: string;
+  /** 可选稳定阶段 ID；仅用于工作流状态同步，不参与活动标题展示。 */
+  stageId?: string;
 }
 
 export interface AssistantMessageRowProps {
@@ -364,7 +368,7 @@ export function ToolActivityPanel({
                         style={{ color: COLORS.textMuted }}
                         title={meta.raw}
                       >
-                        {meta.description}
+                        {activity.detail || meta.description}
                       </div>
                     </div>
                     <span

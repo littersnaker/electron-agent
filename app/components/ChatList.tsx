@@ -2,12 +2,13 @@
 "use client";
 
 /* eslint-disable react-hooks/exhaustive-deps */
-import dynamic from "next/dynamic";
 import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 import type { Message } from "../constants/page-constants";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
+import AmazonListingCard from "./commerce/AmazonListingCard";
+import CommerceReportCard from "./commerce/CommerceReportCard";
 
 interface ChatListProps {
   messages: Message[];
@@ -24,12 +25,6 @@ const COLORS = {
 };
 
 const MemoizedAssistantMessageRow = memo(AssistantMessageRow);
-
-// Commerce 报告卡片只在该插件真正产生报告时才下载对应客户端 chunk。
-const CommerceReportCard = dynamic(
-  () => import("./commerce/CommerceReportCard"),
-  { ssr: false },
-);
 
 function AssistantBadge() {
   return (
@@ -49,7 +44,7 @@ function AssistantBadge() {
         />
         <defs>
           <linearGradient id="assistant-gradient" x1="4" y1="3" x2="16" y2="15">
-            <stop stopColor="#64b5ff" />
+            <stop stopColor="var(--accent-blue-hover)" />
             <stop offset="1" stopColor="#bf5af2" />
           </linearGradient>
         </defs>
@@ -58,7 +53,7 @@ function AssistantBadge() {
   );
 }
 
-export default function ChatList({
+function ChatList({
   messages,
   isStreaming,
   toolActivities = [],
@@ -166,6 +161,7 @@ export default function ChatList({
             (Boolean(message.content) ||
               Boolean(message.attachments?.length) ||
               Boolean(message.commerceReport) ||
+              Boolean(message.commerceListing) ||
               (isLastMessage &&
                 (isStreaming ||
                   toolActivities.length > 0 ||
@@ -182,8 +178,7 @@ export default function ChatList({
                     style={{
                       background:
                         "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
-                      boxShadow:
-                        "0 10px 28px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.18)",
+                      boxShadow: "var(--message-user-shadow)",
                     }}
                   >
                     <MessageAttachmentGallery
@@ -291,7 +286,11 @@ export default function ChatList({
                   className="mb-1.5 text-[11px] font-medium tracking-wide"
                   style={{ color: COLORS.textMuted }}
                 >
-                  {message.commerceReport ? "Market Intelligence Agent" : "Agent"}
+                  {message.commerceListing
+                    ? "Amazon Listing Builder"
+                    : message.commerceReport
+                      ? "Market Intelligence Agent"
+                      : "Agent"}
                 </div>
                 <div
                   className="min-w-0 rounded-[18px] border px-4 py-3.5"
@@ -304,6 +303,9 @@ export default function ChatList({
                 >
                   {message.commerceReport && (
                     <CommerceReportCard report={message.commerceReport} />
+                  )}
+                  {message.commerceListing && (
+                    <AmazonListingCard report={message.commerceListing} />
                   )}
                   <MemoizedAssistantMessageRow
                     content={message.content}
@@ -345,3 +347,9 @@ export default function ChatList({
     </div>
   );
 }
+
+/**
+ * 缓存聊天列表，主题切换时不重新执行大型消息树和图片节点的 React 渲染。
+ * 颜色仍通过 CSS 变量即时更新，因此不会影响深浅色显示。
+ */
+export default memo(ChatList);

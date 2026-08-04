@@ -1,0 +1,509 @@
+"""Code Agent 单轮工具动作的执行器。"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Literal, cast
+
+from backend.services.agent.command_runner import CommandResult
+from backend.services.agent.loop_protocol import AgentAction
+from backend.services.agent.loop_support import ExecutionMode, command_observation
+from backend.services.agent.resource_coordinator import (
+    SPECIAL_TERMINAL_RESOURCE,
+    WorkspaceResourceCoordinator,
+)
+from backend.services.agent.runtime.action_guard import guard_edit, record_factory_decision
+from backend.services.agent.work_models import WorkItem
+from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.workspace_tools import EditBatchResult, ReadBatchResult
+from backend.tools.code_tools import execute_code_tool
+
+EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+CheckpointCallback = Callable[[], Awaitable[None]]
+OutcomeKind = Literal["continue", "success", "failure"]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkActionOutcome:
+    """告诉 Worker 循环继续、成功完成或交给 Planner 重规划。"""
+
+    kind: OutcomeKind
+    summary: str = ""
+    error: str = ""
+    progress_made: bool = False
+    refresh_context: bool = False
+
+
+@dataclass(slots=True)
+class WorkActionEnvironment:
+    """保存执行单轮动作所需的工作区与回调依赖。"""
+
+    root: Path
+    request_text: str
+    work: WorkItem
+    state: WorkWorkerState
+    execution_mode: ExecutionMode
+    coordinator: WorkspaceResourceCoordinator
+    emit: EmitCallback
+    checkpoint: CheckpointCallback
+    slot: int
+    agent_id: str
+
+
+class WorkActionHandler:
+    """把协议动作映射到受控 Tool Gateway 调用。"""
+
+    def __init__(self, environment: WorkActionEnvironment) -> None:
+        """保存当前 Worker 环境，避免每个动作重复传递大量参数。"""
+
+        self._env = environment
+
+    async def execute(self, action: AgentAction) -> WorkActionOutcome:
+        """执行一个动作并返回 Worker 下一步状态。"""
+
+        handlers = {
+            "search": self._search,
+            "read": self._read,
+            "inspect": self._inspect,
+            "factory": self._factory,
+            "edit": self._edit,
+            "run": self._run,
+            "complete_work": self._complete,
+        }
+        handler = handlers.get(action.action)
+        if handler is None:
+            return WorkActionOutcome(
+                "failure",
+                error=f"Worker 不支持动作：{action.action}",
+            )
+        return await handler(action)
+
+    async def _search(self, action: AgentAction) -> WorkActionOutcome:
+        """执行工作区全文搜索并记录观察。"""
+
+        await self._lifecycle(
+            role="modify_worker",
+            detail=f"{self._env.work.id} · {self._env.work.title}：搜索 {action.query}",
+            tool_name="search_codebase",
+        )
+        result = await self._tool(
+            "workspace.search",
+            {"query": action.query},
+            {"read"},
+        )
+        self._env.state.append_transcript(
+            f"ACTION search query={action.query}\nOBSERVATION:\n{result}"
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue")
+
+    async def _read(self, action: AgentAction) -> WorkActionOutcome:
+        """读取真实文件，并保存并行写入冲突检测需要的版本指纹。"""
+
+        await self._lifecycle(
+            role="modify_worker",
+            detail=(
+                f"{self._env.work.id} · {self._env.work.title}："
+                f"读取 {len(action.paths)} 个文件"
+            ),
+            tool_name="read_file_from_disk",
+            files=list(action.paths),
+        )
+        arguments: dict[str, Any] = {"paths": action.paths}
+        if action.offsets:
+            arguments["offsets"] = action.offsets
+        result = cast(
+            ReadBatchResult,
+            await self._tool("workspace.read", arguments, {"read"}),
+        )
+        self._env.state.read_versions.update(result.versions)
+        offset_note = f" offsets={action.offsets}" if action.offsets else ""
+        self._env.state.append_transcript(
+            f"ACTION read paths={action.paths}{offset_note}\nOBSERVATION:\n{result.content}"
+        )
+        if result.blocked_paths:
+            await self._lifecycle(
+                role="modify_worker",
+                detail=(
+                    f"{self._env.work.id} 已读取 {len(result.versions)} 个安全文件，"
+                    f"并过滤 {len(result.blocked_paths)} 个敏感路径；继续执行当前 Work"
+                ),
+                tool_name="read_file_from_disk",
+            )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue")
+
+    async def _inspect(self, action: AgentAction) -> WorkActionOutcome:
+        """执行 AST、符号、调用图和影响范围分析。"""
+
+        await self._lifecycle(
+            role="code_intelligence",
+            detail=(
+                f"{self._env.work.id} · {self._env.work.title}："
+                "分析代码结构与影响范围"
+            ),
+            tool_name="code_intelligence",
+            files=list(action.paths),
+        )
+        inspection = await self._tool(
+            "code.inspect",
+            {"paths": action.paths, "query": action.query},
+            {"read"},
+        )
+        self._env.state.append_transcript(
+            f"ACTION inspect paths={action.paths} query={action.query}\n"
+            f"OBSERVATION:\n{inspection}"
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue")
+
+    async def _factory(self, action: AgentAction) -> WorkActionOutcome:
+        """执行 Software Factory 的计划、生成或一致性校验。"""
+
+        tool_name = f"software_factory.{action.factory_mode}"
+        permission = {"write"} if action.factory_mode == "generate" else {"read"}
+        detail_map = {
+            "plan": "规划领域模型、Mock 和 API 契约",
+            "generate": "生成领域契约、Mock 与前端数据源",
+            "validate": "校验领域、Mock、API 和页面数据层",
+        }
+        await self._lifecycle(
+            role="software_factory",
+            detail=f"{self._env.work.id}：{detail_map[action.factory_mode]}",
+            tool_name=tool_name,
+        )
+
+        arguments = {
+            "request_text": self._env.request_text,
+            "domain_id": action.factory_domain_id,
+            "output_root": action.factory_output_root,
+            "mock_count": action.factory_mock_count,
+            "overwrite": action.factory_overwrite,
+        }
+        try:
+            if action.factory_mode == "generate":
+                # 批量生成同样必须记录修改目的、验证方案和失败恢复策略。
+                record_factory_decision(
+                    work=self._env.work,
+                    state=self._env.state,
+                    output_root=action.factory_output_root,
+                )
+                # 生成会同时写入多个相关文件，用输出目录作为共享资源锁键。
+                lock_key = action.factory_output_root or "software-factory-default"
+                async with self._env.coordinator.reserve(
+                    {lock_key},
+                    owner=self._env.work.id,
+                    priority=self._env.work.priority,
+                ):
+                    result = await self._tool(tool_name, arguments, permission)
+            else:
+                result = await self._tool(tool_name, arguments, permission)
+        except FileExistsError as exc:
+            reuse = await self._reuse_existing_factory_artifacts(action)
+            if reuse is not None:
+                return reuse
+        except Exception as exc:
+            return WorkActionOutcome(
+                "failure",
+                error=f"SOFTWARE FACTORY FAILED: {exc}",
+            )
+
+        progress_made = False
+        if isinstance(result, dict):
+            changed_files = result.get("changedFiles")
+            if isinstance(changed_files, list):
+                await self._record_generated_files(changed_files)
+                progress_made = bool(changed_files)
+            if action.factory_mode == "validate":
+                # 最终验收结果写入 Checkpoint，避免恢复后模型绕过已失败的页面接入校验。
+                output_root = action.factory_output_root.strip()
+                self._env.state.factory_validations[output_root] = bool(
+                    result.get("ok")
+                )
+        observation = json.dumps(result, ensure_ascii=False, indent=2, default=str)
+        self._env.state.append_transcript(
+            f"ACTION factory mode={action.factory_mode}\nOBSERVATION:\n{observation}"
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue", progress_made=progress_made)
+
+    async def _reuse_existing_factory_artifacts(
+        self,
+        action: AgentAction,
+    ) -> WorkActionOutcome | None:
+        """产物已存在时先做一致性校验；通过则直接复用，避免重复生成浪费 Token。"""
+
+        output_root = action.factory_output_root.strip()
+        try:
+            validation = await self._tool(
+                "software_factory.validate",
+                {"output_root": output_root},
+                {"read"},
+            )
+        except Exception:
+            return None
+        ok = bool(validation.get("ok")) if isinstance(validation, dict) else False
+        self._env.state.factory_validations[output_root] = ok
+        if ok:
+            self._env.state.append_transcript(
+                "FACTORY REUSE: 输出目录已存在且一致性校验通过，本次直接复用，"
+                "不重新生成 Mock/契约；无需重复生成。"
+            )
+            await self._env.checkpoint()
+            await self._lifecycle(
+                role="software_factory",
+                status="completed",
+                detail=(
+                    f"{self._env.work.id}：已复用现有契约/Mock 产物，"
+                    "跳过重新生成"
+                ),
+                tool_name="software_factory.validate",
+            )
+            return WorkActionOutcome("continue", progress_made=False)
+        return WorkActionOutcome(
+            "failure",
+            error=(
+                "SOFTWARE FACTORY EXISTING ARTIFACT INVALID: 输出目录已存在但一致性"
+                "校验未通过，请先 read 现有产物定位不一致点，再修复或按需调用 "
+                "factory generate 补齐，不要盲目覆盖全部产物。"
+            ),
+        )
+
+    async def _edit(self, action: AgentAction) -> WorkActionOutcome:
+        """在文件资源锁内应用事务式编辑，并处理并行版本冲突。"""
+
+        gate = guard_edit(
+            root=self._env.root,
+            work=self._env.work,
+            state=self._env.state,
+            operations=action.operations,
+        )
+        if not gate.approved:
+            self._env.state.append_transcript(
+                f"DECISION GATE REJECTED: {gate.reason}\n"
+                "请补充明确修改原因、影响范围、验证与恢复方案后重试。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
+
+        paths = {operation.path for operation in action.operations}
+        await self._lifecycle(
+            role="modify_worker",
+            detail=(
+                f"{self._env.work.id} · {self._env.work.title}："
+                f"等待并写入 {len(paths)} 个文件"
+            ),
+            tool_name="apply_file_change",
+            files=sorted(paths),
+        )
+        try:
+            async with self._env.coordinator.reserve(
+                paths,
+                owner=self._env.work.id,
+                priority=self._env.work.priority,
+            ):
+                expected = {
+                    path: self._env.state.read_versions[path]
+                    for path in paths
+                    if path in self._env.state.read_versions
+                }
+                edit_result = cast(
+                    EditBatchResult,
+                    await self._tool(
+                        "workspace.edit",
+                        {
+                            "operations": action.operations,
+                            "expected_versions": expected,
+                        },
+                        {"write"},
+                    ),
+                )
+                await self._refresh_versions(edit_result.changed_files)
+        except Exception as exc:
+            if "并行冲突" in str(exc):
+                self._env.state.append_transcript(
+                    f"EDIT RETRY REQUIRED: {exc}\n"
+                    "请先 read 冲突文件，再基于最新内容重新 edit。"
+                )
+                await self._lifecycle(
+                    role="modify_worker",
+                    detail=(
+                        f"{self._env.work.id} 检测到并行文件更新，"
+                        "正在读取最新版本后重试"
+                    ),
+                    tool_name="read_file_from_disk",
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue", refresh_context=True)
+            return WorkActionOutcome("failure", error=f"EDIT FAILED: {exc}")
+
+        self._append_changed_files(edit_result.changed_files)
+        self._env.state.append_transcript(
+            f"ACTION edit: {action.summary}\nCHANGED: {edit_result.changed_files}\n"
+            f"DIFF:\n{edit_result.diff_preview}"
+        )
+        await self._lifecycle(
+            role="merge_agent",
+            agent_id=f"merge_agent:{self._env.work.id}",
+            status="completed",
+            detail=(
+                f"{self._env.work.id} 已串行合并 "
+                f"{len(edit_result.changed_files)} 个文件"
+            ),
+            tool_name="apply_file_change",
+            files=list(edit_result.changed_files),
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue", progress_made=True)
+
+    async def _run(self, action: AgentAction) -> WorkActionOutcome:
+        """在全自动模式执行白名单质量命令。"""
+
+        if self._env.execution_mode != "full_auto":
+            self._env.state.append_transcript(
+                f"ACTION run skipped: {action.command}\n自动编辑模式不执行命令。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
+
+        await self._lifecycle(
+            role="verification_agent",
+            agent_id=f"verification_agent:{self._env.work.id}",
+            detail=f"{self._env.work.id}：执行 {action.command}",
+            tool_name="run_terminal_command",
+        )
+        async with self._env.coordinator.reserve(
+            {SPECIAL_TERMINAL_RESOURCE},
+            owner=self._env.work.id,
+            priority=self._env.work.priority,
+        ):
+            result = cast(
+                CommandResult,
+                await self._tool(
+                    "workspace.run",
+                    {"command": action.command},
+                    {"execute"},
+                ),
+            )
+        self._env.state.commands.append(result)
+        observation = command_observation(result)
+        self._env.state.append_transcript(observation)
+        await self._env.checkpoint()
+        if not result.succeeded:
+            return WorkActionOutcome("failure", error=observation)
+
+        await self._lifecycle(
+            role="verification_agent",
+            agent_id=f"verification_agent:{self._env.work.id}",
+            status="completed",
+            detail=f"{self._env.work.id} 验证通过：{action.command}",
+        )
+        return WorkActionOutcome("continue")
+
+    async def _complete(self, action: AgentAction) -> WorkActionOutcome:
+        """把模型明确提交的当前 Work 标记为成功。"""
+
+        if self._requires_factory_validation() and not any(
+            self._env.state.factory_validations.values()
+        ):
+            # 最终验证 Work 必须拿到真实的 ok=true，单靠模型口头声明不能完成任务。
+            self._env.state.append_transcript(
+                "COMPLETE REJECTED: 当前工作负责 Software Factory 最终验收，"
+                "但还没有成功的 factory validate 结果。请先完成真实页面接入并重新校验。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
+
+        return WorkActionOutcome(
+            "success",
+            summary=action.summary or f"{self._env.work.title} 已完成",
+        )
+
+    def _requires_factory_validation(self) -> bool:
+        """判断当前 Work 是否承担 Software Factory 的最终验收职责。"""
+
+        searchable = " ".join(
+            [
+                self._env.work.title,
+                self._env.work.objective,
+                *self._env.work.acceptance_criteria,
+            ]
+        ).lower()
+        validation_terms = (
+            "factory validate",
+            "software factory 一致性校验",
+            "验证契约、mock",
+            "契约校验",
+            "页面数据闭环",
+        )
+        return any(term in searchable for term in validation_terms)
+
+    async def _record_generated_files(self, values: list[object]) -> None:
+        """记录生成文件，并读取其最新版本指纹。"""
+
+        paths = [str(value) for value in values if str(value).strip()]
+        self._append_changed_files(paths)
+        await self._refresh_versions(paths)
+
+    async def _refresh_versions(self, paths: list[str]) -> None:
+        """更新一批文件的内容指纹。"""
+
+        for path in paths:
+            self._env.state.read_versions[path] = str(
+                await self._tool(
+                    "workspace.file_version",
+                    {"path": path},
+                    {"read"},
+                )
+            )
+
+    def _append_changed_files(self, paths: list[str]) -> None:
+        """按首次出现顺序合并修改文件列表。"""
+
+        for path in paths:
+            if path not in self._env.state.changed_files:
+                self._env.state.changed_files.append(path)
+
+    async def _tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        permissions: set[Any],
+    ) -> Any:
+        """通过统一 Tool Gateway 执行工具。"""
+
+        return await execute_code_tool(
+            name,
+            root=self._env.root,
+            arguments=arguments,
+            permissions=permissions,
+            agent_id=self._env.agent_id,
+            task_id=self._env.work.id,
+        )
+
+    async def _lifecycle(
+        self,
+        *,
+        role: str,
+        detail: str,
+        tool_name: str = "",
+        status: str = "running",
+        agent_id: str = "",
+        files: list[str] | None = None,
+    ) -> None:
+        """发送统一生命周期事件，供前端显示当前 Worker 动作。"""
+
+        payload: dict[str, Any] = {
+            "role": role,
+            "agentId": agent_id or self._env.agent_id,
+            "slot": self._env.slot,
+            "status": status,
+            "detail": detail,
+        }
+        if tool_name:
+            payload["toolName"] = tool_name
+        if files:
+            payload["currentFiles"] = list(files)
+        await self._env.emit("lifecycle", payload)

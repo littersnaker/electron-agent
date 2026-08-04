@@ -1,0 +1,24 @@
+id: coding
+name: Coding Agent
+adapter: legacy_code_agent
+planner: software_engineering
+skills:
+  - workspace-code-agent
+  - commerce-software-factory
+tools:
+  - workspace.search
+  - workspace.read
+  - code.inspect
+  - workspace.edit
+  - workspace.filesystem
+  - workspace.run
+  - software_factory.plan
+  - software_factory.generate
+  - software_factory.validate
+memory:
+  - episodic
+  - semantic
+  - task
+output_schema: sse_stream
+metadata:
+  migration: legacy_adapter

@@ -28,6 +28,15 @@ export const BUILTIN_PLUGINS: readonly BuiltinPluginManifest[] = [
     sessionMode: "commerce",
     defaultEnabled: false,
   },
+  {
+    id: "media-agent",
+    name: "Media Agent",
+    shortName: "AI 漫剧",
+    description: "剧本拆分为镜、人工确认后并行出图与图生视频，合并成漫剧短片。",
+    accent: "blue",
+    sessionMode: "media",
+    defaultEnabled: false,
+  },
 ] as const;
 
 export function createDefaultPluginState(): BuiltinPluginState {
@@ -36,6 +45,7 @@ export function createDefaultPluginState(): BuiltinPluginState {
     {
       "code-agent": false,
       "commerce-research": false,
+      "media-agent": false,
     },
   );
 }

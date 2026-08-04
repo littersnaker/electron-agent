@@ -7,18 +7,28 @@ import type {
   ChatSession,
   Message,
 } from "../constants/page-constants";
+import { apiFetch } from "../lib/api-client";
 import type {
   CommerceMarketplaceCode,
   CommerceProgressEvent,
   CommerceResearchReport,
 } from "../lib/commerce/types";
+import type {
+  AmazonListingDemoReport,
+  CommerceWorkflowMode,
+} from "../lib/commerce/listing/types";
+import {
+  getCommerceActivityStageId,
+  getCommerceProgressTitle,
+} from "../lib/commerce/progress-stages";
 import { buildLlmRequestHeaders } from "../lib/llm/client-request";
-import type { LlmCredentials } from "../lib/llm/types";
+import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
 import {
   buildCommerceCredentialHeaders,
   type AuxiliaryServiceCredentials,
 } from "../lib/service-credentials";
 import type { StreamPacket, TokenInfo, ToolActivity } from "../types/workspace";
+import type { CheckpointFinishResult } from "../types/checkpoints";
 import type { AgentCoordinator } from "./useAgentCoordinator";
 
 interface UseCommerceResearchOptions {
@@ -32,6 +42,7 @@ interface UseCommerceResearchOptions {
     title?: string,
   ) => Promise<void>;
   apiKeys: LlmCredentials;
+  endpointOverrides: LlmEndpointOverrides;
   serviceKeys: AuxiliaryServiceCredentials;
   selectedModel: string;
   marketplace: CommerceMarketplaceCode;
@@ -39,15 +50,16 @@ interface UseCommerceResearchOptions {
   agents: AgentCoordinator;
 }
 
-const STAGE_LABELS: Record<CommerceProgressEvent["stage"], string> = {
-  intent: "理解市场目标",
-  category: "生成市场检索计划",
-  collect: "采集公开市场信号",
-  normalize: "统一市场观察",
-  analyze: "计算市场信号",
-  strategy: "生成情报结论",
-  done: "完成市场情报报告",
-};
+export interface CommerceRunOptions {
+  checkpointId?: string;
+  resumeExistingRun?: boolean;
+  workflowModeOverride?: CommerceWorkflowMode;
+  marketplaceOverride?: CommerceMarketplaceCode;
+  modelOverride?: string;
+  onCheckpointFinish?: (
+    result: CheckpointFinishResult,
+  ) => void | Promise<void>;
+}
 
 async function readResponseError(response: Response): Promise<string> {
   try {
@@ -58,7 +70,7 @@ async function readResponseError(response: Response): Promise<string> {
   } catch {
     // 非 JSON 错误响应使用状态码兜底。
   }
-  return `跨境市场情报请求失败（HTTP ${response.status}）`;
+  return `Commerce Agent 请求失败（HTTP ${response.status}）`;
 }
 
 function isCommerceProgressEvent(
@@ -85,6 +97,20 @@ function isCommerceResearchReport(
   );
 }
 
+
+function isAmazonListingReport(
+  value: StreamPacket["payload"],
+): value is AmazonListingDemoReport {
+  return Boolean(
+    value &&
+      "mode" in value &&
+      value.mode === "listing-demo" &&
+      "draft" in value &&
+      "validation" in value &&
+      "mockErp" in value,
+  );
+}
+
 /**
  * Cross-border Market Intelligence Agent 使用独立 Hook 与独立 API Route。
  *
@@ -98,12 +124,15 @@ export function useCommerceResearch({
   setSessions,
   persistSession,
   apiKeys,
+  endpointOverrides,
   serviceKeys,
   selectedModel,
   marketplace,
   clearAfterSubmit,
   agents,
 }: UseCommerceResearchOptions) {
+  const [workflowMode, setWorkflowMode] =
+    useState<CommerceWorkflowMode>("research");
   const [isResearching, setIsResearching] = useState(false);
   const [agentStatus, setAgentStatus] = useState("");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
@@ -123,7 +152,7 @@ export function useCommerceResearch({
   }, []);
 
   const submitPrompt = useCallback(
-    async (promptText: string) => {
+    async (promptText: string, options: CommerceRunOptions = {}) => {
       if (
         !activeSession ||
         activeSession.mode !== "commerce" ||
@@ -134,16 +163,26 @@ export function useCommerceResearch({
 
       const query = promptText.trim();
       if (!query) return;
+      const effectiveWorkflowMode =
+        options.workflowModeOverride || workflowMode;
+      const effectiveMarketplace = options.marketplaceOverride || marketplace;
 
       const userMessage: Message = { role: "user", content: query };
+      const resumeExistingRun = options.resumeExistingRun === true;
+      const lastMessage = messages[messages.length - 1];
+      const baseMessages =
+        resumeExistingRun && lastMessage?.role === "assistant"
+          ? messages.slice(0, -1)
+          : messages;
       const optimisticHistory: Message[] = [
-        ...messages,
-        userMessage,
+        ...baseMessages,
+        ...(resumeExistingRun ? [] : [userMessage]),
         { role: "assistant", content: "" },
       ];
       const title =
         activeSession.title === "新对话"
-          ? query.slice(0, 18) || "市场研究"
+          ? query.slice(0, 18) ||
+            (effectiveWorkflowMode === "listing" ? "Listing Demo" : "市场研究")
           : activeSession.title;
 
       setMessages(optimisticHistory);
@@ -158,29 +197,42 @@ export function useCommerceResearch({
       clearAfterSubmit();
 
       setIsResearching(true);
-      setAgentStatus("正在理解你的市场研究目标…");
+      setAgentStatus(
+        effectiveWorkflowMode === "listing"
+          ? "正在理解商品 Brief 和 Listing 目标…"
+          : "正在理解你的市场研究目标…",
+      );
       setTokenInfo(null);
       setToolActivities([]);
-      agents.beginCommerceRun();
+      agents.beginCommerceRun(effectiveWorkflowMode);
 
       const abortController = new AbortController();
       abortRef.current = abortController;
       let finalText = "";
       let finalReport: CommerceResearchReport | undefined;
+      let finalListing: AmazonListingDemoReport | undefined;
       let runFailed = false;
+      let checkpointResult: CheckpointFinishResult = { status: "completed" };
+      const requestModel = options.modelOverride || selectedModel;
 
       try {
         const headers = {
-          ...buildLlmRequestHeaders(apiKeys, selectedModel),
+          ...buildLlmRequestHeaders(apiKeys, requestModel, endpointOverrides),
           ...buildCommerceCredentialHeaders(serviceKeys),
         };
 
-        const response = await fetch("/api/commerce/research", {
+        const endpoint =
+          effectiveWorkflowMode === "listing"
+            ? "/api/commerce/listing"
+            : "/api/commerce/research";
+        const response = await apiFetch(endpoint, {
           method: "POST",
           headers,
           body: JSON.stringify({
             query,
-            marketplace,
+            marketplace: effectiveMarketplace,
+            sessionId: activeSession.id,
+            checkpointId: options.checkpointId || "",
             sampleSize: 24,
             messages: messages
               .filter((message) => Boolean(message.content.trim()))
@@ -234,7 +286,12 @@ export function useCommerceResearch({
                     ...completed,
                     {
                       id: `commerce_${event.stage}_${now}`,
-                      label: STAGE_LABELS[event.stage],
+                      label: getCommerceProgressTitle(effectiveWorkflowMode, event.stage),
+                      detail: event.detail,
+                      stageId: getCommerceActivityStageId(
+                        effectiveWorkflowMode,
+                        event.stage,
+                      ),
                       status: "running" as const,
                       startedAt: now,
                     },
@@ -254,6 +311,23 @@ export function useCommerceResearch({
                     role: "assistant",
                     content: finalText,
                     commerceReport: finalReport,
+                    commerceListing: finalListing,
+                  },
+                ]);
+                continue;
+              }
+
+              if (
+                packet.type === "COMMERCE_LISTING" &&
+                isAmazonListingReport(packet.payload)
+              ) {
+                finalListing = packet.payload;
+                setMessages((current: Message[]) => [
+                  ...current.slice(0, -1),
+                  {
+                    role: "assistant",
+                    content: finalText,
+                    commerceListing: finalListing,
                   },
                 ]);
                 continue;
@@ -263,8 +337,11 @@ export function useCommerceResearch({
                 const detail =
                   packet.agent.currentTask ||
                   packet.agent.task ||
-                  "Cross-border Market Intelligence Agent 执行失败";
+                  effectiveWorkflowMode === "listing"
+                    ? "Amazon Listing Builder 执行失败"
+                    : "Cross-border Market Intelligence Agent 执行失败";
                 runFailed = true;
+                checkpointResult = { status: "failed", error: detail };
                 setAgentStatus(detail);
                 agents.failCommerceRun(detail);
                 const now = Date.now();
@@ -290,6 +367,7 @@ export function useCommerceResearch({
                     role: "assistant",
                     content: finalText,
                     commerceReport: finalReport,
+                    commerceListing: finalListing,
                   },
                 ]);
                 continue;
@@ -316,9 +394,24 @@ export function useCommerceResearch({
           }
         }
       } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
+        const aborted = error instanceof DOMException && error.name === "AbortError";
+        checkpointResult = aborted
+          ? { status: "interrupted", error: "用户停止或应用中断" }
+          : {
+              status: "failed",
+              error: error instanceof Error ? error.message : "Commerce Agent 请求失败",
+            };
+        if (aborted) {
+          runFailed = true;
+          agents.failCommerceRun("用户已停止当前任务");
+        }
+        if (!aborted) {
           const message =
-            error instanceof Error ? error.message : "Cross-border Market Intelligence Agent 请求失败";
+            error instanceof Error
+              ? error.message
+              : effectiveWorkflowMode === "listing"
+                ? "Amazon Listing Builder 请求失败"
+                : "Cross-border Market Intelligence Agent 请求失败";
           runFailed = true;
           finalText ||= `⚠️ ${message}`;
           agents.failCommerceRun(message);
@@ -339,13 +432,18 @@ export function useCommerceResearch({
           ),
         );
 
-        const answer = finalText || "已停止市场研究。";
+        const answer =
+          finalText ||
+          (effectiveWorkflowMode === "listing"
+            ? "已停止 Listing Demo。"
+            : "已停止市场研究。");
         const finalHistory: Message[] = [
           ...optimisticHistory.slice(0, -1),
           {
             role: "assistant",
             content: answer,
             commerceReport: finalReport,
+            commerceListing: finalListing,
           },
         ];
         setMessages(finalHistory);
@@ -360,6 +458,9 @@ export function useCommerceResearch({
         setIsResearching(false);
         setAgentStatus("");
         abortRef.current = null;
+        if (options.onCheckpointFinish) {
+          await options.onCheckpointFinish(checkpointResult);
+        }
       }
     },
     [
@@ -367,9 +468,11 @@ export function useCommerceResearch({
       agents,
       apiKeys,
       clearAfterSubmit,
+      endpointOverrides,
       isResearching,
       marketplace,
       messages,
+      workflowMode,
       persistSession,
       selectedModel,
       serviceKeys,
@@ -379,6 +482,8 @@ export function useCommerceResearch({
   );
 
   return {
+    workflowMode,
+    setWorkflowMode,
     isResearching,
     agentStatus,
     tokenInfo,
@@ -388,3 +493,5 @@ export function useCommerceResearch({
     reset,
   };
 }
+
+export type CommerceResearchController = ReturnType<typeof useCommerceResearch>;

@@ -55,7 +55,7 @@ export default function CustomTitleBar({
             />
             <defs>
               <linearGradient id="title-star" x1="4" y1="3" x2="16" y2="15">
-                <stop stopColor="#64b5ff" />
+                <stop stopColor="var(--accent-blue-hover)" />
                 <stop offset="1" stopColor="#bf5af2" />
               </linearGradient>
             </defs>
@@ -80,8 +80,8 @@ export default function CustomTitleBar({
           <span
             className="ml-1 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-medium"
             style={{
-              background: "rgba(10,132,255,0.12)",
-              color: "#0a84ff",
+              background: "var(--accent-blue-soft-strong)",
+              color: "var(--accent-blue)",
             }}
           >
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />

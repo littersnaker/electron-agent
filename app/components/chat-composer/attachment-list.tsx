@@ -84,7 +84,6 @@ export function AttachmentList({
                 }}
               >
                 {imagePreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- Data URL 预览不适合 Next Image 优化器。
                   <img
                     src={previewUrl}
                     alt={attachment.name}
