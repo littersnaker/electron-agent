@@ -50,3 +50,12 @@ next-env.d.ts
 # Local generated archives and agent scratch files
 app.zip
 agents/*
+.local-data/
+.pnpm-store/
+.agents/
+.python-build/
+.python-spec/
+python-dist/
+.vscode/
+.venv/
+.uploads/
