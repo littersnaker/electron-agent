@@ -256,10 +256,6 @@ class PlannerInputBuilder:
                 continue
 
             content = contents.get(path, "")
-            # 跳过过大的文件
-            if len(content) > self._max_file_chars:
-                content = content[: self._max_file_chars] + "\n（文件内容已截断）"
-
             result.append({"path": path, "content": content})
 
         return result

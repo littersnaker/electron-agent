@@ -40,7 +40,6 @@ OVERVIEW_PATH_TOKENS = (
     "config",
 )
 MAX_OVERVIEW_FILES = 8
-MAX_OVERVIEW_FILE_CHARS = 4_000
 
 
 def _overview_score(relative_path: str) -> int:
@@ -67,7 +66,7 @@ def _fallback_overview_files(root: Path) -> list[dict[str, object]]:
         if is_sensitive_workspace_path(relative):
             continue
         try:
-            if path.stat().st_size > 500_000 or is_probably_binary(path):
+            if is_probably_binary(path):
                 continue
         except (OSError, ValueError):
             continue
@@ -80,7 +79,7 @@ def _fallback_overview_files(root: Path) -> list[dict[str, object]]:
     for score, path in candidates[:MAX_OVERVIEW_FILES]:
         try:
             relative = path.relative_to(root).as_posix()
-            content = path.read_text("utf-8", errors="replace")[:MAX_OVERVIEW_FILE_CHARS]
+            content = path.read_text("utf-8", errors="replace")
             size = path.stat().st_size
         except (OSError, ValueError):
             continue

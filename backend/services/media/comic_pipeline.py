@@ -131,7 +131,7 @@ def build_comic_pipeline(
             credentials=credentials,
             messages=[
                 LlmMessage("system", _WRITER_SYSTEM),
-                LlmMessage("user", state["script"][:6000]),
+                LlmMessage("user", state["script"]),
             ],
             temperature=0.7,
             timeout_seconds=120,

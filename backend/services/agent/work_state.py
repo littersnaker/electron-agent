@@ -9,21 +9,15 @@ from backend.services.agent.command_runner import CommandResult
 from backend.services.llm.types import LlmUsage
 
 
-# 存储层 transcript 硬上限：单条观察与总字符数都受控，避免并行 Worker 的
-# 读取、搜索、diff 观察无上限膨胀到内存和 Checkpoint 中。
-MAX_TRANSCRIPT_ENTRY_CHARS = 16_000
-MAX_TRANSCRIPT_TOTAL_CHARS = 120_000
-MAX_TRANSCRIPT_KEEP_HEAD = 3
-MAX_TRANSCRIPT_KEEP_TAIL = 40
-_TRANSCRIPT_TRUNCATE_MARKER = "\n（单条观察已按存储预算截断）"
-
-
 @dataclass(slots=True)
 class WorkWorkerState:
     """保存一个并行 Worker 可持久化恢复的安全状态。"""
 
     transcript: list[str] = field(default_factory=list)
     read_versions: dict[str, str] = field(default_factory=dict)
+    # path -> 内容指纹：记录“完整内容当前已在 transcript 中”的文件版本，
+    # 用于工具结果瘦身（未变化文件不再重复注入全文，避免每轮全量重发）。
+    transcript_versions: dict[str, str] = field(default_factory=dict)
     changed_files: list[str] = field(default_factory=list)
     commands: list[CommandResult] = field(default_factory=list)
     usage: LlmUsage = field(default_factory=LlmUsage)
@@ -48,6 +42,8 @@ class WorkWorkerState:
     write_actions: int = 0
     guard_rejections: int = 0
     last_progress_iteration: int = 0
+    # 连续"有效但无进展"的轮次（协议错误轮不计入），用于停滞守卫判定。
+    stall_rounds: int = 0
     # 以下字段只描述当前尝试；每次 retry/replan 都会清零，避免旧守卫状态污染新尝试。
     attempt_number: int = 0
     attempt_iterations: int = 0
@@ -72,6 +68,7 @@ class WorkWorkerState:
         self.action_history.clear()
         self.context_action_history.clear()
         self.last_progress_iteration = 0
+        self.stall_rounds = 0
         if previous > 0:
             # 保留失败摘要、已修改文件和推理事实，但删除上一尝试的大段工具观察。
             summary = self.failure_summary.get("error") if self.failure_summary else ""
@@ -81,34 +78,17 @@ class WorkWorkerState:
                 f"FAILURE SUMMARY: {str(summary)[:4_000] or '请根据当前代码状态继续。'}",
                 f"EXISTING CHANGED FILES: {changed}",
             ]
+            # 上一尝试的完整文件内容已从 transcript 移除，指纹必须同步清空，
+            # 否则恢复后的 read 会把“未变化”误判为已在上下文中。
+            self.transcript_versions.clear()
 
     def append_transcript(self, entry: str) -> None:
-        """追加一条工具观察，并在存储层执行单条与总量硬上限。"""
+        """追加一条工具观察；单次任务内完整保留，不做截断或总量裁剪。
 
-        text = str(entry or "")
-        if len(text) > MAX_TRANSCRIPT_ENTRY_CHARS:
-            text = (
-                text[: MAX_TRANSCRIPT_ENTRY_CHARS - len(_TRANSCRIPT_TRUNCATE_MARKER)]
-                + _TRANSCRIPT_TRUNCATE_MARKER
-            )
-        self.transcript.append(text)
-        self._trim_transcript_storage()
+        压缩只发生在整段聊天的记忆层，不发生在单个任务的工作循环里。
+        """
 
-    def _trim_transcript_storage(self) -> None:
-        """把 transcript 总量限制在预算内：保留开头上下文与最近动作，丢弃中间。"""
-
-        if sum(len(item) for item in self.transcript) <= MAX_TRANSCRIPT_TOTAL_CHARS:
-            return
-        head = self.transcript[:MAX_TRANSCRIPT_KEEP_HEAD]
-        tail = self.transcript[-MAX_TRANSCRIPT_KEEP_TAIL:]
-        kept = list(dict.fromkeys([*head, *tail]))
-        while (
-            sum(len(item) for item in kept) > MAX_TRANSCRIPT_TOTAL_CHARS
-            and len(kept) > MAX_TRANSCRIPT_KEEP_HEAD
-        ):
-            # 丢弃最靠近开头的非头部记录，尽量保留最近动作。
-            kept.pop(MAX_TRANSCRIPT_KEEP_HEAD)
-        self.transcript = kept
+        self.transcript.append(str(entry or ""))
 
     def to_json(self) -> dict[str, Any]:
         """转换成 Checkpoint 可存储的 JSON。"""
@@ -116,6 +96,7 @@ class WorkWorkerState:
         return {
             "transcript": self.transcript,
             "readVersions": self.read_versions,
+            "transcriptVersions": self.transcript_versions,
             "changedFiles": self.changed_files,
             "commands": [
                 {
@@ -152,6 +133,7 @@ class WorkWorkerState:
             "writeActions": self.write_actions,
             "guardRejections": self.guard_rejections,
             "lastProgressIteration": self.last_progress_iteration,
+            "stallRounds": self.stall_rounds,
             "attemptNumber": self.attempt_number,
             "attemptIterations": self.attempt_iterations,
             "attemptInvalidRounds": self.attempt_invalid_rounds,
@@ -179,6 +161,10 @@ class WorkWorkerState:
             read_versions={
                 str(path): str(version)
                 for path, version in dict(value.get("readVersions") or {}).items()
+            },
+            transcript_versions={
+                str(path): str(version)
+                for path, version in dict(value.get("transcriptVersions") or {}).items()
             },
             changed_files=[str(item) for item in value.get("changedFiles", [])],
             commands=commands,
@@ -220,6 +206,7 @@ class WorkWorkerState:
             write_actions=int(value.get("writeActions") or 0),
             guard_rejections=int(value.get("guardRejections") or 0),
             last_progress_iteration=int(value.get("lastProgressIteration") or 0),
+            stall_rounds=int(value.get("stallRounds") or 0),
             attempt_number=int(value.get("attemptNumber") or 0),
             attempt_iterations=int(value.get("attemptIterations") or 0),
             attempt_invalid_rounds=int(value.get("attemptInvalidRounds") or 0),

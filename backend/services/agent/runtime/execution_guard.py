@@ -72,7 +72,9 @@ class ExecutionLimits:
             ),
             max_guard_rejections=base.max_guard_rejections,
             model_timeout_seconds=base.model_timeout_seconds,
-            max_stall_rounds=base.max_stall_rounds,
+            # 多文件 Work 需要先批量读取再动手编辑，放宽"无进展"轮次上限，
+            # 但保持小任务的高收敛要求，且只统计有效动作轮次（协议错误不计入）。
+            max_stall_rounds=max(4, min(10, base.max_stall_rounds + files // 2)),
         )
 
 
@@ -120,7 +122,7 @@ class WorkExecutionGuard:
                     "已停止当前 Work，避免无限分析。"
                 ),
             )
-        stall_rounds = self.state.attempt_iterations - self.state.last_progress_iteration
+        stall_rounds = self.state.stall_rounds
         if stall_rounds >= self.limits.max_stall_rounds:
             return GuardDecision(
                 allowed=False,
@@ -181,28 +183,37 @@ class WorkExecutionGuard:
             self.state.post_write_context_actions += int(self.state.write_actions > 0)
             self.state.context_action_history.append(fingerprint)
             self.state.context_action_history = self.state.context_action_history[-30:]
+            self.state.stall_rounds += 1
             return
 
         if refresh_context:
             # 并行文件版本发生变化时，允许再次读取同一路径获取新版本。
             self.state.context_action_history.clear()
             self.state.guard_rejections = 0
+            self.state.stall_rounds = 0
 
+        progressed = False
         if action.action == "edit" and progress_made:
             self._record_progress()
-            return
+            progressed = True
         if (
             action.action == "factory"
             and action.factory_mode == "generate"
             and progress_made
         ):
             self._record_progress()
+            progressed = True
         if (
             action.action in {"run", "complete_work"}
             and outcome_kind != "failure"
         ):
             # 运行/完成代表有实质进展，但不应把 write_actions 计数当作“已写文件”阶段。
             self.state.last_progress_iteration = self.state.attempt_iterations
+            self.state.stall_rounds = 0
+            progressed = True
+        if not progressed:
+            # 无变化的 edit、被跳过的 run 等仍属于空转轮次，计入停滞计数。
+            self.state.stall_rounds += 1
 
     def prompt_directive(self) -> str:
         """生成每轮附加给模型的短指令，明确剩余执行预算。"""
@@ -234,6 +245,7 @@ class WorkExecutionGuard:
         """累计一次守卫拒绝，并在达到阈值时要求终止。"""
 
         self.state.guard_rejections += 1
+        self.state.stall_rounds += 1
         stop = self.state.guard_rejections >= self.limits.max_guard_rejections
         return GuardDecision(
             allowed=False,
@@ -254,6 +266,7 @@ class WorkExecutionGuard:
         self.state.context_action_history.clear()
         self.state.guard_rejections = 0
         self.state.last_progress_iteration = self.state.attempt_iterations
+        self.state.stall_rounds = 0
 
 
 def action_fingerprint(action: AgentAction) -> str:

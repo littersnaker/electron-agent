@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from backend.services.agent.context import ContextCompactor, WorkContext
 from backend.services.agent.failure_summary import FailureSummary
@@ -20,9 +21,15 @@ from backend.services.agent.runtime.replanner import Replanner
 from backend.services.agent.token_budget import TokenBudgetGuard
 from backend.services.agent.work_models import WorkItem
 from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.workspace_tools import file_version
 
 _FILE_HEADER = re.compile(r"^--- FILE:\s*(.+?)\s*---$", re.MULTILINE)
 _MEMORY_HEADER = re.compile(r"^## Memory · ([^\n]+)$", re.MULTILINE)
+
+# Token 预算软信号：剩余低于"上限比例或绝对值"时，向模型注入收尾指令，
+# 而不是在调用前硬性终止 Work。
+BUDGET_WARNING_RATIO = 0.75
+BUDGET_WARNING_MIN_TOKENS = 8_000
 
 
 @dataclass(slots=True)
@@ -68,6 +75,7 @@ class WorkIntelligenceSession:
         project_tree: str,
         ledger_snapshot: dict[str, object],
         harness_context: str = "",
+        root: Path | None = None,
     ) -> None:
         """仅在首轮建立当前 Work 的独立上下文，避免注入全局完整历史。"""
 
@@ -78,10 +86,22 @@ class WorkIntelligenceSession:
             f"{harness_context}\n\n{initial_context}"
         )
         self.context.relevant_files = [path for path, _ in selected]
+        # 记录“完整内容已在 transcript 中”的文件指纹：这些文件首轮就在上下文里，
+        # 后续模型再 read 时若内容未变化，工具结果瘦身会直接复用，不再重复注入。
+        if root is not None:
+            for path, _ in selected:
+                version = file_version(root, path)
+                if version and version not in {
+                    "missing",
+                    "not-file",
+                    "unreadable",
+                    "blocked-sensitive",
+                }:
+                    self.state.transcript_versions[path] = version
         dependency_state = self._dependency_state(ledger_snapshot)
         metadata = self._project_metadata(project_tree)
         file_context = "\n\n".join(
-            f"--- FILE: {path} ---\n{content[:4_000]}" for path, content in selected
+            f"--- FILE: {path} ---\n{content}" for path, content in selected
         )
         memory_notes = self._extract_memory_notes(
             f"{harness_context}\n\n{initial_context}"
@@ -123,7 +143,7 @@ class WorkIntelligenceSession:
         return notes
 
     def build_prompt(self) -> WorkSessionPrompt:
-        """压缩历史并附加最新推理状态，返回本轮模型输入。"""
+        """组装本轮模型输入：完整保留工作循环内的全部观察，不做压缩。"""
 
         compacted, stats = self.compactor.compact_transcript(self.state.transcript)
         before = int(stats.get("before_tokens") or 0)
@@ -137,34 +157,83 @@ class WorkIntelligenceSession:
         if retry_prompt:
             prompt_parts.append(retry_prompt)
         text = "\n\n".join(part for part in prompt_parts if part.strip())
-        limit_chars = min(self.budget.get("context").limit, 10_000) * 3
-        if len(text) > limit_chars:
-            removed = max(0, len(text) - limit_chars) // 3
-            # 保留开头的目标与预读文件，再截断中间，最后保留最近动作。
-            head_budget = min(2_000, max(0, removed // 3))
-            tail_budget = max(1, limit_chars - head_budget)
-            if len(text) > tail_budget:
-                text = (
-                    text[:head_budget]
-                    + "\n…（中间上下文已按预算压缩）…\n"
-                    + text[-tail_budget:]
-                )
-            self.budget.get("context").record_cleaned(removed)
         estimate = max(1, (len(text.encode("utf-8")) + 3) // 4)
         self.context.token_usage["active"] = estimate
         self._persist()
         return WorkSessionPrompt(text=text, estimated_tokens=estimate)
 
+    def budget_directive(
+        self,
+        worker_budget: object,
+        estimated_tokens: int,
+    ) -> str:
+        """根据 Worker Token 剩余情况生成软信号指令；正常时返回空串。"""
+
+        consumed = int(getattr(worker_budget, "consumed", 0) or 0)
+        if consumed <= 0:
+            return ""
+        remaining = int(getattr(worker_budget, "remaining", 0) or 0)
+        limit = max(int(getattr(worker_budget, "limit", 1) or 1), 1)
+        urgent = remaining < estimated_tokens + 2_000 or consumed >= limit
+        soft_limit = max(int(limit * BUDGET_WARNING_RATIO), BUDGET_WARNING_MIN_TOKENS)
+        if urgent:
+            compacted = bool(self.state.quality.get("budgetCompacted"))
+            note = "（上下文已完成一次压缩）" if compacted else "（尚未压缩）"
+            return (
+                "TOKEN BUDGET EXHAUSTED"
+                f"{note}：Worker Token 预算已接近或超过上限，"
+                "剩余空间不足以再做新读取。本轮必须立即输出最有价值的动作："
+                "要么一次最小 edit 完成核心修改，要么直接 complete_work 总结现状；"
+                "禁止 read/search/inspect/factory，禁止空转。"
+            )
+        if remaining <= soft_limit:
+            return (
+                "TOKEN BUDGET WARNING：Worker Token 预算剩余不多，"
+                "请优先完成核心修改并尽快 complete_work，不要再读取新文件或扩大上下文。"
+            )
+        return ""
+
+    def compact_for_budget(self) -> bool:
+        """预算耗尽前的一次性紧急压缩，返回是否实际执行了压缩。"""
+
+        if bool(self.state.quality.get("budgetCompacted")):
+            return False
+        compacted, stats = self.compactor.compact_transcript_budget(
+            self.state.transcript
+        )
+        if not compacted:
+            return False
+        saved = max(0, int(stats.get("saved_tokens") or 0))
+        if saved > 0:
+            self.budget.get("context").record_compressed(saved)
+        self.state.quality["budgetCompacted"] = True
+        self.state.quality["budgetCompactionStats"] = stats
+        self.state.transcript = compacted
+        # 截断后的文件内容不再是完整版本，必须清空指纹，避免模型误读。
+        self.state.transcript_versions.clear()
+        self.state.append_transcript(
+            "CONTEXT COMPACTED: 预算耗尽前已完成工具结果瘦身与旧观察裁剪，"
+            "保留最近若干轮完整内容；请勿再重复读取文件，直接基于现有信息完成。"
+        )
+        self._persist()
+        return True
+
     def record_usage(self, total_tokens: int) -> bool:
-        """记录 Worker Token 并在严重超限时阻止无限调用。"""
+        """记录 Worker Token；严重超限时先压缩一次让循环收尾，而不是立即失败。"""
 
         within_budget = self.budget.consume("worker", total_tokens)
         mitigation = self.budget.apply_mitigation("worker")
         actions = [str(item) for item in mitigation.get("actions", [])]
         self.context.update_token_usage(total=max(0, total_tokens))
         self.state.quality["tokenMitigation"] = mitigation
+        if "block" in actions:
+            if not bool(self.state.quality.get("budgetCompacted")):
+                # 首次触发终止阈值：压缩上下文并允许再跑一轮收尾（edit 或 complete_work）。
+                # 若上下文本来就很小、压缩无事可做，则立即停止，避免无限放行。
+                return self.compact_for_budget()
+            return False
         self._persist()
-        return within_budget or "block" not in actions
+        return True
 
     def reflect(
         self,
@@ -217,6 +286,8 @@ class WorkIntelligenceSession:
             summary=self.failure,
             memory=self.memory,
         )
+        # 折叠 transcript 后，旧的完整文件内容不再在上下文中，指纹必须清空。
+        self.state.transcript_versions.clear()
         self.budget.consume("retry", max(1, len(error) // 3))
         self._persist()
 
@@ -245,7 +316,12 @@ class WorkIntelligenceSession:
         return sections
 
     def _dependency_state(self, snapshot: dict[str, object]) -> str:
-        """只保留当前 Work 与直接依赖状态，不发送完整 WorkList。"""
+        """只保留当前 Work 与直接依赖状态，不发送完整 WorkList。
+
+        已成功依赖折叠为结构化 VERIFIED FACTS（确认范围 + 修改文件 + 结论），
+        并明确标注可直接引用、无需重新读取验证，避免下游 Worker 重复验证
+        同一批文件而空耗 Token；未成功或当前 Work 保留完整 JSON。
+        """
 
         items = snapshot.get("items")
         selected = []
@@ -256,7 +332,31 @@ class WorkIntelligenceSession:
                 for item in items
                 if isinstance(item, dict) and str(item.get("id")) in wanted
             ]
-        return f"WORK DEPENDENCIES:\n{json.dumps(selected, ensure_ascii=False)}"
+        blocks: list[str] = ["WORK DEPENDENCIES:"]
+        for item in selected:
+            item_id = str(item.get("id") or "")
+            succeeded = str(item.get("status") or "").lower() == "succeeded"
+            if succeeded and item_id != self.work.id:
+                blocks.append(self._dependency_facts(item))
+            else:
+                blocks.append(json.dumps(item, ensure_ascii=False))
+        return "\n\n".join(blocks)
+
+    @staticmethod
+    def _dependency_facts(item: dict[str, object]) -> str:
+        """把已成功依赖折叠为结构化事实：确认范围、修改文件与最终结论。"""
+
+        dep_id = str(item.get("id") or "")
+        scope = [str(path) for path in (item.get("targetFiles") or [])]
+        changed = [str(path) for path in (item.get("changedFiles") or [])]
+        summary = " ".join(str(item.get("summary") or "").split())
+        lines = [f"[{dep_id}] 状态=已成功（结论可信，直接引用即可）"]
+        if scope:
+            lines.append(f"已确认文件（无需重新读取验证）: {', '.join(scope)}")
+        if changed:
+            lines.append(f"已修改文件: {', '.join(changed)}")
+        lines.append(f"结论: {summary or '该 Work 已成功完成。'}")
+        return "\n".join(lines)
 
     def _project_metadata(self, project_tree: str) -> str:
         """把完整项目树转换为语言、规模和顶层目录摘要。"""

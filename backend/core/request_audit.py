@@ -493,16 +493,16 @@ class RequestAuditMiddleware:
             "text/plain"
         ):
             replay_body = await _collect_body(receive)
-        body_consumed = replay_body is not None
 
         async def audit_receive() -> dict[str, Any]:
             nonlocal replay_body
-            if body_consumed:
-                if replay_body is not None:
-                    chunk = replay_body
-                    replay_body = None
-                    return {"type": "http.request", "body": chunk, "more_body": False}
-                return {"type": "http.disconnect"}
+            # 请求体只重放一次；之后必须透传真实 receive，绝不能伪造
+            # http.disconnect，否则 Starlette 的 StreamingResponse 会在流式
+            # 输出期间误以为客户端断连而取消整个 SSE 流。
+            if replay_body is not None:
+                chunk = replay_body
+                replay_body = None
+                return {"type": "http.request", "body": chunk, "more_body": False}
             return await receive()
 
         status_code: int | None = None
@@ -537,7 +537,8 @@ class RequestAuditMiddleware:
         )
         try:
             await self.app(scope, audit_receive, audit_send)
-        except BaseException:
+        except BaseException as exc:
+            LOGGER.exception("RequestAuditMiddleware 捕获异常: %s", type(exc).__name__, exc_info=exc)
             raise
         finally:
             audit_snapshot = effective_audit()

@@ -134,7 +134,7 @@ async def _stream_direct_media(
         )
         return
     prompt = re.sub(r"^(帮我|请|生成|画|做|来|一个|一张|一段|个|条)", "", user_text).strip()
-    prompt = prompt[:1200] or user_text[:1200]
+    prompt = prompt or user_text
     await throttle_media_request()
     endpoint = credentials.get_endpoint(provider)
     api_base = (

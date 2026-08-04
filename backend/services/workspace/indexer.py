@@ -191,7 +191,7 @@ def _query_terms(query: str) -> list[str]:
 async def search_project_index(
     project_id: str, query: str, *, limit: int = 10
 ) -> list[dict[str, object]]:
-    """在项目索引中搜索最相关文件，并返回截断后的内容。"""
+    """在项目索引中搜索最相关文件，并返回索引中的完整内容。"""
 
     terms = _query_terms(query)
     async with open_database() as connection:
@@ -217,7 +217,7 @@ async def search_project_index(
                 {
                     "path": path,
                     "size": int(row["size"]),
-                    "content": content[:12_000],
+                    "content": content,
                     "score": score,
                 },
             )

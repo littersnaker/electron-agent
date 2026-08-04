@@ -22,10 +22,6 @@ from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.software_factory.planning import enrich_software_factory_works
 
-
-MAX_PLANNING_CONTEXT_CHARS = 32_000
-
-
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     """读取整数环境变量并限制在安全区间。"""
 
@@ -324,7 +320,7 @@ priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不�
     prompt = build_planner_prompt(
         user_request=user_request,
         project_tree=project_tree,
-        initial_context=initial_context[:MAX_PLANNING_CONTEXT_CHARS],
+        initial_context=initial_context,
     )
     try:
         text, usage, model = await GATEWAY.complete(

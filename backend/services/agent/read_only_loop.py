@@ -22,44 +22,20 @@ from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.utils.sse import encode_sse
 
-MAX_READ_ONLY_TRANSCRIPT_CHARS = 80_000
-MAX_READ_ONLY_ENTRY_CHARS = 16_000
 MAX_READ_ONLY_ITERATIONS = 12
 MAX_SAME_ACTION_REPEATS = 2
 
 
 def _trim(entries: list[str]) -> str:
-    """从后向前保留足够的工具观察，避免长项目无限占用上下文。"""
+    """把工具观察完整拼接；单次任务内不做截断或总量裁剪。"""
 
-    selected: list[str] = []
-    consumed = 0
-    for entry in reversed(entries):
-        remaining = MAX_READ_ONLY_TRANSCRIPT_CHARS - consumed
-        if remaining <= 0:
-            break
-        selected.append(entry[-remaining:])
-        consumed += min(len(entry), remaining)
-    selected.reverse()
-    return "\n\n".join(selected)
+    return "\n\n".join(entries)
 
 
 def _append_transcript(entries: list[str], entry: str) -> None:
-    """追加观察并执行单条与总量存储上限，避免只读循环无界膨胀。"""
+    """追加观察；单次任务内完整保留，不做截断或总量裁剪。"""
 
-    text = str(entry or "")
-    marker = "\n（单条观察已按存储预算截断）"
-    if len(text) > MAX_READ_ONLY_ENTRY_CHARS:
-        text = text[: MAX_READ_ONLY_ENTRY_CHARS - len(marker)] + marker
-    entries.append(text)
-    if sum(len(item) for item in entries) <= MAX_READ_ONLY_TRANSCRIPT_CHARS:
-        return
-    kept = list(dict.fromkeys([*entries[:3], *entries[-30:]]))
-    while (
-        sum(len(item) for item in kept) > MAX_READ_ONLY_TRANSCRIPT_CHARS
-        and len(kept) > 3
-    ):
-        kept.pop(3)
-    entries[:] = kept
+    entries.append(str(entry or ""))
 
 
 def _parse_action(text: str) -> dict[str, Any]:

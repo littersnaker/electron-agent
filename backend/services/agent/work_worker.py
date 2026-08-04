@@ -59,9 +59,6 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 MAX_BATCH_WRITE_FILES = _env_int("CODE_AGENT_BATCH_WRITE_FILES", 16, 1, 64)
-MAX_BATCH_WRITE_CHARS = _env_int(
-    "CODE_AGENT_BATCH_WRITE_CHARS", 64_000, 4_000, 1_000_000
-)
 
 
 async def _try_batch_write(
@@ -103,12 +100,6 @@ async def _try_batch_write(
     if len(targets) > MAX_BATCH_WRITE_FILES and not targets_override:
         return None, "too_many"
     read = read_workspace_files_with_versions(root, targets)
-    if (
-        len(read.content) > MAX_BATCH_WRITE_CHARS
-        or "文件内容已截断" in read.content
-    ):
-        # 文件超过单文件读取上限时，模型会拿到截断内容，禁止批量直写，避免覆盖丢内容。
-        return None, "too_large"
 
     system = """你是一次性批量写入 Agent。CURRENT WORK 的目标文件全文已在输入中。
 直接返回一个 edit 动作 JSON，禁止返回 search/read/run 等其他动作，禁止附加 Markdown：
@@ -675,7 +666,7 @@ async def _try_write_then_review(
             credentials=credentials,
             messages=[
                 LlmMessage("system", _REVIEW_SYSTEM),
-                LlmMessage("user", user[:50_000]),
+                LlmMessage("user", user),
             ],
             temperature=0.1,
             timeout_seconds=180,
@@ -947,8 +938,7 @@ def _worker_prompt(
   - 已知文件必须一次 read 批量读取；Harness 已预读的内容不得再次搜索。
   - 动手 edit 前先核对目标文件是否已满足 CURRENT WORK 的验收标准；已满足则直接
     complete_work，不要重复修改；只修改确实缺失的部分。
-  - read 支持 offsets（字符偏移）：内容标注“已截断”时必须用不同 offsets 续读同一文件，
-    不能把截断内容当作全文，也不要在未截断时重复读取。
+  - read 默认返回完整文件内容；超大文件可用 offsets（字符偏移）分页查看。
   - 最多补充必要上下文，随后立即 edit；通过验收后立即 complete_work。
   - factory 只用于尚未被本地 Factory Worker处理的数据层工作。
   {factory_hint}
@@ -1005,6 +995,7 @@ async def execute_work(
             harness=harness,
             work=work,
         ),
+        root=root,
     )
     agent_id = f"modify_worker:{work.id}"
     guard = WorkExecutionGuard(
@@ -1101,22 +1092,17 @@ async def execute_work(
             and worker_budget.remaining
             < session_prompt.estimated_tokens + 2_000
         ):
-            error = (
-                f"Worker Token 预算不足：剩余 {worker_budget.remaining} Tokens，"
-                f"下一轮预计输入约 {session_prompt.estimated_tokens} Tokens；"
-                "已在调用前停止，交由 Planner 重新规划。"
-            )
-            session.record_failure(action="token_budget", error=error)
-            state.runtime_failures += 1
-            await checkpoint()
-            return WorkExecutionResult(
-                work.id,
-                False,
-                "",
-                error,
-                state,
-                failure_kind="guard",
-            )
+            # 预算不再作为调用前硬闸门：先压缩上下文腾出空间，再通过软信号
+            # 引导模型本轮收尾（edit 或 complete_work），而不是直接失败交回 Planner。
+            session.compact_for_budget()
+            session_prompt = session.build_prompt()
+        budget_hint = session.budget_directive(
+            worker_budget,
+            session_prompt.estimated_tokens,
+        )
+        user_text = f"{session_prompt.text}\n\n{guard.prompt_directive()}"
+        if budget_hint:
+            user_text = f"{user_text}\n\n{budget_hint}"
         next_attempt_iteration = state.attempt_iterations + 1
         attempt_note = (
             f" · 第 {state.attempt_number} 次尝试"
@@ -1155,7 +1141,7 @@ async def execute_work(
                     ),
                     LlmMessage(
                         "user",
-                        f"{session_prompt.text}\n\n{guard.prompt_directive()}",
+                        user_text,
                     ),
                 ],
                 temperature=0.1,
@@ -1191,10 +1177,11 @@ async def execute_work(
             worker_budget = dict(state.token_budget.get("worker") or {})
             budget_limit = int(worker_budget.get("limit") or 0)
             error = (
-                "Worker Token 预算严重超限，已阻止继续无限调用"
+                "Worker Token 预算严重超限且已完成一次上下文压缩"
                 f"（已消耗 {worker_budget.get('consumed') or 0} / "
                 f"触发终止阈值 {budget_limit * 2} Tokens；"
                 f"单 Work 预算上限 {budget_limit or '未知'}）。"
+                "压缩后仍无法收尾，停止继续消耗。"
             )
             session.record_failure(action="token_budget", error=error)
             state.runtime_failures += 1

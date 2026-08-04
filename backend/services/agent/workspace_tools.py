@@ -19,8 +19,6 @@ from backend.utils.sensitive_paths import (
 )
 
 
-MAX_READ_FILE_CHARS = 12_000
-MAX_READ_TOTAL_CHARS = 48_000
 MAX_SEARCH_FILE_BYTES = 1_500_000
 MAX_WRITE_FILE_CHARS = 2_000_000
 MAXIMUM_SOURCE_LINES = 500
@@ -36,6 +34,9 @@ class ReadBatchResult:
     content: str
     versions: dict[str, str]
     blocked_paths: list[str] = field(default_factory=list)
+    # path -> 该文件的独立内容块（含 --- path --- 头），供调用方做
+    # “未变化文件不重复注入”的瘦身，同时保证变化文件仍拿到完整内容。
+    contents: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -183,50 +184,45 @@ def read_workspace_files_with_versions(
 ) -> ReadBatchResult:
     """读取安全文本文件，并把敏感路径转换为非致命的过滤提示。
 
-    ``offsets`` 提供 path -> 字符偏移 的映射，用于对截断文件分页续读；
-    返回内容按预算截断并明确标注，避免把超大文件全文塞入模型上下文。
+    ``offsets`` 提供 path -> 字符偏移 的映射，用于超大文件分页查看；
+    单次任务内不做内容截断，模型始终拿到文件完整内容。
     """
 
     safe_paths, blocked_paths = partition_safe_workspace_paths(paths)
     offsets = offsets or {}
     sections: list[str] = []
+    contents: dict[str, str] = {}
     skip_message = render_sensitive_skip(blocked_paths)
     if skip_message:
         sections.append(skip_message)
     versions: dict[str, str] = {}
-    consumed = 0
     for relative_path in safe_paths:
         versions[relative_path] = file_version(root, relative_path)
         target = resolve_inside(root, relative_path)
         if not target.exists():
-            sections.append(f"--- {relative_path} ---\n（文件不存在）")
+            section = f"--- {relative_path} ---\n（文件不存在）"
+            sections.append(section)
+            contents[relative_path] = section
             continue
         if not target.is_file() or is_probably_binary(target):
-            sections.append(f"--- {relative_path} ---\n（不是可读取的文本文件）")
+            section = f"--- {relative_path} ---\n（不是可读取的文本文件）"
+            sections.append(section)
+            contents[relative_path] = section
             continue
         try:
             content = target.read_text("utf-8", errors="replace")
         except OSError as exc:
-            sections.append(f"--- {relative_path} ---\n（读取失败：{exc}）")
+            section = f"--- {relative_path} ---\n（读取失败：{exc}）"
+            sections.append(section)
+            contents[relative_path] = section
             continue
-        remaining = MAX_READ_TOTAL_CHARS - consumed
-        if remaining <= 0:
-            sections.append("（本轮读取总量达到上限，请下一轮继续 read）")
-            break
         offset = max(0, int(offsets.get(relative_path) or 0))
-        chunk_size = min(MAX_READ_FILE_CHARS, remaining)
-        included = content[offset : offset + chunk_size]
+        included = content[offset:]
         offset_note = f"（从字符 {offset} 续读）" if offset > 0 else ""
-        if offset + len(included) < len(content):
-            suffix = (
-                "\n（文件内容已截断，可用 offsets 从字符 "
-                f"{offset + len(included)} 续读）"
-            )
-        else:
-            suffix = ""
-        sections.append(f"--- {relative_path} ---{offset_note}\n{included}{suffix}")
-        consumed += len(included)
-    return ReadBatchResult("\n\n".join(sections), versions, blocked_paths)
+        section = f"--- {relative_path} ---{offset_note}\n{included}"
+        sections.append(section)
+        contents[relative_path] = section
+    return ReadBatchResult("\n\n".join(sections), versions, blocked_paths, contents)
 
 
 def read_workspace_files(root: Path, paths: list[str]) -> str:
@@ -265,7 +261,11 @@ def _apply_operation(target: Path, operation: EditOperation) -> tuple[str, str]:
             raise ValueError(f"replace 目标文件不存在：{operation.path}")
         occurrences = before.count(operation.old_text)
         if occurrences == 0:
-            raise ValueError(f"replace 未找到精确旧文本：{operation.path}")
+            hint = _nearby_text_hint(before, operation.old_text)
+            raise ValueError(
+                f"replace 未找到精确旧文本：{operation.path}"
+                + (f"；{hint}" if hint else "")
+            )
         count = -1 if operation.replace_all else 1
         after = before.replace(operation.old_text, operation.new_text, count)
 
@@ -273,6 +273,36 @@ def _apply_operation(target: Path, operation: EditOperation) -> tuple[str, str]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(after, encoding="utf-8", newline="")
     return before, after
+
+
+def _nearby_text_hint(before: str, needle: str) -> str:
+    """在精确替换失败时，返回与 oldText 最相似位置的上下文行，供模型修正。"""
+
+    if not needle or not before:
+        return ""
+    lines = before.splitlines()
+    if not lines:
+        return ""
+    needle_compact = "".join(needle.split())[:200]
+    if not needle_compact:
+        return ""
+    best_index = 0
+    best_score = -1.0
+    for index, line in enumerate(lines[:2_000]):
+        line_compact = "".join(line.split())[:200]
+        if not line_compact:
+            continue
+        score = difflib.SequenceMatcher(None, line_compact, needle_compact).ratio()
+        if score > best_score:
+            best_score = score
+            best_index = index
+    start = max(0, best_index - 3)
+    end = min(len(lines), best_index + 4)
+    context = "\n".join(
+        f"{number}: {line}"
+        for number, line in enumerate(lines[start:end], start=start + 1)
+    )
+    return f"最接近的代码块（行 {start + 1}~{end}）:\n{context[:1_500]}"
 
 
 def apply_edit_operations(

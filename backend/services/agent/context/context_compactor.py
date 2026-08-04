@@ -1,7 +1,7 @@
-"""Work Context 压缩器。
+"""Work Context 记忆压缩器。
 
-避免 847k token -> 无限增长，将 Raw History 压缩为 Action Summary -> Compressed Context。
-保留关键信息，删除冗余内容。
+整段聊天级别的记忆压缩仍由 Runtime/Memory 层负责；单个 Work 的工作循环内
+不做任何压缩或截断，确保模型每次都能看到完整的工具观察与文件内容。
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from backend.services.agent.context.work_context import WorkContext
 # 阈值配置
 MAX_WORK_CONTEXT_TOKEN = 10_000
 MAX_TOOL_OUTPUT_TOKEN = 3_000
+# 预算紧急压缩时完整保留的最近观察条数（更早的观察只做工具结果瘦身）。
+BUDGET_KEEP_RECENT_ENTRIES = 6
 
 
 @dataclass(slots=True)
@@ -178,64 +180,51 @@ class ContextCompactor:
     def compact_transcript(
         self, transcript: list[str]
     ) -> tuple[list[str], dict[str, Any]]:
-        """按实际 Token 体积压缩 transcript，而不是等待固定条数。
+        """单次任务内完整透传 transcript，不做截断、去重或总量裁剪。
 
-        少量记录也可能包含多个完整源码文件，因此先截断单条工具观察，再按上下文预算
-        保留初始目标、关键错误和最新动作。
+        文件大小未知，压缩会导致模型看不到完整内容而陷入循环读取；
+        因此本方法保留全部记录，仅返回统计信息供调用方使用。
         """
 
-        if not transcript:
-            return [], {"removed": 0, "before_tokens": 0, "after_tokens": 0}
-
         before_tokens = sum(self._estimate_tokens(item) for item in transcript)
-        normalized = [self._compact_transcript_entry(item) for item in transcript]
-        normalized_tokens = sum(self._estimate_tokens(item) for item in normalized)
-        if (
-            normalized_tokens <= self._max_work_context_token
-            and len(normalized) <= 20
-        ):
-            return normalized, {
+        return list(transcript), {
+            "removed": 0,
+            "before_tokens": before_tokens,
+            "after_tokens": before_tokens,
+        }
+
+    def compact_transcript_budget(
+        self, transcript: list[str]
+    ) -> tuple[list[str], dict[str, Any]]:
+        """预算耗尽前的一次性紧急压缩：完整保留最近若干轮，旧观察做工具结果瘦身。
+
+        这是预算硬性耗尽时的兜底路径（而不是正常循环的默认行为）：完整保留
+        最近 BUDGET_KEEP_RECENT_ENTRIES 条观察，只对更早的工具观察截断大段
+        源码/Diff，避免模型完全失去正在处理的文件内容；调用方会同时清空
+        transcript_versions，防止模型误以为截断后的内容仍是完整版本。
+        """
+
+        entries = list(transcript)
+        if not entries:
+            return entries, {
                 "removed": 0,
-                "before_tokens": before_tokens,
-                "after_tokens": normalized_tokens,
+                "before_tokens": 0,
+                "after_tokens": 0,
+                "saved_tokens": 0,
             }
-
-        head = normalized[:3]
-        recent = normalized[-12:]
-        middle_candidates = normalized[3:-12] if len(normalized) > 15 else []
-        keywords = (
-            "error",
-            "fail",
-            "exception",
-            "timeout",
-            "rejected",
-            "冲突",
-            "失败",
-            "未完成",
-        )
-        important = [
-            item
-            for item in middle_candidates
-            if any(keyword in item.lower() for keyword in keywords)
-        ][-6:]
-
-        selected = list(dict.fromkeys([*head, *important, *recent]))
-        # 从最旧的非目标记录开始删除，直至满足 Work Context 预算。
-        while (
-            sum(self._estimate_tokens(item) for item in selected)
-            > self._max_work_context_token
-            and len(selected) > 4
-        ):
-            remove_index = 3 if len(selected) > 6 else 1
-            selected.pop(remove_index)
-
-        selected = self._fit_entries_to_budget(selected)
-
-        after_tokens = sum(self._estimate_tokens(item) for item in selected)
-        return selected, {
-            "removed": max(0, len(transcript) - len(selected)),
+        before_tokens = sum(self._estimate_tokens(item) for item in entries)
+        recent_tail = entries[-BUDGET_KEEP_RECENT_ENTRIES:]
+        older = entries[:-BUDGET_KEEP_RECENT_ENTRIES]
+        slimmed = [self._compact_transcript_entry(entry) for entry in older]
+        fitted = self._fit_entries_to_budget(slimmed)
+        result = fitted + recent_tail
+        after_tokens = sum(self._estimate_tokens(item) for item in result)
+        saved_tokens = max(0, before_tokens - after_tokens)
+        return result, {
+            "removed": max(0, len(entries) - len(result)),
             "before_tokens": before_tokens,
             "after_tokens": after_tokens,
+            "saved_tokens": saved_tokens,
         }
 
     def _compact_transcript_entry(self, entry: str) -> str:

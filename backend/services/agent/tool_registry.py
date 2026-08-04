@@ -34,8 +34,8 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
         name="read",
         scope="read",
         description=(
-            "读取一个或多个已知相对路径的文本文件；大文件按预算截断并标注位置，"
-            "可用 offsets 从指定字符位置续读。"
+            "读取一个或多个已知相对路径的文本文件；返回完整文件内容，"
+            "超大文件可用 offsets 从指定字符位置分页查看。"
         ),
         example=(
             '{"action":"read","workId":"W001","paths":["src/app.ts"],'

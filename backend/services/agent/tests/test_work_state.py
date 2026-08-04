@@ -1,28 +1,24 @@
-"""WorkWorkerState 存储层 transcript 上限测试。"""
+"""WorkWorkerState 存储层 transcript 完整性测试。"""
 
 from __future__ import annotations
 
-from backend.services.agent.work_state import (
-    MAX_TRANSCRIPT_ENTRY_CHARS,
-    MAX_TRANSCRIPT_TOTAL_CHARS,
-    WorkWorkerState,
-)
+from backend.services.agent.work_state import WorkWorkerState
 
 
-def test_single_entry_is_truncated_to_entry_budget() -> None:
-    """超大单条观察必须在 append 时截断，不能全文进入内存。"""
+def test_single_entry_is_preserved_fully() -> None:
+    """超大单条观察必须完整保留，单次任务内不做截断。"""
 
     state = WorkWorkerState()
 
     state.append_transcript("ACTION read paths=['big.ts']\nOBSERVATION:\n" + "x" * 200_000)
 
     assert len(state.transcript) == 1
-    assert len(state.transcript[0]) <= MAX_TRANSCRIPT_ENTRY_CHARS
-    assert "已按存储预算截断" in state.transcript[0]
+    assert state.transcript[0].endswith("x" * 200_000)
+    assert len(state.transcript[0]) == len("ACTION read paths=['big.ts']\nOBSERVATION:\n") + 200_000
 
 
-def test_total_transcript_is_bounded_and_keeps_head() -> None:
-    """累计 transcript 超过预算时保留开头上下文与最近动作，丢弃中间。"""
+def test_total_transcript_is_preserved() -> None:
+    """累计 transcript 完整保留，单次任务内不做总量裁剪。"""
 
     state = WorkWorkerState()
     head = "WORK CONTEXT: 目标上下文"
@@ -34,7 +30,7 @@ def test_total_transcript_is_bounded_and_keeps_head() -> None:
 
     total = sum(len(item) for item in state.transcript)
 
-    assert total <= MAX_TRANSCRIPT_TOTAL_CHARS
     assert state.transcript[0] == head
     assert "ACTION read paths=[199]" in state.transcript[-1]
-    assert len(state.transcript) < 200
+    assert len(state.transcript) == 203
+    assert total > 200_000

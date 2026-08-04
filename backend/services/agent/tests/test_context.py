@@ -153,13 +153,13 @@ class TestContextCompactor:
         assert len(ctx.recent_actions[0]) < len(long_output)
 
     def test_compact_transcript(self):
-        """验证 test compact transcript 场景的输入、执行结果与兼容行为。"""
+        """单次任务内 transcript 完整透传，不做压缩。"""
         compactor = ContextCompactor()
         transcript = [f"历史记录 {i}" for i in range(100)]
         compacted, stats = compactor.compact_transcript(transcript)
-        assert len(compacted) < len(transcript)
-        assert stats["removed"] > 0
-        assert stats["before_tokens"] >= stats["after_tokens"]
+        assert compacted == transcript
+        assert stats["removed"] == 0
+        assert stats["before_tokens"] == stats["after_tokens"]
 
     def test_compact_transcript_small(self):
         """验证 test compact transcript small 场景的输入、执行结果与兼容行为。"""
@@ -179,8 +179,8 @@ class TestContextCompactor:
         assert result.estimated_tokens_after <= MAX_WORK_CONTEXT_TOKEN
 
 
-def test_compact_transcript_handles_few_but_huge_tool_outputs() -> None:
-    """不足二十条记录时，只要单条源码过大也必须按 Token 预算截断。"""
+def test_compact_transcript_preserves_huge_tool_outputs() -> None:
+    """超大工具观察必须完整保留，不得按 Token 预算截断。"""
 
     compactor = ContextCompactor(max_work_context_token=500, max_tool_output_token=100)
     transcript = [
@@ -191,8 +191,9 @@ def test_compact_transcript_handles_few_but_huge_tool_outputs() -> None:
 
     compacted, stats = compactor.compact_transcript(transcript)
 
-    assert stats["after_tokens"] < stats["before_tokens"]
-    assert any("已按 Token 预算截断" in item for item in compacted)
+    assert stats["after_tokens"] == stats["before_tokens"]
+    assert compacted == transcript
+    assert ("代码内容" * 2_000) in compacted[1]
 
 
 def test_worker_session_includes_memory_notes() -> None:

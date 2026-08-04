@@ -118,11 +118,42 @@ class WorkActionHandler:
             ReadBatchResult,
             await self._tool("workspace.read", arguments, {"read"}),
         )
-        self._env.state.read_versions.update(result.versions)
+        state = self._env.state
+        state.read_versions.update(result.versions)
         offset_note = f" offsets={action.offsets}" if action.offsets else ""
-        self._env.state.append_transcript(
-            f"ACTION read paths={action.paths}{offset_note}\nOBSERVATION:\n{result.content}"
-        )
+        # 工具结果瘦身：完整内容已在当前 transcript 中且文件未变化时，
+        # 只追加一行“未变化”提示，不再重复注入全文；文件变化或首次读取时
+        # 仍返回完整内容，保证模型始终能看到真实文件。
+        unchanged: list[str] = []
+        fresh_sections: list[str] = []
+        if not action.offsets:
+            for path in action.paths:
+                version = result.versions.get(path)
+                if version is None or version in {
+                    "missing",
+                    "not-file",
+                    "unreadable",
+                    "blocked-sensitive",
+                }:
+                    continue
+                if state.transcript_versions.get(path) == version:
+                    unchanged.append(path)
+                else:
+                    state.transcript_versions[path] = version
+                    section = result.contents.get(path)
+                    if section:
+                        fresh_sections.append(section)
+        observation_parts = [f"ACTION read paths={action.paths}{offset_note}"]
+        if unchanged:
+            observation_parts.append(
+                "OBSERVATION（以下文件未变化，完整内容已在上下文中，无需再次读取）:\n"
+                + ", ".join(unchanged)
+            )
+        if fresh_sections:
+            observation_parts.append("OBSERVATION:\n" + "\n\n".join(fresh_sections))
+        if not unchanged and not fresh_sections:
+            observation_parts.append(f"OBSERVATION:\n{result.content}")
+        state.append_transcript("\n\n".join(observation_parts))
         if result.blocked_paths:
             await self._lifecycle(
                 role="modify_worker",
@@ -322,7 +353,8 @@ class WorkActionHandler:
                 )
                 await self._refresh_versions(edit_result.changed_files)
         except Exception as exc:
-            if "并行冲突" in str(exc):
+            error_text = str(exc)
+            if "并行冲突" in error_text:
                 self._env.state.append_transcript(
                     f"EDIT RETRY REQUIRED: {exc}\n"
                     "请先 read 冲突文件，再基于最新内容重新 edit。"
@@ -334,6 +366,16 @@ class WorkActionHandler:
                         "正在读取最新版本后重试"
                     ),
                     tool_name="read_file_from_disk",
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue", refresh_context=True)
+            if "未找到精确旧文本" in error_text:
+                # replace 的 oldText 失配：把最接近的真实代码行反馈给模型，
+                # 让本轮直接修正，而不是把整个 Work 交给 Planner 重试。
+                self._env.state.append_transcript(
+                    f"EDIT RETRY REQUIRED: {exc}\n"
+                    "请基于上面给出的真实代码行重新生成 replace 的 oldText；"
+                    "不要整文件重写，也不要重复尝试同一个 oldText。"
                 )
                 await self._env.checkpoint()
                 return WorkActionOutcome("continue", refresh_context=True)

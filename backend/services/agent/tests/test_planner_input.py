@@ -107,15 +107,15 @@ export const cart = []
         assert "Related Memory" in prompt
         assert "购物车加载速度" in prompt
 
-    def test_build_truncates_large_files(self):
-        """验证 test build truncates large files 场景的输入、执行结果与兼容行为。"""
+    def test_build_preserves_large_files(self):
+        """单次任务内 Planner 输入不截断大文件，完整保留内容。"""
         builder = PlannerInputBuilder(max_file_chars=10)
         result = builder.build(
             user_goal="test",
             relevant_file_paths=["big.py"],
             file_contents={"big.py": "x" * 100_000},
         )
-        assert len(result.relevant_files[0]["content"]) <= 50
+        assert len(result.relevant_files[0]["content"]) == 100_000
 
     def test_build_includes_file_inventory(self):
         """楠岃瘉 Project File Inventory 只携带路径，且过滤无关注录。"""
