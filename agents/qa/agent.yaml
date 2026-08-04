@@ -4,6 +4,7 @@ adapter: qa_agent
 planner: conversational_qa
 skills:
   - qa-assistant
+  - glm46v-vision
 tools: []
 memory:
   - episodic

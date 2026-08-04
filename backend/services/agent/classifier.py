@@ -14,9 +14,7 @@ AgentMode = Literal["suggest", "auto_edit", "full_auto"]
 
 _WRITE_PATTERNS = (
     r"\b(add|create|implement|develop|fix|modify|update|delete|rename|refactor|write|apply|build)\b",
-    r"新增|创建|实现|开发|制作|搭建|做成|完善|修复|修改|更新|删除|重命名|重构|"
-    r"写入|替换|迁移|调整|改好|修好|落地|优化|接入|接上|接好|绑定|对接|"
-    r"写一个|写个|写好|补上|补齐|加上|装上|搭好|弄好|做好|实现好",
+    r"新增|创建|实现|开发|制作|搭建|做成|完善|修复|修改|更新|删除|重命名|重构|写入|替换|迁移|调整|改好|修好|落地",
 )
 _CONTINUATION_WRITE_PATTERNS = (
     r"\b(continue|resume|retry|finish it|complete it|do it|ship it)\b",
