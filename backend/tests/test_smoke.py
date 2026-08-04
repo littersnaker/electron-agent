@@ -155,6 +155,8 @@ def test_fastapi_workspace_and_commerce(tmp_path: Path, monkeypatch) -> None:
     # 从而保证冒烟测试完全离线、稳定且不会产生外部 API 费用。
     monkeypatch.setenv("TALORDATA_API_TOKEN", "")
     monkeypatch.setenv("SERPAPI_API_KEY", "")
+    # 禁用 Amazon 公开爬虫，保证“无数据源 → Demo 兜底”的断言不依赖外部网络。
+    monkeypatch.setenv("COMMERCE_AMAZON_CRAWLER", "0")
     get_settings.cache_clear()
     project_root = tmp_path / "demo-project"
     project_root.mkdir()
@@ -335,6 +337,27 @@ def test_provider_endpoint_environment_override(monkeypatch) -> None:
     assert endpoints == (
         "https://workspace.example.test/compatible-mode/v1/chat/completions",
     )
+
+
+def test_invalid_base_url_override_is_ignored(monkeypatch) -> None:
+    """把 API Key 填进 Base URL 环境变量时应回退默认端点，而不是拼出非法 URL。"""
+
+    monkeypatch.setenv("DASHSCOPE_BASE_URL", "sk-invalid-key-value")
+    endpoints = GATEWAY._provider_endpoints(get_provider("qwen"))
+
+    assert endpoints
+    assert all(endpoint.startswith("https://") for endpoint in endpoints)
+
+
+def test_invalid_request_base_url_is_ignored() -> None:
+    """请求头出现非 http(s) 的 Base URL 时应忽略并回退默认端点。"""
+
+    request = _request_with_headers(
+        [(b"x-llm-base-url-qwen", b"sk-invalid-key-value")]
+    )
+    credentials = resolve_credentials(request)
+
+    assert credentials.get_endpoint("qwen") is None
 
 
 def test_builtin_qwen_is_used_when_user_does_not_configure(monkeypatch) -> None:

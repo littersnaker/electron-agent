@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from backend.services.agent.work_models import WorkItem
+from backend.utils.paths import is_build_output_segment
 
 MAX_PREFLIGHT_FILES = 15
 
@@ -81,7 +82,10 @@ def extract_tree_paths(project_tree: str) -> list[str]:
         if not path:
             continue
         segments = path.split("/")
-        if any(segment in IGNORED_DIR_MARKS for segment in segments):
+        if any(
+            segment in IGNORED_DIR_MARKS or is_build_output_segment(segment)
+            for segment in segments
+        ):
             continue
         if path in seen:
             continue

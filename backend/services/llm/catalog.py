@@ -1,22 +1,39 @@
 """LLM 供应商与模型注册表。
 
-供应商地址仍在本文件中维护；聊天模型列表由 ``config/chat-models.json`` 生成。
-开发时保存 JSON 后，models watcher 会同时刷新 Python 与 TypeScript 注册表。
+全部从 ``config/*.json`` 运行时读取：providers.json 供应商、
+chat-models.json 聊天模型。改 JSON 后重启/重新构建即生效，不再需要生成脚本。
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, cast
 
-from backend.services.llm.catalog_generated import (
-    DEFAULT_MODEL_ID,
-    MODEL_CATALOG_DATA,
-    MODEL_ID_ALIASES,
-)
+CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
 
 
-ProviderId = Literal["qwen", "openai", "gemini", "deepseek", "glm", "kimi"]
+def _read_config(filename: str) -> dict:
+    """读取配置 JSON；缺失或损坏时快速失败，避免静默使用空注册表。"""
+
+    path = CONFIG_DIR / filename
+    try:
+        payload = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"模型配置文件缺失或损坏：{path}（{exc}）") from exc
+    return payload if isinstance(payload, dict) else {}
+
+
+ProviderId = Literal[
+    "qwen",
+    "openai",
+    "gemini",
+    "deepseek",
+    "glm",
+    "kimi",
+    "doubao",
+]
 Protocol = Literal["openai-compatible", "gemini"]
 
 
@@ -53,64 +70,47 @@ class ModelDefinition:
     is_custom: bool = False
 
 
-PROVIDERS: tuple[ProviderDefinition, ...] = (
-    ProviderDefinition(
-        "qwen",
-        "Qwen / DashScope",
-        "DASHSCOPE_API_KEY",
-        "x-llm-key-qwen",
-        "openai-compatible",
-        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-        (
-            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
-            "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions",
-        ),
-        "DASHSCOPE_BASE_URL",
-    ),
-    ProviderDefinition(
-        "openai",
-        "OpenAI",
-        "OPENAI_API_KEY",
-        "x-llm-key-openai",
-        "openai-compatible",
-        "https://api.openai.com/v1/chat/completions",
-        endpoint_environment_key="OPENAI_BASE_URL",
-    ),
-    ProviderDefinition(
-        "gemini",
-        "Google Gemini",
-        "GEMINI_API_KEY",
-        "x-llm-key-gemini",
-        "gemini",
-    ),
-    ProviderDefinition(
-        "deepseek",
-        "DeepSeek",
-        "DEEPSEEK_API_KEY",
-        "x-llm-key-deepseek",
-        "openai-compatible",
-        "https://api.deepseek.com/chat/completions",
-        endpoint_environment_key="DEEPSEEK_BASE_URL",
-    ),
-    ProviderDefinition(
-        "glm",
-        "GLM / BigModel",
-        "GLM_API_KEY",
-        "x-llm-key-glm",
-        "openai-compatible",
-        "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-        endpoint_environment_key="GLM_BASE_URL",
-    ),
-    ProviderDefinition(
-        "kimi",
-        "Kimi / Moonshot",
-        "KIMI_API_KEY",
-        "x-llm-key-kimi",
-        "openai-compatible",
-        "https://api.moonshot.cn/v1/chat/completions",
-        endpoint_environment_key="KIMI_BASE_URL",
-    ),
-)
+def _load_providers() -> (
+    tuple[
+        tuple[ProviderDefinition, ...],
+        dict[ProviderId, tuple[str, ...]],
+    ]
+):
+    """从 providers.json 加载供应商及其环境变量别名。"""
+
+    payload = _read_config("providers.json")
+    providers: list[ProviderDefinition] = []
+    env_keys: dict[ProviderId, tuple[str, ...]] = {}
+    for entry in payload.get("providers") or []:
+        if not isinstance(entry, dict):
+            continue
+        provider_id = cast(ProviderId, str(entry.get("id") or ""))
+        keys = tuple(str(item) for item in (entry.get("environmentKeys") or []))
+        env_keys[provider_id] = keys
+        providers.append(
+            ProviderDefinition(
+                id=provider_id,
+                name=str(entry.get("name") or provider_id),
+                environment_key=keys[0] if keys else "",
+                request_header=str(entry.get("requestHeader") or ""),
+                protocol=cast(
+                    Protocol,
+                    str(entry.get("protocol") or "openai-compatible"),
+                ),
+                default_endpoint=str(entry.get("defaultEndpoint") or "") or None,
+                fallback_endpoints=tuple(
+                    str(item) for item in (entry.get("fallbackEndpoints") or [])
+                ),
+                endpoint_environment_key=str(
+                    entry.get("endpointEnvironmentKey") or ""
+                )
+                or None,
+            )
+        )
+    return tuple(providers), env_keys
+
+
+PROVIDERS, PROVIDER_ENV_KEYS = _load_providers()
 
 AUTO_MODEL_ID = "auto"
 
@@ -132,9 +132,27 @@ def _create_model(raw: dict[str, object]) -> ModelDefinition:
     )
 
 
-MODELS: tuple[ModelDefinition, ...] = tuple(
-    _create_model(raw) for raw in MODEL_CATALOG_DATA
-)
+def _load_chat_models() -> (
+    tuple[tuple[ModelDefinition, ...], dict[str, str], str]
+):
+    """从 chat-models.json 加载聊天模型、别名与默认模型 ID。"""
+
+    payload = _read_config("chat-models.json")
+    raw_models = payload.get("models") or []
+    models = tuple(
+        _create_model(raw)
+        for raw in raw_models
+        if isinstance(raw, dict)
+    )
+    aliases = {
+        str(key): str(value)
+        for key, value in dict(payload.get("aliases") or {}).items()
+    }
+    default_id = str(payload.get("defaultModelId") or "")
+    return models, aliases, default_id
+
+
+MODELS, MODEL_ID_ALIASES, DEFAULT_MODEL_ID = _load_chat_models()
 
 
 def get_provider(provider_id: ProviderId) -> ProviderDefinition:

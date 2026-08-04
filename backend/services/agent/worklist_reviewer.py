@@ -9,37 +9,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from backend.services.agent.domain_rules import worklist_reviewer_rules
 from backend.services.agent.work_models import WorkItem
 from backend.services.agent.work_router import is_factory_audit_work
 from backend.services.agent.worklist_normalizer import (
     MAX_WORK_TARGET_FILES,
     split_oversized_works,
 )
+from backend.utils.paths import is_build_output_path
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
-FACTORY_GENERATE_TERMS = ("mock", "契约", "contract", "openapi", "数据源", "data source", "api client")
-GENERATE_TERMS = ("生成", "generate", "创建")
-PAGE_INTENT_TERMS = ("页面", "组件", "接入", "绑定", "路由", "界面", "page", "component", "widget")
-VALIDATION_ONLY_TERMS = (
-    "运行测试",
-    "执行测试",
-    "质量验证",
-    "验证全部",
-    "typecheck",
-    "lint 检查",
-    "只验证",
+FACTORY_GENERATE_TERMS = tuple(
+    str(item)
+    for item in worklist_reviewer_rules().get("factoryGenerateTerms") or ()
 )
-EDIT_INTENT_TERMS = (
-    "修复",
-    "修改",
-    "补齐",
-    "接入",
-    "编辑",
-    "实现",
-    "写入",
-    "fix",
-    "edit",
-    "implement",
+GENERATE_TERMS = tuple(
+    str(item)
+    for item in worklist_reviewer_rules().get("generateTerms") or ()
+)
+PAGE_INTENT_TERMS = tuple(
+    str(item)
+    for item in worklist_reviewer_rules().get("pageIntentTerms") or ()
+)
+VALIDATION_ONLY_TERMS = tuple(
+    str(item)
+    for item in worklist_reviewer_rules().get("validationOnlyTerms") or ()
+)
+EDIT_INTENT_TERMS = tuple(
+    str(item)
+    for item in worklist_reviewer_rules().get("editIntentTerms") or ()
 )
 
 
@@ -75,11 +73,17 @@ def review_worklist(works: list[WorkItem]) -> tuple[list[WorkItem], WorklistRevi
         targets = list(dict.fromkeys(item.target_files))
         if len(targets) != len(item.target_files):
             report.adjustments.append(f"Work {item.id} 目标文件重复，已去重")
-        item.target_files = [
-            path for path in targets if not is_sensitive_workspace_path(path)
+        filtered = [
+            path
+            for path in targets
+            if not is_sensitive_workspace_path(path)
+            and not is_build_output_path(path)
         ]
-        if len(item.target_files) != len(targets):
-            report.adjustments.append(f"Work {item.id} 含敏感路径，已过滤")
+        if len(filtered) != len(targets):
+            report.adjustments.append(
+                f"Work {item.id} 含敏感路径或构建产物（dist/release 等），已过滤"
+            )
+        item.target_files = filtered
 
     # 4) 执行类型再分配：纯生成走确定性 factory，纯验证走确定性验证执行器。
     for item in normalized:

@@ -128,6 +128,56 @@ async def test_prompt_optimizer_preserves_explicit_model_and_base_url(monkeypatc
     assert "model=qwen3.7-plus" in captured["prompt"]
 
 
+@pytest.mark.asyncio
+async def test_planner_receives_candidate_files_context(monkeypatch) -> None:
+    """传入候选文件时，Planner 系统提示词应包含候选文件上下文。"""
+
+    captured: list[str] = []
+
+    async def fake_complete(**kwargs):
+        captured.append(kwargs["messages"][0].content)
+        return (
+            json.dumps(
+                {
+                    "optimizedPrompt": "创建电商小程序",
+                    "objective": "创建电商小程序",
+                    "constraints": [],
+                    "acceptanceCriteria": [],
+                    "nonGoals": [],
+                    "validationCommands": [],
+                    "worklist": [
+                        {
+                            "id": "W001",
+                            "title": "整站生成",
+                            "objective": "创建全部页面",
+                            "targetFiles": ["src/cart/CartPage.tsx"],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            LlmUsage(prompt=20, completion=10, total=30),
+            SimpleNamespace(name="Planner Model"),
+        )
+
+    monkeypatch.setattr(
+        "backend.services.agent.task_planner.GATEWAY.complete",
+        fake_complete,
+    )
+    await prepare_code_task(
+        user_request="做一个电商小程序",
+        project_tree="",
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        candidate_files=["src/cart/CartPage.tsx", "src/home/HomePage.tsx"],
+    )
+
+    assert captured
+    assert "候选文件" in captured[0]
+    assert "src/cart/CartPage.tsx" in captured[0]
+
+
 def test_replan_keeps_successful_work_immutable() -> None:
     """验证重规划只能调整失败/待办 Work，不能让成功 Work 重复执行。"""
 
@@ -226,10 +276,179 @@ async def test_agent_loop_can_edit_many_files_and_finish(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_empty_project_generation_work_uses_one_shot_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """空项目中无 targetFiles 的“开发”类 Work 应走一键生成，不进多轮循环。"""
+
+    responses = iter(
+        [
+            {
+                "action": "edit",
+                "workId": "W001",
+                "summary": "创建购物车页",
+                "operations": [
+                    {
+                        "type": "write",
+                        "path": "src/pages/cart.tsx",
+                        "content": "export default function Cart() { return null; }\n",
+                    }
+                ],
+            },
+            {"verdict": "complete", "summary": "购物车页已创建"},
+        ]
+    )
+
+    async def fake_complete(**_kwargs):
+        return (
+            json.dumps(next(responses), ensure_ascii=False),
+            LlmUsage(prompt=10, completion=5, total=15),
+            SimpleNamespace(name="Fake Coding Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(WorkItem("W001", "购物车页开发", "开发购物车页面")),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert result is not None
+    assert result.worklist["succeeded"] == 1
+    # 一键生成 + 审查共 2 次模型调用（15 tokens/次），证明没有进入多轮循环。
+    assert result.usage.total == 30
+    assert (tmp_path / "src" / "pages" / "cart.tsx").is_file()
+
+
+@pytest.mark.asyncio
+async def test_empty_edit_feedback_leads_to_complete_work(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """空 operations 的 edit 应得到针对性反馈而不是协议失败，模型随后可正常完成。"""
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "CartPage.tsx").write_text(
+        "// 购物车页面\n",
+        "utf-8",
+    )
+    responses = iter(
+        [
+            {
+                "action": "edit",
+                "workId": "W001",
+                "summary": "已满足，无需修改",
+                "operations": [],
+            },
+            {"action": "complete_work", "workId": "W001", "summary": "无需修改"},
+        ]
+    )
+    async def fake_complete(**_kwargs):
+        return (
+            json.dumps(next(responses), ensure_ascii=False),
+            LlmUsage(prompt=10, completion=5, total=15),
+            SimpleNamespace(name="Fake Coding Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(
+            WorkItem(
+                "W001",
+                "购物车页开发",
+                "开发购物车页面",
+                target_files=["src/CartPage.tsx"],
+            )
+        ),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert result is not None
+    assert result.worklist["succeeded"] == 1
+    assert result.usage.total == 30
+
+
+@pytest.mark.asyncio
+async def test_non_empty_project_creation_work_uses_one_shot_create_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """非空项目中无 targetFiles 的创建类 Work 应一次性全量创建缺失文件，不进多轮循环。"""
+
+    (tmp_path / "src").mkdir()
+    for index in range(6):
+        (tmp_path / "src" / f"module_{index}.ts").write_text(
+            f"export const value_{index} = {index};\n",
+            "utf-8",
+        )
+
+    responses = iter(
+        [
+            {
+                "action": "edit",
+                "workId": "W001",
+                "summary": "创建购物车页",
+                "operations": [
+                    {
+                        "type": "write",
+                        "path": "src/pages/cart.tsx",
+                        "content": "export default function Cart() { return null; }\n",
+                    }
+                ],
+            },
+            {"verdict": "complete", "summary": "购物车页已创建"},
+        ]
+    )
+
+    async def fake_complete(**_kwargs):
+        return (
+            json.dumps(next(responses), ensure_ascii=False),
+            LlmUsage(prompt=10, completion=5, total=15),
+            SimpleNamespace(name="Fake Coding Model"),
+        )
+
+    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    result = None
+    async for event in stream_autonomous_loop(
+        root=tmp_path,
+        task_plan=_plan(WorkItem("W001", "购物车页开发", "开发购物车页面")),
+        initial_context="",
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+    ):
+        if event.kind == "result":
+            result = event.result
+
+    assert result is not None
+    assert result.worklist["succeeded"] == 1
+    assert result.usage.total == 30
+    assert (tmp_path / "src" / "pages" / "cart.tsx").is_file()
+
+
+@pytest.mark.asyncio
 async def test_failed_work_replans_with_full_snapshot_without_repeating_success(
     tmp_path: Path, monkeypatch
 ) -> None:
     """验证一个 Work 失败时，Planner 收到成功/失败/待办的完整 JSON。"""
+
+    (tmp_path / "src").mkdir()
+    for index in range(6):
+        (tmp_path / "src" / f"seed_{index}.ts").write_text(
+            f"export const seed_{index} = {index};\n",
+            "utf-8",
+        )
 
     responses = iter(
         [
@@ -241,11 +460,24 @@ async def test_failed_work_replans_with_full_snapshot_without_repeating_success(
                     {"type": "write", "path": "a.py", "content": "A = 1\n"}
                 ],
             },
-            {"action": "complete_work", "workId": "W001", "summary": "A 完成"},
+            {"verdict": "complete", "summary": "A 完成"},
             {
                 "action": "edit",
                 "workId": "W002",
                 "summary": "错误修改 B",
+                "operations": [
+                    {
+                        "type": "replace",
+                        "path": "missing.py",
+                        "oldText": "x",
+                        "newText": "y",
+                    }
+                ],
+            },
+            {
+                "action": "edit",
+                "workId": "W002",
+                "summary": "再次错误修改 B",
                 "operations": [
                     {
                         "type": "replace",
@@ -277,7 +509,7 @@ async def test_failed_work_replans_with_full_snapshot_without_repeating_success(
                     {"type": "write", "path": "b.py", "content": "B = 2\n"}
                 ],
             },
-            {"action": "complete_work", "workId": "W002", "summary": "B 完成"},
+            {"verdict": "complete", "summary": "B 完成"},
             {"action": "finish", "summary": "A 和 B 均完成", "tests": []},
         ]
     )
@@ -499,8 +731,10 @@ async def test_guard_stop_work_goes_to_replanner_with_failure_reason(
 
     monkeypatch.setenv("CODE_AGENT_MAX_CONTEXT_ACTIONS", "4")
     monkeypatch.setenv("CODE_AGENT_MAX_GUARD_REJECTIONS", "2")
+    # 本项目非空，走常规循环；调高停滞阈值，让“上下文动作超限”守卫先触发。
+    monkeypatch.setenv("CODE_AGENT_MAX_STALL_ROUNDS", "10")
     (tmp_path / "src").mkdir()
-    for index in range(4):
+    for index in range(7):
         (tmp_path / "src" / f"f{index}.py").write_text(f"V = {index}\n", "utf-8")
 
     responses = iter(
@@ -511,6 +745,7 @@ async def test_guard_stop_work_goes_to_replanner_with_failure_reason(
             {"action": "read", "workId": "W001", "paths": ["src/f3.py"]},
             {"action": "read", "workId": "W001", "paths": ["src/f4.py"]},
             {"action": "read", "workId": "W001", "paths": ["src/f5.py"]},
+            {"action": "read", "workId": "W001", "paths": ["src/f6.py"]},
             {
                 "reason": "目标模糊导致守卫终止，重设计为只读审计",
                 "retry": [
@@ -519,11 +754,13 @@ async def test_guard_stop_work_goes_to_replanner_with_failure_reason(
                         "title": "只读审计",
                         "objective": "仅审计 src 目录并输出结论",
                         "acceptanceCriteria": ["输出审计结论"],
+                        "targetFiles": ["src/f0.py"],
                     }
                 ],
                 "newWorks": [],
                 "skip": [],
             },
+            {"action": "complete_work", "workId": "W001", "summary": "审计完成"},
             {"action": "complete_work", "workId": "W001", "summary": "审计完成"},
         ]
     )

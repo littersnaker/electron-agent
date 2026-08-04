@@ -17,7 +17,13 @@ export interface Props {
   onClose: () => void;
 }
 
-export type MarketProviderId = "talordata" | "keepa" | "tiktok" | "temu" | "1688";
+export type MarketProviderId =
+  | "talordata"
+  | "keepa"
+  | "amazon"
+  | "tiktok"
+  | "temu"
+  | "1688";
 
 export type ConnectionState =
   | "idle"
@@ -119,6 +125,34 @@ export const PROVIDERS: ProviderDefinition[] = [
     ],
   },
   {
+    id: "amazon",
+    title: "Amazon SP-API",
+    subtitle: "Amazon 官方商品搜索（未配置时自动回退公开页爬虫）",
+    note: "填写 Client ID / Secret / Refresh Token 后走官方 SP-API；留空则使用 Amazon 公开搜索页爬虫作为初筛信号（受反爬影响，稳定性无保证）。",
+    fields: [
+      {
+        key: "amazonClientId",
+        label: "Client ID",
+        environmentKey: "AMAZON_SP_API_CLIENT_ID",
+        placeholder: "amzn1.application-oa2-client.…",
+      },
+      {
+        key: "amazonClientSecret",
+        label: "Client Secret",
+        environmentKey: "AMAZON_SP_API_CLIENT_SECRET",
+        placeholder: "Client Secret",
+        secret: true,
+      },
+      {
+        key: "amazonRefreshToken",
+        label: "Refresh Token",
+        environmentKey: "AMAZON_SP_API_REFRESH_TOKEN",
+        placeholder: "Atzr|…",
+        secret: true,
+      },
+    ],
+  },
+  {
     id: "tiktok",
     title: "TikTok Shop",
     subtitle: "可选官方/合作方授权增强；公开市场仍可由 TalorData 采样",
@@ -207,6 +241,7 @@ export function initialProviderStates(): Record<MarketProviderId, ProviderViewSt
   return {
     talordata: { state: "idle", message: "" },
     keepa: { state: "idle", message: "" },
+    amazon: { state: "idle", message: "" },
     tiktok: { state: "idle", message: "" },
     temu: { state: "idle", message: "" },
     "1688": { state: "idle", message: "" },

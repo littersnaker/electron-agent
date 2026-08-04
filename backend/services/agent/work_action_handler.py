@@ -356,7 +356,12 @@ class WorkActionHandler:
             files=list(edit_result.changed_files),
         )
         await self._env.checkpoint()
-        return WorkActionOutcome("continue", progress_made=True)
+        # 只有真实发生文件变更才算进展；空内容/无变化写入会被工具层跳过，
+        # 不能误记 progress，否则停滞守卫会被空转“骗过”。
+        return WorkActionOutcome(
+            "continue",
+            progress_made=bool(edit_result.changed_files),
+        )
 
     async def _run(self, action: AgentAction) -> WorkActionOutcome:
         """在全自动模式执行白名单质量命令。"""
@@ -422,23 +427,26 @@ class WorkActionHandler:
         )
 
     def _requires_factory_validation(self) -> bool:
-        """判断当前 Work 是否承担 Software Factory 的最终验收职责。"""
+        """判断当前 Work 是否承担 Software Factory 的最终验收职责。
+
+        只扫描标题与目标中“明确要调用 factory validate 做最终验收”的意图词，
+        不再扫描验收文案——避免页面类 Work 因验收里提到“数据闭环/契约”而被误拦，
+        写完页面却无法 complete_work，只能空转。
+        """
+
+        from backend.services.agent.domain_rules import complete_work_rules
 
         searchable = " ".join(
-            [
-                self._env.work.title,
-                self._env.work.objective,
-                *self._env.work.acceptance_criteria,
-            ]
+            [self._env.work.title, self._env.work.objective]
         ).lower()
-        validation_terms = (
-            "factory validate",
-            "software factory 一致性校验",
-            "验证契约、mock",
-            "契约校验",
-            "页面数据闭环",
+        terms = tuple(
+            str(item)
+            for item in complete_work_rules().get(
+                "factoryValidationIntentTerms"
+            )
+            or ()
         )
-        return any(term in searchable for term in validation_terms)
+        return any(term in searchable for term in terms)
 
     async def _record_generated_files(self, values: list[object]) -> None:
         """记录生成文件，并读取其最新版本指纹。"""

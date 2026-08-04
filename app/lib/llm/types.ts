@@ -6,7 +6,8 @@ export type LlmProviderId =
   | "gemini"
   | "deepseek"
   | "glm"
-  | "kimi";
+  | "kimi"
+  | "doubao";
 
 /** Agent Runtime 中的调用场景。 */
 export type LlmTaskType =

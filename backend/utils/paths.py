@@ -9,6 +9,47 @@ class UnsafePathError(ValueError):
     """表示某个文件路径越出了允许的工作区。"""
 
 
+_BUILD_OUTPUT_DIRECTORY_NAMES = {
+    "dist",
+    "build",
+    "release",
+    "coverage",
+    "output",
+    "storybook-static",
+    ".turbo",
+    ".next",
+}
+
+
+def is_build_output_segment(name: object) -> bool:
+    """判断单个目录名是否属于构建/发布产物：精确名单或以 ``-dist`` 结尾。
+
+    覆盖 ``app-dist``、``web-dist`` 这类常见构建输出目录，大小写不敏感。
+    """
+
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return False
+    return lowered in _BUILD_OUTPUT_DIRECTORY_NAMES or lowered.endswith("-dist")
+
+
+def is_build_output_path(relative_path: object) -> bool:
+    """判断相对路径的任一路径段是否命中构建/发布产物目录。"""
+
+    normalized = (
+        str(relative_path or "")
+        .strip()
+        .replace("\\", "/")
+        .strip("/")
+        .lower()
+    )
+    if not normalized:
+        return False
+    return any(
+        is_build_output_segment(segment) for segment in normalized.split("/")
+    )
+
+
 def resolve_inside(root: Path, relative_path: str) -> Path:
     """把相对路径解析为工作区内的绝对路径。
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shlex
@@ -19,6 +20,32 @@ from pathlib import Path
 MAX_COMMAND_OUTPUT_CHARS = 80_000
 DEFAULT_TIMEOUT_SECONDS = 180
 SHELL_META_PATTERN = re.compile(r"[;&|><`\r\n]")
+
+
+def _load_extra_whitelist() -> tuple[set[str], set[str]]:
+    """从用户配置追加命令白名单；默认配置为空数组，追加不会收窄安全基线。"""
+
+    try:
+        raw = json.loads(
+            (
+                Path(__file__).resolve().parents[3]
+                / "config"
+                / "command-whitelist.json"
+            ).read_text("utf-8")
+        )
+    except (OSError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        return set(), set()
+    executables = raw.get("allowedDirectExecutables") or []
+    scripts = raw.get("allowedPackageScripts") or []
+    return (
+        {str(item) for item in executables if isinstance(item, str)},
+        {str(item) for item in scripts if isinstance(item, str)},
+    )
+
+
+_EXTRA_EXECUTABLES, _EXTRA_PACKAGE_SCRIPTS = _load_extra_whitelist()
 ALLOWED_DIRECT_EXECUTABLES = {
     "pytest",
     "ruff",
@@ -26,7 +53,7 @@ ALLOWED_DIRECT_EXECUTABLES = {
     "tsc",
     "vitest",
     "jest",
-}
+} | _EXTRA_EXECUTABLES
 ALLOWED_PACKAGE_SCRIPTS = {
     "test",
     "lint",
@@ -40,7 +67,7 @@ ALLOWED_PACKAGE_SCRIPTS = {
     "backend:test",
     "backend:check",
     "electron:typecheck",
-}
+} | _EXTRA_PACKAGE_SCRIPTS
 
 
 @dataclass(slots=True)

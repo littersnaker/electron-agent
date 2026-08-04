@@ -8,44 +8,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from backend.services.agent.domain_rules import work_router_rules
 from backend.services.agent.work_models import WorkItem
 
 
 WorkHandler = Callable[..., Awaitable[Any]]
 
-FACTORY_AUDIT_TERMS = (
-    "审查",
-    "审计",
-    "补齐",
-    "补全",
-    "完整性",
-    "一致性",
-    "review",
-    "audit",
-    "verify",
-    "校验",
-    "检查",
+FACTORY_AUDIT_TERMS = tuple(
+    str(item)
+    for item in work_router_rules().get("factoryAuditTerms") or ()
 )
-FACTORY_TERMS = (
-    "mock",
-    "契约",
-    "contract",
-    "openapi",
-    "数据源",
-    "data source",
-    "api client",
-    "software factory",
+FACTORY_TERMS = tuple(
+    str(item)
+    for item in work_router_rules().get("factoryTerms") or ()
 )
-PAGE_INTENT_TERMS = (
-    "页面",
-    "组件",
-    "接入",
-    "绑定",
-    "路由",
-    "界面",
-    "page",
-    "component",
-    "widget",
+PAGE_INTENT_TERMS = tuple(
+    str(item)
+    for item in work_router_rules().get("pageIntentTerms") or ()
 )
 
 

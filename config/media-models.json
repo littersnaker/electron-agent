@@ -1,0 +1,125 @@
+{
+  "defaultMediaModelId": "qwen:qwen-image-2.0-pro",
+  "models": [
+    {
+      "id": "doubao:doubao-seedream-3-0-t2i",
+      "provider": "doubao",
+      "model": "doubao-seedream-3-0-t2i-250415",
+      "name": "豆包 Seedream 3.0 文生图",
+      "description": "火山引擎 Seedream 图像生成。",
+      "modes": ["text-to-image"],
+      "outputKind": "image",
+      "protocol": "volcengine-image"
+    },
+    {
+      "id": "doubao:doubao-seedance-1-0-t2v",
+      "provider": "doubao",
+      "model": "doubao-seedance-1-0-pro-250528",
+      "name": "豆包 Seedance 1.0 文生视频",
+      "description": "火山引擎 Seedance 文生视频（异步任务轮询）。",
+      "modes": ["text-to-video"],
+      "outputKind": "video",
+      "protocol": "volcengine-video-async"
+    },
+    {
+      "id": "qwen:qwen-image-2.0-pro",
+      "provider": "qwen",
+      "model": "qwen-image-2.0-pro-2026-06-22",
+      "name": "Qwen-Image 2.0 Pro",
+      "description": "千问图像生成与编辑 Pro。",
+      "modes": ["text-to-image", "image-edit"],
+      "outputKind": "image",
+      "protocol": "qwen-image-sync"
+    },
+    {
+      "id": "qwen:qwen-image-2.0",
+      "provider": "qwen",
+      "model": "qwen-image-2.0",
+      "name": "Qwen-Image 2.0",
+      "description": "速度更快的图片生成与编辑模型。",
+      "modes": ["text-to-image", "image-edit"],
+      "outputKind": "image",
+      "protocol": "qwen-image-sync"
+    },
+    {
+      "id": "qwen:wan2.7-t2v-2026-06-12",
+      "provider": "qwen",
+      "model": "wan2.7-t2v-2026-06-12",
+      "name": "Wan 2.7 文生视频 2026-06-12",
+      "description": "Wan 文生视频模型。",
+      "modes": ["text-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:wan2.7-t2v-2026-04-25",
+      "provider": "qwen",
+      "model": "wan2.7-t2v-2026-04-25",
+      "name": "Wan 2.7 文生视频 2026-04-25",
+      "description": "Wan 文生视频快照模型。",
+      "modes": ["text-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:happyhorse-1.1-t2v",
+      "provider": "qwen",
+      "model": "happyhorse-1.1-t2v",
+      "name": "HappyHorse 1.1 文生视频",
+      "description": "HappyHorse 有声文生视频模型。",
+      "modes": ["text-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:wan2.7-i2v-2026-04-25",
+      "provider": "qwen",
+      "model": "wan2.7-i2v-2026-04-25",
+      "name": "Wan 2.7 图生视频",
+      "description": "首帧图生视频模型。",
+      "modes": ["image-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:happyhorse-1.1-i2v",
+      "provider": "qwen",
+      "model": "happyhorse-1.1-i2v",
+      "name": "HappyHorse 1.1 图生视频",
+      "description": "首帧图生视频模型。",
+      "modes": ["image-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:happyhorse-1.1-r2v",
+      "provider": "qwen",
+      "model": "happyhorse-1.1-r2v",
+      "name": "HappyHorse 1.1 参考生视频",
+      "description": "参考图片生成视频模型。",
+      "modes": ["reference-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:wan2.7-r2v-2026-06-12",
+      "provider": "qwen",
+      "model": "wan2.7-r2v-2026-06-12",
+      "name": "Wan 2.7 参考生视频",
+      "description": "Wan 多模态参考生视频模型。",
+      "modes": ["reference-to-video"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    },
+    {
+      "id": "qwen:happyhorse-1.0-video-edit",
+      "provider": "qwen",
+      "model": "happyhorse-1.0-video-edit",
+      "name": "HappyHorse 1.0 视频编辑",
+      "description": "视频风格转换与局部编辑模型。",
+      "modes": ["video-edit"],
+      "outputKind": "video",
+      "protocol": "dashscope-video-async"
+    }
+  ]
+}

@@ -49,6 +49,9 @@ class TestExtractTreePaths:
                 "node_modules/pkg/index.js",
                 ".venv/lib/site.py",
                 "dist/bundle.js",
+                "web-dist/bundle.js",
+                "app-dist/app.js",
+                "release/app.js",
                 "app/",
             ]
         )
@@ -57,7 +60,23 @@ class TestExtractTreePaths:
         assert all("node_modules" not in p for p in paths)
         assert all(".venv" not in p for p in paths)
         assert all("dist" not in p for p in paths)
+        assert all("web-dist" not in p for p in paths)
+        assert all("app-dist" not in p for p in paths)
+        assert all("release" not in p for p in paths)
         assert all("app/" not in p for p in paths)
+
+
+def test_build_output_path_detection() -> None:
+    """-dist 后缀与 release 等生产目录应被识别为构建产物路径。"""
+
+    from backend.utils.paths import is_build_output_path
+
+    assert is_build_output_path("app-dist/bundle.js")
+    assert is_build_output_path("web-dist/app.js")
+    assert is_build_output_path("release/app.js")
+    assert is_build_output_path("dist/bundle.js")
+    assert not is_build_output_path("src/app.ts")
+    assert not is_build_output_path("redist/helper.py")
 
 
 class TestGreenfieldDetection:

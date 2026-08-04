@@ -82,13 +82,20 @@ class TokenBudgetGuard:
         """初始化预算守卫，可传入自定义配置。"""
 
         self._limits = {**TOKEN_LIMITS, **(limits or {})}
-        if limits is None or "worker" not in limits:
-            self._limits["worker"] = _env_int(
-                "CODE_AGENT_WORKER_TOKEN_BUDGET",
-                self._limits["worker"],
-                8_000,
-                1_000_000,
-            )
+        env_budget_map = (
+            ("planner", "CODE_AGENT_PLANNER_TOKEN_BUDGET", 1_000, 1_000_000),
+            ("worker", "CODE_AGENT_WORKER_TOKEN_BUDGET", 8_000, 1_000_000),
+            ("retry", "CODE_AGENT_RETRY_TOKEN_BUDGET", 1_000, 1_000_000),
+            ("context", "CODE_AGENT_CONTEXT_TOKEN_BUDGET", 4_000, 1_000_000),
+        )
+        for domain, env_name, minimum, maximum in env_budget_map:
+            if limits is None or domain not in limits:
+                self._limits[domain] = _env_int(
+                    env_name,
+                    self._limits[domain],
+                    minimum,
+                    maximum,
+                )
         self._budgets: dict[str, TokenBudget] = {
             key: TokenBudget(limit=limit) for key, limit in self._limits.items()
         }

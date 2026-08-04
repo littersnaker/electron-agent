@@ -135,6 +135,62 @@ async def test_batch_write_falls_back_when_model_returns_read(
 
 
 @pytest.mark.asyncio
+async def test_batch_write_empty_operations_marks_satisfied(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """模型返回空 operations 的 edit 表示目标已满足，应直接成功收尾。"""
+
+    (tmp_path / "a.ts").write_text("OLD_A", encoding="utf-8")
+
+    async def fake_complete(**_kwargs):
+        return (
+            json.dumps(
+                {
+                    "action": "edit",
+                    "workId": "W001",
+                    "summary": "已满足，无需修改",
+                    "operations": [],
+                }
+            ),
+            LlmUsage(prompt=10, completion=2, total=12),
+            SimpleNamespace(name="Batch Model"),
+        )
+
+    monkeypatch.setattr(
+        "backend.services.agent.work_worker.GATEWAY.complete",
+        fake_complete,
+    )
+    state = WorkWorkerState()
+    work = WorkItem(
+        id="W001",
+        title="修改 A",
+        objective="更新目标文件",
+        target_files=["a.ts"],
+        execution_type="coding",
+    )
+
+    result, reason = await _try_batch_write(
+        root=tmp_path,
+        work=work,
+        preferred_model_id="auto",
+        credentials=LlmCredentials(values={}),
+        execution_mode="auto_edit",
+        coordinator=WorkspaceResourceCoordinator(),
+        state=state,
+        emit=_noop,
+        checkpoint=_noop,
+        slot=1,
+    )
+
+    assert result is not None
+    assert result.succeeded is True
+    assert result.summary == "目标文件已满足验收标准，无需修改"
+    assert reason == "no_changes"
+    assert (tmp_path / "a.ts").read_text("utf-8") == "OLD_A"
+
+
+@pytest.mark.asyncio
 async def test_write_then_review_completes_generation_work(
     tmp_path, monkeypatch
 ) -> None:

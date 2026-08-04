@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.services.agent.harness import ProjectHarness
+from backend.services.agent.domain_rules import default_factory_domain_id
 from backend.services.agent.loop_support import ExecutionMode
 from backend.services.agent.validation_work import execute_validation_work
 from backend.services.agent.work_models import WorkItem
@@ -48,7 +49,7 @@ async def execute_factory_work(
     )
     arguments = {
         "request_text": request_text,
-        "domain_id": "commerce-miniapp",
+        "domain_id": default_factory_domain_id(),
         "output_root": output_root,
         "mock_count": 12,
         "overwrite": False,

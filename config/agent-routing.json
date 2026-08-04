@@ -1,0 +1,59 @@
+{
+  "aliases": {
+    "orchestrator": "orchestrator",
+    "coordinator": "orchestrator",
+    "manager": "orchestrator",
+    "planner": "planner",
+    "plan": "planner",
+    "researcher": "researcher",
+    "research": "researcher",
+    "search": "researcher",
+    "coder": "coder",
+    "coding": "coder",
+    "developer": "coder",
+    "reviewer": "reviewer",
+    "review": "reviewer",
+    "tester": "reviewer",
+    "terminal": "terminal",
+    "shell": "terminal",
+    "command": "terminal",
+    "media": "media",
+    "image": "media",
+    "video": "media",
+    "draw": "media",
+    "commerce": "commerce",
+    "market": "commerce",
+    "amazon": "commerce",
+    "ecommerce": "commerce"
+  },
+  "intents": [
+    {
+      "agent": "commerce",
+      "keywords": ["amazon", "commerce", "market", "电商", "跨境", "选品", "竞品", "市场研究"]
+    },
+    {
+      "agent": "media",
+      "keywords": ["media", "image", "video", "draw", "生图", "改图", "视频", "绘图", "海报"]
+    },
+    {
+      "agent": "terminal",
+      "keywords": ["terminal", "shell", "command", "run_terminal", "终端", "命令", "npm", "pnpm", "yarn", "test", "build"]
+    },
+    {
+      "agent": "reviewer",
+      "keywords": ["review", "diff", "check", "lint", "verify", "审查", "检查", "验证", "测试"]
+    },
+    {
+      "agent": "coder",
+      "keywords": ["apply", "write", "edit", "change", "patch", "propose", "代码", "修改", "写入", "创建文件"]
+    },
+    {
+      "agent": "researcher",
+      "keywords": ["search", "read", "list", "index", "find", "检索", "搜索", "读取", "目录", "索引"]
+    },
+    {
+      "agent": "planner",
+      "keywords": ["plan", "analy", "task", "规划", "计划", "分析", "拆解"]
+    }
+  ]
+}

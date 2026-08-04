@@ -273,11 +273,11 @@ class LlmGateway:
             credentials=credentials,
             messages=messages,
             temperature=0.0,
-        ):
+        )
             # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
         pass
         AVAILABILITY.mark_success(model, credentials)
-        return model
+        return model, max(0.0, network_ms)
 
     async def _stream_model(
         self,
@@ -312,27 +312,27 @@ class LlmGateway:
             endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
             messages=messages,
             temperature=temperature,
-        ).__aiter__()
-        while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                raise ProviderRequestError(
-                    f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
-                    scope="provider",
-                )
-            try:
-                chunk = await asyncio.wait_for(
-                    anext(iterator),
-                    timeout=min(stall_budget, remaining),
-                )
-            except StopAsyncIteration:
-                return
-            except asyncio.TimeoutError:
-                raise ProviderRequestError(
-                    f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
-                    scope="provider",
-                )
-            yield chunk
+        ).__aiter__():
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise ProviderRequestError(
+                        f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
+                        scope="provider",
+                    )
+                try:
+                    chunk = await asyncio.wait_for(
+                        anext(iterator),
+                        timeout=min(stall_budget, remaining),
+                    )
+                except StopAsyncIteration:
+                    return
+                except asyncio.TimeoutError:
+                    raise ProviderRequestError(
+                        f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
+                        scope="provider",
+                    )
+                yield chunk
 
     async def probe(
         self,
@@ -525,7 +525,16 @@ class LlmGateway:
             or builtin_override
         )
         if override:
-            return (self._normalize_chat_endpoint(override),)
+            if not override.startswith(("https://", "http://")):
+                # 常见配置错误：把 API Key 填进了 Base URL 字段/环境变量。
+                # 忽略该覆盖并回退默认端点，避免拼出 "unknown url type"。
+                LOGGER.warning(
+                    "忽略无效的 %s Base URL 覆盖：必须以 http(s):// 开头"
+                    "（可能把 API Key 填进了 Base URL 字段）",
+                    provider.id,
+                )
+            else:
+                return (self._normalize_chat_endpoint(override),)
         return tuple(
             endpoint
             for endpoint in (provider.default_endpoint, *provider.fallback_endpoints)

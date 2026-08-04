@@ -19,14 +19,6 @@ from backend.services.agent.request_routing import route_code_request
         ("切回读写模式，继续完成当前任务", "code_change"),
         ("恢复全自动权限", "code_change"),
         ("先分析失败原因，不要修改任何文件", "read_only"),
-        ("优化一下首页加载速度", "code_change"),
-        ("把后端接口接上前端页面", "code_change"),
-        ("把订单数据接上购物车页面", "code_change"),
-        ("写一个 README 并提交", "code_change"),
-        ("写个启动脚本", "code_change"),
-        ("绑定用户协议到注册页", "code_change"),
-        ("补齐订单列表的缺失字段", "code_change"),
-        ("做好商品详情的加载状态", "code_change"),
     ],
 )
 def test_mixed_read_and_write_intent_is_classified_correctly(

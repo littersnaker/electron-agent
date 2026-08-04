@@ -11,6 +11,9 @@ from fastapi import Request
 HEADER_TO_FIELD = {
     "x-commerce-talordata-token": "talordata",
     "x-commerce-keepa-key": "keepa",
+    "x-commerce-amazon-client-id": "amazon_client_id",
+    "x-commerce-amazon-client-secret": "amazon_client_secret",
+    "x-commerce-amazon-refresh-token": "amazon_refresh_token",
     "x-commerce-tiktok-client-key": "tiktok_client_key",
     "x-commerce-tiktok-client-secret": "tiktok_client_secret",
     "x-commerce-tiktok-merchant-id": "tiktok_merchant_id",
@@ -25,6 +28,9 @@ HEADER_TO_FIELD = {
 ENVIRONMENT_FIELDS = {
     "talordata": ("TALORDATA_API_TOKEN", "SERPAPI_API_KEY"),
     "keepa": ("KEEPA_API_KEY",),
+    "amazon_client_id": ("AMAZON_SP_API_CLIENT_ID",),
+    "amazon_client_secret": ("AMAZON_SP_API_CLIENT_SECRET",),
+    "amazon_refresh_token": ("AMAZON_SP_API_REFRESH_TOKEN",),
     "tiktok_client_key": ("TIKTOK_SHOP_CLIENT_KEY",),
     "tiktok_client_secret": ("TIKTOK_SHOP_CLIENT_SECRET",),
     "tiktok_merchant_id": ("TIKTOK_SHOP_MERCHANT_ID",),

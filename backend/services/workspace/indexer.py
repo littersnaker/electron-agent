@@ -14,6 +14,7 @@ from backend.services.workspace.repository import (
     update_project_index_state,
 )
 from backend.utils.paths import is_probably_binary
+from backend.utils.paths import is_build_output_segment
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 
@@ -75,6 +76,7 @@ def iter_project_files(root: Path):
             directory
             for directory in dirs
             if directory not in IGNORED_DIRECTORIES
+            and not is_build_output_segment(directory)
         )
         for name in sorted(files):
             path = Path(current) / name

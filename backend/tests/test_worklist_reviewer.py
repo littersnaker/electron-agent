@@ -68,6 +68,29 @@ def test_sensitive_paths_are_filtered() -> None:
     normalized, report = review_worklist(works)
 
     assert normalized[0].target_files == ["src/app.ts"]
+
+
+def test_build_output_paths_are_filtered() -> None:
+    """-dist 与 release 等构建产物目录不得进入 Work 目标文件。"""
+
+    works = [
+        _work(
+            "W001",
+            "构建产物",
+            "x",
+            target_files=[
+                "src/app.ts",
+                "web-dist/bundle.js",
+                "app-dist/app.js",
+                "release/app.js",
+            ],
+        ),
+    ]
+
+    normalized, report = review_worklist(works)
+
+    assert normalized[0].target_files == ["src/app.ts"]
+    assert any("构建产物" in note for note in report.adjustments)
     assert any("敏感路径" in note for note in report.adjustments)
 
 

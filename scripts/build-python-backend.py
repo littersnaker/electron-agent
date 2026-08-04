@@ -14,13 +14,38 @@ from pathlib import Path
 import PyInstaller.__main__
 
 from embed_builtin_credentials import embed_builtin_credentials
-from sync_model_catalog import sync_model_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIRECTORY = ROOT / "python-dist"
 WORK_DIRECTORY = ROOT / ".python-build"
 SPEC_DIRECTORY = ROOT / ".python-spec"
+
+REQUIRED_BUILD_IMPORTS = (
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "langgraph",
+    "PyInstaller",
+)
+
+
+def check_build_environment() -> None:
+    """构建前校验解释器，缺模块时直接报错，避免静默产出残缺安装包。"""
+
+    missing = [
+        name
+        for name in REQUIRED_BUILD_IMPORTS
+        if importlib.util.find_spec(name) is None
+    ]
+    if not missing:
+        return
+    raise SystemExit(
+        "当前 Python 缺少打包所需模块："
+        + "、".join(missing)
+        + "\n请改用已安装 requirements.txt 与 requirements-dev.txt 的解释器构建，例如：\n"
+        + "C:\\Users\\小艳艳的电脑\\AppData\\Local\\Programs\\Python\\Python314\\python.exe scripts\\build-python-backend.py"
+    )
 
 
 def clean_previous_build() -> None:
@@ -33,6 +58,21 @@ def clean_previous_build() -> None:
 
 def _pyinstaller_arguments() -> list[str]:
     """生成 PyInstaller 参数，并在已安装 tzdata 时显式收集时区文件。"""
+
+    def collect_optional(package_name: str) -> None:
+        """按需收集可选依赖包。
+
+        langgraph 1.x 是 PEP 420 namespace 包（没有顶层 __init__.py），
+        PyInstaller 的静态分析经常整包漏掉，必须显式 --collect-all。
+        """
+
+        if importlib.util.find_spec(package_name) is not None:
+            arguments.extend(
+                [
+                    f"--collect-all={package_name}",
+                    f"--hidden-import={package_name}",
+                ]
+            )
 
     arguments = [
         str(ROOT / "backend" / "main.py"),
@@ -55,7 +95,16 @@ def _pyinstaller_arguments() -> list[str]:
         "--hidden-import=uvicorn.protocols.websockets.auto",
         "--hidden-import=uvicorn.lifespan.on",
         "--hidden-import=backend.core._builtin_credentials_generated",
+        # 打包后 PROJECT_ROOT 指向 _internal，agent.yaml 与 system skills 必须作为数据文件一并打入。
+        f"--add-data={ROOT / 'agents'};agents",
+        f"--add-data={ROOT / 'skills' / 'system'};skills/system",
+        # 领域规则、市场与命令白名单配置同样需要在运行时读取。
+        f"--add-data={ROOT / 'config'};config",
     ]
+    collect_optional("langgraph")
+    collect_optional("langgraph_sdk")
+    collect_optional("langgraph_checkpoint")
+    collect_optional("langchain_core")
     if importlib.util.find_spec("tzdata") is not None:
         arguments.extend(["--collect-data=tzdata", "--hidden-import=tzdata"])
     return arguments
@@ -64,7 +113,6 @@ def _pyinstaller_arguments() -> list[str]:
 def build_executable() -> None:
     """嵌入百炼兜底后，调用 PyInstaller 生成后端可执行文件。"""
 
-    sync_model_catalog()
     embed_builtin_credentials()
     PyInstaller.__main__.run(_pyinstaller_arguments())
 
@@ -72,6 +120,7 @@ def build_executable() -> None:
 def main() -> None:
     """执行清理和构建，并检查最终文件是否存在。"""
 
+    check_build_environment()
     clean_previous_build()
     build_executable()
     bundle_directory = OUTPUT_DIRECTORY / "multi-agent-backend"

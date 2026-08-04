@@ -9,17 +9,14 @@ from typing import Literal
 from fastapi import Request
 
 from backend.core.builtin_credentials import get_builtin_value, has_builtin_value
-from backend.services.llm.catalog import PROVIDERS, ProviderId
+from backend.services.llm.catalog import (
+    PROVIDER_ENV_KEYS,
+    PROVIDERS,
+    ProviderId,
+)
 
 
-ENVIRONMENT_ALIASES: dict[ProviderId, tuple[str, ...]] = {
-    "qwen": ("DASHSCOPE_API_KEY",),
-    "openai": ("OPENAI_API_KEY",),
-    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "NEXT_PUBLIC_GEMINI_API_KEY"),
-    "deepseek": ("DEEPSEEK_API_KEY",),
-    "glm": ("GLM_API_KEY", "ZHIPU_API_KEY"),
-    "kimi": ("KIMI_API_KEY", "MOONSHOT_API_KEY"),
-}
+ENVIRONMENT_ALIASES: dict[ProviderId, tuple[str, ...]] = PROVIDER_ENV_KEYS
 
 # 当前只允许百炼使用随 Python 后端分发的共享兜底 Key。其他供应商仍要求用户
 # 自己配置，避免无意中把更多第三方密钥打进桌面安装包。
@@ -101,7 +98,9 @@ def _request_endpoint(request: Request, provider_id: ProviderId) -> str:
     if not value:
         return ""
     if not value.startswith(("https://", "http://")):
-        raise ValueError(f"{provider_id} Base URL 必须以 http:// 或 https:// 开头")
+        # 兼容配置错误：把 API Key 填进 Base URL 时忽略该覆盖，回退默认端点，
+        # 避免出现 “unknown url type” 这类难排查的报错。
+        return ""
     return value
 
 

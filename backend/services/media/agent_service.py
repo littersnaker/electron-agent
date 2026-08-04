@@ -26,6 +26,7 @@ from backend.services.media.comic_pipeline import (
 )
 from backend.services.media.dashscope import generate_media, resolve_media_api_base
 from backend.services.media.rate_limit import throttle_media_request
+from backend.services.media.volcengine import resolve_volcengine_base
 from backend.utils.sse import encode_sse, encode_sse_comment
 
 _COMIC_INTENT = re.compile(r"漫剧|分镜|剧本|漫画|分鏡|storyboard", re.IGNORECASE)
@@ -122,25 +123,35 @@ async def _stream_direct_media(
 ) -> AsyncIterator[str]:
     """单次文生图/文生视频（漫剧之外的普通媒体请求）。"""
 
-    yield _lifecycle_frame("正在调用 qwen 生成媒体内容…")
-    api_key = credentials.get("qwen")
-    if not api_key:
-        yield encode_sse({"type": "TEXT", "content": "缺少 qwen API Key，无法生成媒体。"})
-        return
     is_video = "视频" in user_text or "动画" in user_text
+    model_id = VIDEO_MODEL_ID if is_video else IMAGE_MODEL_ID
+    provider = str(model_id).split(":", 1)[0] or "qwen"
+    yield _lifecycle_frame(f"正在调用 {provider} 生成媒体内容…")
+    api_key = credentials.get(provider)
+    if not api_key:
+        yield encode_sse(
+            {"type": "TEXT", "content": f"缺少 {provider} API Key，无法生成媒体。"}
+        )
+        return
     prompt = re.sub(r"^(帮我|请|生成|画|做|来|一个|一张|一段|个|条)", "", user_text).strip()
     prompt = prompt[:1200] or user_text[:1200]
     await throttle_media_request()
+    endpoint = credentials.get_endpoint(provider)
+    api_base = (
+        resolve_volcengine_base(endpoint)
+        if provider == "doubao"
+        else resolve_media_api_base(endpoint)
+    )
     result = await generate_media(
         MediaGenerateBody(
-            model_id=VIDEO_MODEL_ID if is_video else IMAGE_MODEL_ID,
+            model_id=model_id,
             mode="text-to-video" if is_video else "text-to-image",
             prompt=prompt,
             negative_prompt="3D 渲染，CGI，塑料质感，写实照片" if not is_video else None,
             size=None if is_video else "1280*720",
         ),
         api_key,
-        resolve_media_api_base(credentials.get_endpoint("qwen")),
+        api_base,
     )
     attachments = result.get("attachments") or []
     yield _lifecycle_frame("生成完成", status="completed")

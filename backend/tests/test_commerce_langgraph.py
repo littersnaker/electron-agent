@@ -16,9 +16,15 @@ def _request(query: str = "yoga mat") -> CommerceRequest:
 
 
 @pytest.mark.asyncio
-async def test_research_demo_fallback_builds_full_report() -> None:
+async def test_research_demo_fallback_builds_full_report(monkeypatch) -> None:
     """无数据源 token 时走 Demo 兜底，报告结构完整且标记 isDemo。"""
 
+    from backend.services.commerce import langgraph as module
+
+    async def fake_amazon(_query, _marketplace, _creds, _limit):
+        return [], {"mode": "crawler"}
+
+    monkeypatch.setattr(module, "search_amazon", fake_amazon)
     graph = build_research_graph(_request(), {})
     state = await graph.ainvoke(
         {
@@ -77,7 +83,15 @@ async def test_research_parallel_collection_with_token(monkeypatch) -> None:
             {"ok": True},
         )
 
+    async def fake_amazon(_query, _marketplace, _creds, _limit):
+        return [], {"mode": "crawler"}
+
     monkeypatch.setattr(module, "request_search", fake_search)
+    monkeypatch.setattr(
+        module,
+        "search_amazon",
+        fake_amazon,
+    )
     graph = build_research_graph(_request("wireless earbuds"), {"talordata": "token"})
     state = await graph.ainvoke(
         {

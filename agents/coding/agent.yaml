@@ -5,6 +5,7 @@ planner: software_engineering
 skills:
   - workspace-code-agent
   - commerce-software-factory
+  - glm46v-vision
 tools:
   - workspace.search
   - workspace.read

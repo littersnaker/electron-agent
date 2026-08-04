@@ -6,7 +6,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
+
+MARKETPLACE_CONFIG_PATH = (
+    Path(__file__).resolve().parents[3] / "config" / "marketplaces.json"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,18 +25,34 @@ class Marketplace:
     currency: str
     amazon_domain: str
     country_name: str
+    sp_api_marketplace_id: str = ""
 
 
-MARKETPLACES: dict[str, Marketplace] = {
-    "US": Marketplace("US", "美国站", "en_US", "USD", "www.amazon.com", "United States"),
-    "CA": Marketplace("CA", "加拿大站", "en_CA", "CAD", "www.amazon.ca", "Canada"),
-    "UK": Marketplace("UK", "英国站", "en_GB", "GBP", "www.amazon.co.uk", "United Kingdom"),
-    "DE": Marketplace("DE", "德国站", "de_DE", "EUR", "www.amazon.de", "Germany"),
-    "FR": Marketplace("FR", "法国站", "fr_FR", "EUR", "www.amazon.fr", "France"),
-    "IT": Marketplace("IT", "意大利站", "it_IT", "EUR", "www.amazon.it", "Italy"),
-    "ES": Marketplace("ES", "西班牙站", "es_ES", "EUR", "www.amazon.es", "Spain"),
-    "JP": Marketplace("JP", "日本站", "ja_JP", "JPY", "www.amazon.co.jp", "Japan"),
-}
+def _load_marketplaces() -> dict[str, Marketplace]:
+    """从配置 JSON 加载市场，避免新增市场时修改业务流程代码。"""
+
+    try:
+        raw = json.loads(MARKETPLACE_CONFIG_PATH.read_text("utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    markets: dict[str, Marketplace] = {}
+    for code, item in (raw.items() if isinstance(raw, dict) else []):
+        if not isinstance(item, dict):
+            continue
+        normalized = str(code)
+        markets[normalized] = Marketplace(
+            code=normalized,
+            label=str(item.get("label") or ""),
+            locale=str(item.get("locale") or ""),
+            currency=str(item.get("currency") or ""),
+            amazon_domain=str(item.get("amazonDomain") or ""),
+            sp_api_marketplace_id=str(item.get("spApiMarketplaceId") or ""),
+            country_name=str(item.get("countryName") or ""),
+        )
+    return markets
+
+
+MARKETPLACES: dict[str, Marketplace] = _load_marketplaces()
 
 
 def get_marketplace(code: str) -> Marketplace:

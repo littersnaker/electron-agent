@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.services.agent.loop_protocol import EditOperation
+from backend.services.agent.icon_assets import backfill_placeholder_icons
 from backend.services.workspace.indexer import TEXT_EXTENSIONS, iter_project_files
 from backend.services.workspace.search_terms import extract_search_terms
 from backend.utils.paths import is_probably_binary, resolve_inside
@@ -119,6 +120,44 @@ def search_workspace(root: Path, query: str, *, limit: int = 24) -> str:
     if not matches:
         return "没有找到匹配文件。请换关键词或使用 read 读取已知路径。"
     return "\n\n".join(item[1] for item in matches[:limit])
+
+
+def score_workspace_paths(
+    root: Path,
+    query: str,
+    *,
+    limit: int = 24,
+) -> list[str]:
+    """按“路径 + 文件内容”命中度给工作区文本文件打分，返回相对路径列表。
+
+    中文请求（如“购物车”）能命中文件里的中文文案，从而把 `CartPage.tsx`
+    这类英文命名文件映射到任务；用于 Planner 前置筛查与 WorkList 异常检测。
+    """
+
+    terms = _query_terms(query)
+    if not terms:
+        return []
+    scored: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for path in _iter_text_files(root):
+        try:
+            content = path.read_text("utf-8", errors="replace")
+        except OSError:
+            continue
+        relative = path.relative_to(root).as_posix()
+        path_lower = relative.lower()
+        content_lower = content.lower()
+        score = sum(
+            (8 if term in path_lower else 0)
+            + min(content_lower.count(term), 20)
+            for term in terms
+        )
+        if score <= 0 or relative in seen:
+            continue
+        seen.add(relative)
+        scored.append((score, relative))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [relative for _score, relative in scored[:limit]]
 
 
 def file_version(root: Path, relative_path: str) -> str:
@@ -287,7 +326,14 @@ def apply_edit_operations(
                 target.write_bytes(previous)
         raise
 
+    created_icons = backfill_placeholder_icons(root, changed)
+    for icon_path in created_icons:
+        if icon_path not in changed:
+            changed.append(icon_path)
     preview = "\n\n".join(item for item in previews if item)
+    if created_icons:
+        icon_note = "（自动补齐占位图标：" + "、".join(created_icons) + "）"
+        preview = (preview + "\n" + icon_note) if preview else icon_note
     if len(preview) > 80_000:
         preview = f"{preview[:80_000]}\n（差异预览已截断）"
     return EditBatchResult(changed, deleted, preview or "（文件内容没有实际变化）")

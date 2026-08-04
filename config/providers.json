@@ -1,0 +1,86 @@
+{
+  "providers": [
+    {
+      "id": "qwen",
+      "name": "Qwen / DashScope",
+      "environmentKeys": ["DASHSCOPE_API_KEY"],
+      "requestHeader": "x-llm-key-qwen",
+      "endpointRequestHeader": "x-llm-base-url-qwen",
+      "endpointEnvironmentKey": "DASHSCOPE_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "fallbackEndpoints": [
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions"
+      ],
+      "placeholder": "sk-..."
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "environmentKeys": ["OPENAI_API_KEY"],
+      "requestHeader": "x-llm-key-openai",
+      "endpointRequestHeader": "x-llm-base-url-openai",
+      "endpointEnvironmentKey": "OPENAI_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://api.openai.com/v1/chat/completions",
+      "placeholder": "sk-..."
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "environmentKeys": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "NEXT_PUBLIC_GEMINI_API_KEY"
+      ],
+      "requestHeader": "x-llm-key-gemini",
+      "protocol": "gemini",
+      "placeholder": "AIza..."
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "environmentKeys": ["DEEPSEEK_API_KEY"],
+      "requestHeader": "x-llm-key-deepseek",
+      "endpointRequestHeader": "x-llm-base-url-deepseek",
+      "endpointEnvironmentKey": "DEEPSEEK_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://api.deepseek.com/chat/completions",
+      "placeholder": "sk-..."
+    },
+    {
+      "id": "glm",
+      "name": "GLM / BigModel",
+      "environmentKeys": ["GLM_API_KEY", "ZHIPU_API_KEY"],
+      "requestHeader": "x-llm-key-glm",
+      "endpointRequestHeader": "x-llm-base-url-glm",
+      "endpointEnvironmentKey": "GLM_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "placeholder": "API Key"
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi / Moonshot",
+      "environmentKeys": ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+      "requestHeader": "x-llm-key-kimi",
+      "endpointRequestHeader": "x-llm-base-url-kimi",
+      "endpointEnvironmentKey": "KIMI_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://api.moonshot.cn/v1/chat/completions",
+      "placeholder": "sk-..."
+    },
+    {
+      "id": "doubao",
+      "name": "豆包 / 火山引擎",
+      "environmentKeys": ["DOUBAO_API_KEY"],
+      "requestHeader": "x-llm-key-doubao",
+      "endpointRequestHeader": "x-llm-base-url-doubao",
+      "endpointEnvironmentKey": "DOUBAO_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "placeholder": "API Key"
+    }
+  ]
+}

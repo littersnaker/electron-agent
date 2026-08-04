@@ -21,22 +21,23 @@ _PROGRESS_ACTIONS = {"edit", "factory"}
 class ExecutionLimits:
     """保存可通过环境变量调整的 Worker 收敛阈值。"""
 
-    max_iterations: int = 16
-    max_context_actions: int = 6
-    max_post_write_context_actions: int = 3
+    max_iterations: int = 12
+    max_context_actions: int = 5
+    max_post_write_context_actions: int = 2
     max_guard_rejections: int = 2
     model_timeout_seconds: int = 300
+    max_stall_rounds: int = 4
 
     @classmethod
     def from_environment(cls, target_file_count: int = 0) -> "ExecutionLimits":
         """读取环境变量并把异常值限制在安全范围。"""
 
         base = cls(
-            max_iterations=_env_int("CODE_AGENT_MAX_WORK_ITERATIONS", 16, 6, 80),
-            max_context_actions=_env_int("CODE_AGENT_MAX_CONTEXT_ACTIONS", 6, 3, 24),
+            max_iterations=_env_int("CODE_AGENT_MAX_WORK_ITERATIONS", 12, 6, 60),
+            max_context_actions=_env_int("CODE_AGENT_MAX_CONTEXT_ACTIONS", 5, 3, 24),
             max_post_write_context_actions=_env_int(
                 "CODE_AGENT_MAX_POST_WRITE_CONTEXT_ACTIONS",
-                3,
+                2,
                 1,
                 12,
             ),
@@ -52,19 +53,26 @@ class ExecutionLimits:
                 30,
                 900,
             ),
+            max_stall_rounds=_env_int(
+                "CODE_AGENT_MAX_STALL_ROUNDS",
+                4,
+                2,
+                12,
+            ),
         )
         # 多文件 Work（购物车 UI + 状态同步等）需要更多读取与编辑轮次；
         # 按目标文件数量自适应放宽，同时保留小任务的高收敛要求。
         files = max(0, int(target_file_count or 0))
         return cls(
-            max_iterations=max(6, min(32, base.max_iterations + files * 2)),
-            max_context_actions=max(3, min(12, base.max_context_actions + files // 2)),
+            max_iterations=max(6, min(24, base.max_iterations + files)),
+            max_context_actions=max(3, min(10, base.max_context_actions + files // 2)),
             max_post_write_context_actions=max(
                 1,
-                min(6, base.max_post_write_context_actions + files // 4),
+                min(5, base.max_post_write_context_actions + files // 4),
             ),
             max_guard_rejections=base.max_guard_rejections,
             model_timeout_seconds=base.model_timeout_seconds,
+            max_stall_rounds=base.max_stall_rounds,
         )
 
 
@@ -110,6 +118,17 @@ class WorkExecutionGuard:
                 error=(
                     "模型连续忽略执行守卫，仍重复读取或搜索；"
                     "已停止当前 Work，避免无限分析。"
+                ),
+            )
+        stall_rounds = self.state.attempt_iterations - self.state.last_progress_iteration
+        if stall_rounds >= self.limits.max_stall_rounds:
+            return GuardDecision(
+                allowed=False,
+                stop=True,
+                error=(
+                    f"执行守卫终止：Work 已连续 {stall_rounds} 轮无实质进展"
+                    "（未成功写入、运行或完成），"
+                    "已停止当前 Work 并交由 Planner 重新规划，避免空转消耗 Token。"
                 ),
             )
         return GuardDecision(allowed=True)
@@ -178,6 +197,12 @@ class WorkExecutionGuard:
             and progress_made
         ):
             self._record_progress()
+        if (
+            action.action in {"run", "complete_work"}
+            and outcome_kind != "failure"
+        ):
+            # 运行/完成代表有实质进展，但不应把 write_actions 计数当作“已写文件”阶段。
+            self.state.last_progress_iteration = self.state.attempt_iterations
 
     def prompt_directive(self) -> str:
         """生成每轮附加给模型的短指令，明确剩余执行预算。"""

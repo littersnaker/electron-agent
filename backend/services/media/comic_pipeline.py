@@ -20,6 +20,7 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
 from backend.services.media.dashscope import generate_media, resolve_media_api_base
+from backend.services.media.volcengine import resolve_volcengine_base
 from backend.services.media.rate_limit import throttle_media_request
 from backend.services.media.video_merge import merge_videos
 
@@ -177,11 +178,17 @@ def build_comic_pipeline(
             "status": "pending",
             "error": "",
         }
-        api_key = credentials.get("qwen")
-        api_base = resolve_media_api_base(credentials.get_endpoint("qwen"))
+        provider = str(image_model_id).split(":", 1)[0] or "qwen"
+        api_key = credentials.get(provider)
+        endpoint = credentials.get_endpoint(provider)
+        api_base = (
+            resolve_volcengine_base(endpoint)
+            if provider == "doubao"
+            else resolve_media_api_base(endpoint)
+        )
         if not api_key:
             record["status"] = "failed"
-            record["error"] = "缺少 qwen API Key"
+            record["error"] = f"缺少 {provider} API Key"
             return {"shots": [record]}
 
         await lifecycle(f"分镜 {index}：生成画面…")

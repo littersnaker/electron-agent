@@ -7,10 +7,18 @@ from fastapi import Request
 from backend.services.commerce.credentials import read_credentials, secret_fingerprint
 from backend.services.commerce.marketplaces import get_marketplace
 from backend.services.commerce.sources.ali1688 import search_1688
+from backend.services.commerce.sources.amazon import search_amazon
 from backend.services.commerce.sources.tiktokshop import fetch_tiktok_access_token
 from backend.services.commerce.talordata import CURRENT_ENDPOINT, request_search
 
-SUPPORTED_HEALTH_PROVIDERS = {"talordata", "keepa", "tiktok", "temu", "1688"}
+SUPPORTED_HEALTH_PROVIDERS = {
+    "talordata",
+    "keepa",
+    "tiktok",
+    "temu",
+    "1688",
+    "amazon",
+}
 
 
 def read_data_source_status() -> dict[str, object]:
@@ -25,6 +33,16 @@ def read_data_source_status() -> dict[str, object]:
         "keepa": {
             "configured": bool(credentials.get("keepa")),
             "fingerprint": secret_fingerprint(credentials.get("keepa")),
+        },
+        "amazon": {
+            "configured": bool(
+                credentials.get("amazon_client_id")
+                and credentials.get("amazon_client_secret")
+                and credentials.get("amazon_refresh_token")
+            ),
+            "fingerprint": secret_fingerprint(
+                credentials.get("amazon_refresh_token")
+            ),
         },
         "tiktok": {
             "configured": bool(
@@ -72,6 +90,43 @@ async def verify_data_source(request: Request) -> dict[str, object]:
             "state": "configured" if credentials.get("keepa") else "unconfigured",
             "message": "Keepa 凭据已填写；当前未做真实 API 探测。",
         }
+    if provider == "amazon":
+        configured = bool(
+            credentials.get("amazon_client_id")
+            and credentials.get("amazon_client_secret")
+            and credentials.get("amazon_refresh_token")
+        )
+        try:
+            observations, diagnostic = await search_amazon(
+                "probe",
+                get_marketplace("US"),
+                credentials,
+                1,
+            )
+            mode = str(diagnostic.get("mode") or "crawler")
+            if not observations:
+                return {
+                    "ok": False,
+                    "state": "empty",
+                    "message": f"Amazon {mode} 请求成功但未解析到结果。",
+                    **diagnostic,
+                }
+            return {
+                "ok": True,
+                "state": "configured" if configured else "crawler",
+                "message": (
+                    f"Amazon {mode} 数据源连接正常。"
+                    if configured
+                    else "Amazon 公开爬虫可用（未配置 SP-API 凭据）。"
+                ),
+                **diagnostic,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "state": "failed",
+                "message": f"Amazon 探测失败：{exc}",
+            }
     if provider == "tiktok":
         client_key = credentials.get("tiktok_client_key")
         client_secret = credentials.get("tiktok_client_secret")

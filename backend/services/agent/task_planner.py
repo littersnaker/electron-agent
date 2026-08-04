@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +24,22 @@ from backend.software_factory.planning import enrich_software_factory_works
 
 
 MAX_PLANNING_CONTEXT_CHARS = 32_000
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """读取整数环境变量并限制在安全区间。"""
+
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+# Planner 提示词中的数量上限统一走环境变量，避免改规划策略要动代码。
+PLAN_MIN_WORKS = _env_int("CODE_AGENT_PLAN_MIN_WORKS", 3, 1, 12)
+PLAN_MAX_WORKS = _env_int("CODE_AGENT_PLAN_MAX_WORKS", 8, 2, 24)
+PLAN_TARGET_FILES_CAP = _env_int("CODE_AGENT_PLAN_TARGET_FILES_CAP", 15, 3, 60)
 
 
 @dataclass(slots=True)
@@ -250,6 +267,7 @@ async def prepare_code_task(
     initial_context: str,
     preferred_model_id: str,
     credentials: LlmCredentials,
+    candidate_files: list[str] | None = None,
 ) -> PreparedTask:
     """把原始输入优化成执行规格和去重 WorkList。"""
 
@@ -275,6 +293,25 @@ async def prepare_code_task(
 每个 coding/artifact Work 必须填写 targetFiles（具体相对路径数组），禁止留空；批量直写依赖它。不要只填 src、app、pages 等宽泛目录；宽泛目录只表示影响范围，不应阻止其他模块并行。
 priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不冲突的 Work 会滚动并行，任一 Work 完成后立即补充新任务。会写同一具体文件或共享资源的 Work 必须填写相同 targetFiles/serialGroup，并用 priority 确定串行先后。
 纯重命名、移动或删除空目录使用 filesystem；普通代码理解与修改使用 coding（兼容旧值 agent）；只执行质量命令使用 validation 并填写 validationCommands；生成可复用产物使用 artifact。filesystem 将由本地执行器完成，不调用 Worker 大模型。"""
+    system = system.replace(
+        "默认 3-6 个 Work，最多 8 个。",
+        f"默认 {PLAN_MIN_WORKS} 个左右 Work，最多 {PLAN_MAX_WORKS} 个。",
+    )
+    system = system.replace(
+        "单个 Work 的 targetFiles 控制在 15 个以内",
+        f"单个 Work 的 targetFiles 控制在 {PLAN_TARGET_FILES_CAP} 个以内",
+    )
+    system = system.replace(
+        "每组不超过 15 个",
+        f"每组不超过 {PLAN_TARGET_FILES_CAP} 个",
+    )
+    if candidate_files:
+        system += "\n\n" + (
+            "内容检索到的项目相关候选文件（按匹配度排序，可能已存在，优先引用而不是新建）：\n"
+            + "\n".join(f"- {path}" for path in candidate_files[:20])
+            + "\ntargetFiles 应优先从这些候选文件中选择已存在的文件；"
+            "只有确认该文件确实不存在时才新建并给出新路径。"
+        )
     # Planner 只接收目标、项目元数据和相关文件摘要，不接收全仓库或完整历史。
     greenfield = is_greenfield_project(project_tree)
     if greenfield:

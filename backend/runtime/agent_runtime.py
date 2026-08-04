@@ -15,6 +15,11 @@ from backend.runtime.agent_registry import AgentRegistry
 from backend.runtime.context import ContextManager
 from backend.runtime.contracts import RuntimeRequest
 from backend.runtime.task_manager import TaskManager
+from backend.services.glm46v import (
+    builtin_skill_catalog,
+    resolve_builtin_skills,
+    split_registry_and_builtin_skill_ids,
+)
 from backend.skills import SkillRegistry
 from backend.tools.code_tools import register_code_tools
 
@@ -97,7 +102,13 @@ class AgentRuntime:
                 scope_ids=scopes,
                 top_k=8,
             )
-            fixed_skills = self._skills.resolve(registered.config.skills)
+            registry_skill_ids, builtin_skill_ids = split_registry_and_builtin_skill_ids(
+                registered.config.skills
+            )
+            fixed_skills = [
+                *self._skills.resolve(registry_skill_ids),
+                *resolve_builtin_skills(builtin_skill_ids),
+            ]
             # 兼容测试替身和旧版 SkillRegistry：只有实现动态匹配接口时才启用。
             matcher = getattr(self._skills, "match", None)
             dynamic_skills = (
@@ -210,9 +221,20 @@ class AgentRuntime:
 
         from backend.tools.gateway import TOOL_GATEWAY
 
+        skills = list(self._skills.catalog())
+        known_ids = {
+            str(item.get("id") or "")
+            for item in skills
+            if isinstance(item, dict)
+        }
+        skills.extend(
+            item
+            for item in builtin_skill_catalog()
+            if str(item.get("id") or "") not in known_ids
+        )
         return {
             "agents": self._agents.catalog(),
-            "skills": self._skills.catalog(),
+            "skills": skills,
             "tools": TOOL_GATEWAY.catalog(),
         }
 

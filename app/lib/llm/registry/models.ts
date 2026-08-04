@@ -1,27 +1,20 @@
-// 模块说明：把单一 JSON 模型表生成的常量转换成前端强类型注册表。
+// 模块说明：前端聊天模型注册表直接读取 config/chat-models.json，
+// 改 JSON 后重新构建前端即可生效，不再经过生成脚本。
 import type {
   LlmModelDefinition,
   LlmProviderId,
 } from "../types";
-import {
-  GENERATED_DEFAULT_MODEL_ID,
-  GENERATED_MODEL_CATALOG,
-  GENERATED_MODEL_ID_ALIASES,
-} from "./models.generated";
+import chatModelConfig from "../../../../config/chat-models.json";
 
 export const AUTO_MODEL_ID = "auto";
-export const DEFAULT_MODEL_ID = GENERATED_DEFAULT_MODEL_ID;
+export const DEFAULT_MODEL_ID = chatModelConfig.defaultModelId as string;
 
-/**
- * 聊天模型唯一源文件是 config/chat-models.json。
- * 保存 JSON 后，开发 watcher 会刷新此处导入的 models.generated.ts。
- */
 export const LLM_MODEL_CATALOG =
-  GENERATED_MODEL_CATALOG satisfies readonly LlmModelDefinition[];
+  chatModelConfig.models as unknown as readonly LlmModelDefinition[];
 
 /** 旧版保存值到新版稳定逻辑 ID 的迁移表。 */
 const MODEL_ID_ALIASES: Readonly<Record<string, string>> =
-  GENERATED_MODEL_ID_ALIASES;
+  chatModelConfig.aliases as Readonly<Record<string, string>>;
 
 /** 按逻辑 ID、旧版别名或厂商真实模型名查找模型。 */
 export function getModelDefinition(
