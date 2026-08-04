@@ -333,6 +333,7 @@ priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不�
             messages=[LlmMessage("system", system), LlmMessage("user", prompt)],
             temperature=0.1,
             timeout_seconds=180,
+            audit={"agentRole": "prompt_optimizer"},
         )
         raw = _extract_json(text)
         works = _parse_work_items(raw.get("worklist"))
@@ -463,6 +464,7 @@ failures 数组逐条列出每个失败 Work 的原因、状态与失败类型�
         ],
         temperature=0.1,
         timeout_seconds=120,
+        audit={"agentRole": "task_planner"},
     )
     raw = _extract_json(text)
     existing_ids = {item.id for item in ledger.items}

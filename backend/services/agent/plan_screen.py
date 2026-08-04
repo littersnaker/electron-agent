@@ -166,6 +166,7 @@ async def refine_plan_works(
         ],
         temperature=0.1,
         timeout_seconds=120,
+        audit={"agentRole": "plan_screen"},
     )
     by_id = {work.id: work for work in plan.works}
     applied: list[str] = []

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.api.router import api_router
 from backend.core.config import get_settings
 from backend.core.logging import configure_console_encoding, configure_logging
+from backend.core.request_audit import RequestAuditMiddleware
 from backend.core.timezones import PACIFIC_TIMEZONE, timezone_source
 from backend.runtime.bootstrap import RUNTIME
 from backend.services.llm.custom_models import initialize_custom_models
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestAuditMiddleware)
     app.include_router(api_router)
     _register_exception_handlers(app)
     _register_frontend(app)

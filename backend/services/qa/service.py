@@ -50,6 +50,7 @@ async def stream_qa_agent(
             credentials=credentials,
             messages=_build_messages(body, runtime_context),
             temperature=0.3,
+            audit={"agentRole": "qa_stream"},
         ):
             content = ""
 

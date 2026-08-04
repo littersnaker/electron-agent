@@ -144,6 +144,11 @@ async def _try_batch_write(
             temperature=0.1,
             timeout_seconds=300,
             stall_timeout_seconds=90,
+            audit={
+                "agentId": f"modify_worker:{work.id}",
+                "agentRole": "batch_write",
+                "parentRequestId": work.id,
+            },
         )
     except Exception:
         return None, "write_failed"
@@ -435,6 +440,11 @@ async def _try_generate_all_files(
             temperature=0.1,
             timeout_seconds=300,
             stall_timeout_seconds=90,
+            audit={
+                "agentId": f"modify_worker:{work.id}",
+                "agentRole": "generate_all",
+                "parentRequestId": work.id,
+            },
         )
     except Exception:
         return None
@@ -670,6 +680,11 @@ async def _try_write_then_review(
             temperature=0.1,
             timeout_seconds=180,
             stall_timeout_seconds=90,
+            audit={
+                "agentId": f"modify_worker:{work.id}",
+                "agentRole": "review_patch",
+                "parentRequestId": work.id,
+            },
         )
     except Exception:
         state.append_transcript("REVIEW CALL FAILED，接受已写入结果")
@@ -1146,6 +1161,11 @@ async def execute_work(
                 temperature=0.1,
                 timeout_seconds=guard.limits.model_timeout_seconds,
                 stall_timeout_seconds=90.0,
+                audit={
+                    "agentId": agent_id,
+                    "agentRole": "worker_loop",
+                    "parentRequestId": work.id,
+                },
             )
         except (TimeoutError, ProviderRequestError) as exc:
             if isinstance(exc, ProviderRequestError) and "超时" not in str(exc):

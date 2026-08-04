@@ -7,6 +7,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
+from backend.core import request_audit
 from backend.evaluation import RuntimeEvaluator
 from backend.memory import MemoryRouter
 from backend.models import ModelRouter
@@ -88,6 +89,12 @@ class AgentRuntime:
         started_at = self._evaluator.begin()
         event_count = 0
         result_summary = ""
+        audit_token = request_audit.push_audit_context(
+            agent_id=request.agent_id,
+            session_id=request.session_id,
+            project_id=request.project_id,
+            parent_request_id=task.id,
+        )
 
         try:
             # Memory 作用域优先使用项目，其次使用会话；global 会由 Store 自动补充。
@@ -206,6 +213,7 @@ class AgentRuntime:
             )
             raise
         finally:
+            request_audit.reset_audit_context(audit_token)
             await self._tasks.discard_finished()
 
     async def execute(self, request: RuntimeRequest) -> list[str]:

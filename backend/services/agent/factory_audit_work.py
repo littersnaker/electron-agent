@@ -309,6 +309,7 @@ async def execute_factory_audit_work(
                 LlmMessage("user", user),
             ],
             temperature=0.1,
+            audit={"agentRole": "factory_audit"},
         )
     except Exception as exc:
         return WorkExecutionResult(

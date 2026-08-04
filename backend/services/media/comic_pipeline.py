@@ -135,6 +135,7 @@ def build_comic_pipeline(
             ],
             temperature=0.7,
             timeout_seconds=120,
+            audit={"agentId": "media_agent", "agentRole": "comic_writer"},
         )
         title, storyboard = await _extract_storyboard(text)
         await lifecycle(f"已完成分镜表：{len(storyboard)} 个镜头")

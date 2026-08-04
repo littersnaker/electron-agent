@@ -114,6 +114,7 @@ JSON 结构必须是：
         credentials=credentials,
         messages=[LlmMessage("system", system), LlmMessage("user", prompt)],
         temperature=0.1,
+        audit={"agentRole": "proposal"},
     )
     return _validate_proposal(root, _extract_json(text), usage, model.name)
 

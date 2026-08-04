@@ -38,6 +38,9 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Request audit logs (JSON Lines, keyed by requestId)
+/request-audit-*.jsonl
+
 # Local archives
 app.zip
 agents/*

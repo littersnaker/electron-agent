@@ -167,6 +167,7 @@ async def stream_read_only_tool_answer(
             ],
             temperature=0.1,
             timeout_seconds=90,
+            audit={"agentRole": "read_only"},
         )
         usage_total.prompt += usage.prompt
         usage_total.completion += usage.completion

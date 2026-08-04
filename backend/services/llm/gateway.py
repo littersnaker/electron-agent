@@ -12,7 +12,9 @@ import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from time import monotonic
+from typing import Any
 
+from backend.core import request_audit
 from backend.core.builtin_credentials import get_builtin_value
 from backend.services.llm.availability import AVAILABILITY
 from backend.services.llm.catalog import (
@@ -44,6 +46,18 @@ class ProviderFailure:
     provider_name: str
     detail: str
     scope: str
+
+
+def _usage_payload(usage: LlmUsage | None) -> dict[str, int] | None:
+    """把 token 用量转成审计友好的 JSON 结构。"""
+
+    if usage is None:
+        return None
+    return {
+        "prompt": usage.prompt,
+        "completion": usage.completion,
+        "total": usage.total,
+    }
 
 
 class LlmGateway:
@@ -126,8 +140,77 @@ class LlmGateway:
         credentials: LlmCredentials,
         messages: list[LlmMessage],
         temperature: float = 0.2,
+        audit: dict[str, Any] | None = None,
     ) -> AsyncIterator[LlmChunk]:
-        """统一返回流式增量；Auto 仅在尚未输出内容时切换候选模型。"""
+        """统一返回流式增量；Auto 仅在尚未输出内容时切换候选模型。
+
+        每次调用都会写入请求审计日志（requestId + Agent 身份 + 参数 + 结果）。
+        """
+
+        audit_info = request_audit.effective_audit(audit)
+        request_id = request_audit.new_request_id("llm")
+        started = monotonic()
+        request_payload: dict[str, Any] = {
+            "model": preferred_model_id,
+            "temperature": temperature,
+            "messages": self._audit_messages_payload(messages),
+            "candidates": [],
+        }
+        try:
+            request_payload["candidates"] = [
+                {"model": model.model, "provider": model.provider}
+                for model in self.resolve_candidates(
+                    preferred_model_id, credentials, messages
+                )
+            ]
+        except Exception as exc:
+            request_payload["candidatesError"] = str(exc)
+        last_usage: LlmUsage | None = None
+        try:
+            async for chunk in self._stream_impl(
+                preferred_model_id=preferred_model_id,
+                credentials=credentials,
+                messages=messages,
+                temperature=temperature,
+            ):
+                if chunk.usage:
+                    last_usage = chunk.usage
+                yield chunk
+        except Exception as exc:
+            request_audit.record(
+                kind="llm.stream",
+                request_id=request_id,
+                status="error",
+                duration_ms=request_audit.duration_ms(started),
+                request=request_payload,
+                response={"error": str(exc)},
+                agent=audit_info,
+                error=str(exc),
+            )
+            raise
+        request_audit.record(
+            kind="llm.stream",
+            request_id=request_id,
+            status="success",
+            duration_ms=request_audit.duration_ms(started),
+            request=request_payload,
+            response={
+                "stream": True,
+                "finished": True,
+                "usage": _usage_payload(last_usage),
+            },
+            agent=audit_info,
+        )
+
+    async def _stream_impl(
+        self,
+        *,
+        preferred_model_id: str,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float = 0.2,
+    ) -> AsyncIterator[LlmChunk]:
+        """原始流式实现，供 stream() 审计包装调用。"""
 
         candidates = self.resolve_candidates(
             preferred_model_id,
@@ -189,12 +272,83 @@ class LlmGateway:
         temperature: float = 0.2,
         timeout_seconds: float | None = None,
         stall_timeout_seconds: float | None = None,
+        audit: dict[str, Any] | None = None,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
         """收集完整响应；Auto 在没有收到任何内容时允许降级。
 
         ``timeout_seconds`` 控制单次模型调用的总时长上限；``stall_timeout_seconds``
         控制“没有新数据”的卡死阈值。默认只杀卡死流，不杀慢速但持续输出的长生成。
+        每次调用都会写入请求审计日志（requestId + Agent 身份 + 参数 + 结果）。
         """
+
+        audit_info = request_audit.effective_audit(audit)
+        request_id = request_audit.new_request_id("llm")
+        started = monotonic()
+        request_payload: dict[str, Any] = {
+            "model": preferred_model_id,
+            "temperature": temperature,
+            "messages": self._audit_messages_payload(messages),
+            "candidates": [],
+        }
+        try:
+            request_payload["candidates"] = [
+                {"model": model.model, "provider": model.provider}
+                for model in self.resolve_candidates(
+                    preferred_model_id, credentials, messages
+                )
+            ]
+        except Exception as exc:
+            request_payload["candidatesError"] = str(exc)
+        try:
+            result = await self._complete_impl(
+                preferred_model_id=preferred_model_id,
+                credentials=credentials,
+                messages=messages,
+                temperature=temperature,
+                timeout_seconds=timeout_seconds,
+                stall_timeout_seconds=stall_timeout_seconds,
+            )
+        except Exception as exc:
+            request_audit.record(
+                kind="llm.complete",
+                request_id=request_id,
+                status="error",
+                duration_ms=request_audit.duration_ms(started),
+                request=request_payload,
+                response={"error": str(exc)},
+                agent=audit_info,
+                error=str(exc),
+            )
+            raise
+        text, usage, model = result
+        request_audit.record(
+            kind="llm.complete",
+            request_id=request_id,
+            status="success",
+            duration_ms=request_audit.duration_ms(started),
+            request=request_payload,
+            response={
+                "text": text,
+                "usage": _usage_payload(usage),
+                "model": model.model,
+                "provider": model.provider,
+                "name": model.name,
+            },
+            agent=audit_info,
+        )
+        return result
+
+    async def _complete_impl(
+        self,
+        *,
+        preferred_model_id: str,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float = 0.2,
+        timeout_seconds: float | None = None,
+        stall_timeout_seconds: float | None = None,
+    ) -> tuple[str, LlmUsage, ModelDefinition]:
+        """原始完整响应实现，供 complete() 审计包装调用。"""
 
         candidates = self.resolve_candidates(
             preferred_model_id,
@@ -254,6 +408,28 @@ class LlmGateway:
                     blocked_routes.add(route_group)
 
         raise ValueError(self._format_failures(failures))
+
+    @staticmethod
+    def _audit_messages_payload(messages: list[LlmMessage]) -> list[dict[str, Any]]:
+        """把模型消息转成审计载荷：文本截断、图片只保留元信息。"""
+
+        max_chars = request_audit._max_message_chars()
+        payload: list[dict[str, Any]] = []
+        for message in messages:
+            item: dict[str, Any] = {
+                "role": message.role,
+                "content": request_audit.truncate_text(message.content, max_chars),
+            }
+            if message.images:
+                item["images"] = [
+                    {
+                        "mimeType": image.mime_type,
+                        "bytes": len(image.data),
+                    }
+                    for image in message.images
+                ]
+            payload.append(item)
+        return payload
 
     async def _stream_with_deadline(
         self,
@@ -343,6 +519,7 @@ class LlmGateway:
             credentials=credentials,
             messages=messages,
             temperature=0.0,
+            audit={"agentRole": "probe"},
         ):
             # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
             pass
