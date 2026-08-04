@@ -40,8 +40,13 @@ Thumbs.db
 
 # Local archives
 app.zip
-.next-electron/
-.agents/
-.uploads/
+agents/*
+.local-data/
 .pnpm-store/
-INTERVIEW_PREP_CN.md
+.agents/
+.python-build/
+.python-spec/
+python-dist/
+.vscode/
+.venv/
+.uploads/

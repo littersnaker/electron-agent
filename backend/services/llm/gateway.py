@@ -272,28 +272,67 @@ class LlmGateway:
             model=model,
             credentials=credentials,
             messages=messages,
+            temperature=0.0,
+        )
+            # 自然读取到流结束，避免过早取消 HTTP/2 连接造成供应商误报。
+        pass
+        AVAILABILITY.mark_success(model, credentials)
+        return model, max(0.0, network_ms)
+
+    async def _stream_model(
+        self,
+        *,
+        model: ModelDefinition,
+        credentials: LlmCredentials,
+        messages: list[LlmMessage],
+        temperature: float,
+    ) -> AsyncIterator[LlmChunk]:
+        """按供应商协议执行一次模型请求，并处理同供应商区域端点回退。"""
+
+        provider = get_provider(model.provider)
+        api_key = credentials.get(model.provider)
+        if not api_key:
+            raise ValueError(f"未配置 {provider.name} API Key")
+
+        if provider.protocol == "gemini":
+            async for chunk in self._protocols.stream_gemini(
+                model=model,
+                api_key=api_key,
+                messages=messages,
+                temperature=temperature,
+                endpoint_base=model.base_url,
+            ):
+                yield chunk
+            return
+
+        async for chunk in self._stream_openai_provider(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
+            messages=messages,
             temperature=temperature,
-        ).__aiter__()
-        while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                raise ProviderRequestError(
-                    f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
-                    scope="provider",
-                )
-            try:
-                chunk = await asyncio.wait_for(
-                    anext(iterator),
-                    timeout=min(stall_budget, remaining),
-                )
-            except StopAsyncIteration:
-                return
-            except asyncio.TimeoutError:
-                raise ProviderRequestError(
-                    f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
-                    scope="provider",
-                )
-            yield chunk
+        ).__aiter__():
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise ProviderRequestError(
+                        f"模型响应超过 {int(total_budget)} 秒仍未完成，已终止本次调用",
+                        scope="provider",
+                    )
+                try:
+                    chunk = await asyncio.wait_for(
+                        anext(iterator),
+                        timeout=min(stall_budget, remaining),
+                    )
+                except StopAsyncIteration:
+                    return
+                except asyncio.TimeoutError:
+                    raise ProviderRequestError(
+                        f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
+                        scope="provider",
+                    )
+                yield chunk
 
     async def probe(
         self,
