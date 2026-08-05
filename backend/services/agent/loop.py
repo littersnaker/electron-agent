@@ -31,6 +31,7 @@ from backend.services.agent.resource_coordinator import (
     max_parallel_workers,
     select_parallel_candidates,
 )
+from backend.services.agent.reflection.runner import schedule_work_review
 from backend.services.agent.task_planner import CodeTaskPlan, WorkLedger
 from backend.services.agent.target_preflight import preflight_plan_works
 from backend.services.agent.work_dispatcher import (
@@ -320,6 +321,17 @@ async def stream_autonomous_loop(
                 for task in ordered_done:
                     work_id, _slot = running.pop(task)
                     result = task.result()
+                    schedule_work_review(
+                        work_id=work_id,
+                        succeeded=result.succeeded,
+                        summary=result.summary,
+                        error=result.error,
+                        failure_kind=getattr(result, "failure_kind", None) or "",
+                        changed_files=list(result.state.changed_files),
+                        transcript_tail=list(result.state.transcript),
+                        project_id=project_id,
+                        credentials=credentials,
+                    )
                     if result.state.model_name:
                         model_name = result.state.model_name
                     merged = merge_worker_result(

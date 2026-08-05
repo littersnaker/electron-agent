@@ -152,6 +152,53 @@ CREATE TABLE IF NOT EXISTS agent_memories (
   
   CREATE INDEX IF NOT EXISTS idx_completed_works_lookup
   ON project_completed_works(project_id, title_key, completed_at DESC);
+
+  CREATE TABLE IF NOT EXISTS review_artifacts (
+      id TEXT PRIMARY KEY,
+      work_id TEXT NOT NULL,
+      agent_kind TEXT NOT NULL DEFAULT 'code',
+      scope_id TEXT NOT NULL DEFAULT 'project',
+      model TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      digest_hash TEXT NOT NULL,
+      output_json TEXT NOT NULL,
+      error_message TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      reviewed_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_review_artifacts_work
+  ON review_artifacts(work_id, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_review_artifacts_status
+  ON review_artifacts(status, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS memory_eval (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      injected INTEGER NOT NULL DEFAULT 0,
+      hit INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_memory_eval_created
+  ON memory_eval(created_at DESC);
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS agent_memories_fts USING fts5(
+      content,
+      memory_type UNINDEXED,
+      scope_id UNINDEXED
+  );
+
+  DROP TRIGGER IF EXISTS trg_agent_memories_fts_insert;
+  DROP TRIGGER IF EXISTS trg_agent_memories_fts_delete;
+  DROP TRIGGER IF EXISTS trg_agent_memories_fts_update;
+
+  INSERT INTO agent_memories_fts(rowid, content, memory_type, scope_id)
+  SELECT rowid, content, memory_type, scope_id FROM agent_memories
+  WHERE NOT EXISTS (SELECT 1 FROM agent_memories_fts);
   """
 
 
@@ -173,6 +220,12 @@ class AsyncCursor:
         """读取全部查询结果。"""
 
         return self._cursor.fetchall()
+
+    @property
+    def lastrowid(self) -> int | None:
+        """返回最近一次 INSERT 的 rowid。"""
+
+        return self._cursor.lastrowid
 
 
 class AsyncConnection:
@@ -265,6 +318,19 @@ def loads_json(value: str, default: object) -> object:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+async def rebuild_memory_fts() -> None:
+    """整体重建记忆 FTS 索引（删除/淘汰后调用，保证索引一致）。"""
+
+    async with open_database() as connection:
+        await connection.execute("DELETE FROM agent_memories_fts")
+        await connection.execute(
+            """
+            INSERT INTO agent_memories_fts(rowid, content, memory_type, scope_id)
+            SELECT rowid, content, memory_type, scope_id FROM agent_memories
+            """
+        )
 
 
 def normalize_root_path(raw_path: str) -> Path:

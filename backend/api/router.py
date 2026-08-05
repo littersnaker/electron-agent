@@ -16,6 +16,7 @@ from backend.api.models import router as models_router
 from backend.api.observability import router as observability_router
 from backend.api.preferences import router as preferences_router
 from backend.api.qa import router as qa_router
+from backend.api.review import router as review_router
 from backend.api.workspace import router as workspace_router
 
 
@@ -37,6 +38,7 @@ def register_routes() -> None:
         media_router,
         commerce_router,
         observability_router,
+        review_router,
         mcp_router,
         legacy_router,
     ):

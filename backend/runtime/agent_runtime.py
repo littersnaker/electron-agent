@@ -21,6 +21,8 @@ from backend.services.glm46v import (
     resolve_builtin_skills,
     split_registry_and_builtin_skill_ids,
 )
+from backend.services.agent.reflection.runner import schedule_runtime_review
+from backend.services.agent.reflection.eval import schedule_memory_eval
 from backend.skills import SkillRegistry
 from backend.tools.code_tools import register_code_tools
 
@@ -191,6 +193,18 @@ class AgentRuntime:
                 task_id=task.id,
                 result_summary=result_summary,
             )
+            self._schedule_runtime_review(
+                request=request,
+                task_id=task.id,
+                status="completed",
+                event_count=event_count,
+                result_summary=result_summary,
+            )
+            schedule_memory_eval(
+                task_id=task.id,
+                agent_id=request.agent_id,
+                memory_ids=list(context.memory_ids),
+            )
         except Exception as exc:
             evaluation = self._evaluator.finish(
                 started_at=started_at,
@@ -210,6 +224,19 @@ class AgentRuntime:
                 task_id=task.id,
                 error_message=str(exc),
                 result_summary=result_summary,
+            )
+            self._schedule_runtime_review(
+                request=request,
+                task_id=task.id,
+                status="failed",
+                event_count=event_count,
+                error_message=str(exc),
+                result_summary=result_summary,
+            )
+            schedule_memory_eval(
+                task_id=task.id,
+                agent_id=request.agent_id,
+                memory_ids=list(context.memory_ids),
             )
             raise
         finally:
@@ -251,6 +278,11 @@ class AgentRuntime:
 
         return await self._tasks.snapshot()
 
+    def reload_skills(self) -> None:
+        """重新扫描技能目录（审批落盘新技能后调用，使其立即生效）。"""
+
+        self._skills.load()
+
     async def _save_execution_memory(
         self,
         *,
@@ -279,3 +311,31 @@ class AgentRuntime:
             )
         except Exception:
             LOGGER.exception("保存 Runtime Episodic Memory 失败")
+
+    def _schedule_runtime_review(
+        self,
+        *,
+        request: RuntimeRequest,
+        task_id: str,
+        status: str,
+        event_count: int,
+        error_message: str = "",
+        result_summary: str = "",
+    ) -> None:
+        """跨境电商 Agent 任务结束后触发异步复盘（fire-and-forget）。"""
+
+        if request.agent_id != "commerce":
+            return
+        schedule_runtime_review(
+            task_id=task_id,
+            agent_id=request.agent_id,
+            status=status,
+            request_text=request.user_text,
+            result_summary=result_summary,
+            error_message=error_message,
+            event_count=event_count,
+            project_id=request.project_id,
+            session_id=request.session_id,
+            marketplace=str((request.metadata or {}).get("marketplace") or ""),
+            credentials=request.credentials,
+        )

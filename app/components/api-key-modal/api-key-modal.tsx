@@ -16,6 +16,7 @@ import {
   type AuxiliaryServiceCredentials,
 } from "../../lib/service-credentials";
 import { apiFetch } from "../../lib/api-client";
+import { getModelDefinition } from "../../lib/llm/registry/models";
 import {
   AppleButton,
   AppleModalCloseButton,
@@ -42,6 +43,8 @@ export function ApiKeyModal({
   onSave,
   onClose,
 }: Props) {
+  const DEFAULT_REVIEW_MODEL_ID = "deepseek-v4-flash";
+
   const [keys, setKeys] = useState<LlmCredentials>(initialKeys);
   const [endpoints, setEndpoints] =
     useState<LlmEndpointOverrides>(initialEndpoints);
@@ -55,9 +58,33 @@ export function ApiKeyModal({
   >({});
   const [providerStates, setProviderStates] = useState(initialProviderStates);
   const [testingAll, setTestingAll] = useState(false);
+  const [reviewModelId, setReviewModelId] = useState("");
+  const [reviewEnabled, setReviewEnabled] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+
+    const loadReviewSettings = async () => {
+      try {
+        const response = await apiFetch("/api/agent/review-settings", {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          modelId?: string;
+          enabled?: boolean;
+        };
+        if (typeof payload.modelId === "string") {
+          setReviewModelId(payload.modelId);
+        }
+        if (typeof payload.enabled === "boolean") {
+          setReviewEnabled(payload.enabled);
+        }
+      } catch {
+        // Review settings are convenience UI only; backend keeps defaults.
+      }
+    };
 
     const loadEnvironmentStatus = async () => {
       try {
@@ -73,6 +100,7 @@ export function ApiKeyModal({
       }
     };
 
+    void loadReviewSettings();
     void loadEnvironmentStatus();
     return () => {
       cancelled = true;
@@ -174,7 +202,7 @@ export function ApiKeyModal({
     }
   };
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalized: LlmCredentials = {};
     for (const provider of LLM_PROVIDER_CATALOG) {
@@ -195,6 +223,18 @@ export function ApiKeyModal({
         if (value) Object.assign(normalizedServices, { [field.key]: value });
       }
     }
+    try {
+      await apiFetch("/api/agent/review-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelId: reviewModelId.trim(),
+          enabled: reviewEnabled,
+        }),
+      });
+    } catch {
+      // Review settings save is best-effort; provider keys still persist client-side.
+    }
     onSave(normalized, normalizedEndpoints, normalizedServices);
   };
 
@@ -207,6 +247,32 @@ export function ApiKeyModal({
       ).length,
     [environmentProviders, serviceKeys],
   );
+
+  const reviewProviderInfo = (
+    modelId: string,
+    keysState: LlmCredentials,
+  ): {
+    providerName: string;
+    keyConfigured: boolean;
+    valid: boolean;
+  } => {
+    const trimmed = modelId.trim();
+    const resolved = getModelDefinition(trimmed);
+    if (!resolved) {
+      return { providerName: "", keyConfigured: false, valid: false };
+    }
+    const provider = LLM_PROVIDER_CATALOG.find(
+      (item) => item.id === resolved.provider,
+    );
+    if (!provider) {
+      return { providerName: "", keyConfigured: false, valid: false };
+    }
+    return {
+      providerName: provider.name,
+      keyConfigured: Boolean(keysState[resolved.provider]?.trim()),
+      valid: true,
+    };
+  };
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center px-4 py-8">
@@ -266,6 +332,57 @@ export function ApiKeyModal({
             updateEndpoint={updateEndpoint}
             toggleVisibility={toggleVisibility}
           />
+
+          <section>
+            <div className="mb-3">
+              <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+                Agent 复盘循环
+              </div>
+              <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                任务完成后自动复盘并沉淀长期记忆；复盘模型与对应厂商的 API
+                Key 都配置好后才会运行，且不会阻塞主任务。填模型名即可（如
+                deepseek-v4-flash），无需厂商前缀。
+              </div>
+            </div>
+            <label className="block">
+              <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+                <span>复盘模型</span>
+                <span className="text-[8px] text-[var(--text-tertiary)]">
+                  默认 deepseek-v4-flash
+                </span>
+              </span>
+              <input
+                aria-label="复盘模型"
+                type="text"
+                autoComplete="off"
+                className="h-9 w-full rounded-[10px] border bg-[var(--glass-black)] px-3 text-[11px] outline-none"
+                style={{ color: COLORS.text, borderColor: COLORS.border }}
+                placeholder="deepseek-v4-flash"
+                value={reviewModelId}
+                onChange={(event) => setReviewModelId(event.target.value)}
+              />
+            </label>
+            <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              {(() => {
+                const effectiveModel = reviewModelId.trim() || DEFAULT_REVIEW_MODEL_ID;
+                const info = reviewProviderInfo(effectiveModel, keys);
+                if (!info.valid) {
+                  return "未识别的模型名称，请填目录中的模型名（如 deepseek-v4-flash）";
+                }
+                return info.keyConfigured
+                  ? `已配置 ${info.providerName} API Key，复盘将使用 ${effectiveModel} 运行`
+                  : `缺少 ${info.providerName} API Key，复盘不会运行——请在上方模型服务中配置`;
+              })()}
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={reviewEnabled}
+                onChange={(event) => setReviewEnabled(event.target.checked)}
+              />
+              启用复盘循环
+            </label>
+          </section>
 
           <section>
             <div className="mb-3 flex items-center justify-between gap-3">

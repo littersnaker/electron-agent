@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -10,8 +11,11 @@ from backend.services.workspace.database import (
     dumps_json,
     loads_json,
     open_database,
+    rebuild_memory_fts,
     utc_now_iso,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SQLiteMemoryStore:
@@ -81,7 +85,7 @@ class SQLiteMemoryStore:
         identifier = f"mem_{uuid4().hex}"
         now = utc_now_iso()
         async with open_database() as connection:
-            await connection.execute(
+            cursor = await connection.execute(
                 """
                 INSERT INTO agent_memories(
                     id, memory_type, scope_id, content, metadata_json,
@@ -99,6 +103,19 @@ class SQLiteMemoryStore:
                     expires_at,
                 ),
             )
+            rowid = cursor.lastrowid
+            if rowid is not None:
+                try:
+                    await connection.execute(
+                        """
+                        INSERT INTO agent_memories_fts(rowid, content, memory_type, scope_id)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (rowid, normalized_content, self.memory_type, normalized_scope),
+                    )
+                except Exception:
+                    # FTS 索引失败不应阻断记忆写入；后续重建可恢复。
+                    LOGGER.exception("记忆 FTS 索引写入失败")
         return MemoryRecord(
             id=identifier,
             memory_type=self.memory_type,
@@ -118,6 +135,10 @@ class SQLiteMemoryStore:
                 "DELETE FROM agent_memories WHERE memory_type = ? AND scope_id = ?",
                 (self.memory_type, scope_id),
             )
+        try:
+            await rebuild_memory_fts()
+        except Exception:
+            LOGGER.exception("记忆 FTS 索引重建失败")
         return max(0, cursor.rowcount)
 
     def _from_row(self, row: Any) -> MemoryRecord:
