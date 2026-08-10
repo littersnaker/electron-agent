@@ -9,7 +9,12 @@ from backend.runtime.bootstrap import RUNTIME
 from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.credentials import read_credentials
+from backend.services.commerce.drafts import (
+    list_listing_drafts,
+    update_listing_draft_status,
+)
 from backend.services.llm.catalog import AUTO_MODEL_ID
+from backend.services.llm.credentials import resolve_credentials
 from backend.utils.sse import create_sse_response
 
 router = APIRouter(tags=["commerce-agent"])
@@ -45,6 +50,12 @@ def _runtime_request(
             "route": f"/api/commerce/{workflow}",
             "workflow": workflow,
             "marketplace": body.marketplace,
+            "llm": {
+                "modelId": preferred_model,
+                "credentials": resolve_credentials(request)
+                if request is not None
+                else None,
+            },
         },
     )
 
@@ -79,3 +90,42 @@ async def verify_commerce_data_source(request: Request) -> dict[str, object]:
     """执行用户主动触发的数据源轻量检查。"""
 
     return await verify_data_source(request)
+
+
+@router.get("/api/commerce/listing/drafts")
+async def commerce_listing_drafts(
+    status: str | None = None,
+    limit: int = 50,
+) -> dict[str, object]:
+    """列出待人工确认的 Listing 草稿。"""
+
+    return {
+        "items": await list_listing_drafts(
+            status=status,
+            limit=limit,
+        )
+    }
+
+
+@router.post("/api/commerce/listing/drafts/{draft_id}/confirm")
+async def commerce_confirm_listing_draft(draft_id: str) -> dict[str, object]:
+    """人工确认一条 Listing 草稿。"""
+
+    updated = await update_listing_draft_status(draft_id, "confirmed")
+    if not updated:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Listing 草稿不存在")
+    return {"ok": True}
+
+
+@router.post("/api/commerce/listing/drafts/{draft_id}/reject")
+async def commerce_reject_listing_draft(draft_id: str) -> dict[str, object]:
+    """驳回一条 Listing 草稿。"""
+
+    updated = await update_listing_draft_status(draft_id, "rejected")
+    if not updated:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Listing 草稿不存在")
+    return {"ok": True}

@@ -103,12 +103,15 @@ def _validate(draft: dict[str, Any], keywords: list[dict[str, Any]]) -> dict[str
     }
 
 
-async def stream_listing(body: CommerceRequest) -> AsyncIterator[str]:
+async def stream_listing(
+    body: CommerceRequest,
+    llm=None,
+) -> AsyncIterator[str]:
     """通过 LangGraph 生成 Listing Demo，并输出现有界面所需 SSE 事件。"""
 
     from backend.services.commerce.langgraph import build_listing_graph
 
-    graph = build_listing_graph(body)
+    graph = build_listing_graph(body, llm=llm)
     initial: dict[str, object] = {
         "query": body.query,
         "marketplace": {},
@@ -116,6 +119,9 @@ async def stream_listing(body: CommerceRequest) -> AsyncIterator[str]:
         "mock_erp": {},
         "keywords": [],
         "draft": {},
+        "draft_source": "template",
+        "draft_feedback": "",
+        "draft_id": "",
         "validation": {},
         "report": {},
         "retries": 0,

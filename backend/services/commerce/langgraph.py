@@ -23,6 +23,14 @@ from backend.services.commerce.analytics import (
     observations_to_products,
     resolve_category,
 )
+from backend.services.commerce.drafts import save_listing_draft
+from backend.services.commerce.llm import (
+    CommerceCategoryAnalysis,
+    CommerceInsights,
+    CommerceListingDraft,
+    LlmConfig,
+    try_complete_json,
+)
 from backend.services.commerce.listing import _draft, _keywords, _validate
 from backend.services.commerce.marketplaces import get_marketplace
 from backend.services.commerce.sources.amazon import search_amazon
@@ -63,6 +71,67 @@ def _demo_observations(query: str, currency: str, count: int = 12) -> list[dict[
     return observations
 
 
+_CATEGORY_PROMPT = """目标市场：__MARKET__
+用户问题：__QUERY__
+
+请输出品类分析 JSON：
+{
+  "categoryName": "中文类目名",
+  "categoryNameEn": "英文类目名",
+  "keywords": ["3-6 个核心关键词"],
+  "targetAudience": "目标人群一句话",
+  "sellingPoints": ["可能的卖点"],
+  "complianceRisks": ["合规风险"],
+  "assumptions": ["需要用户确认的假设"]
+}
+只基于问题推断，拿不准的写进 assumptions。"""
+
+
+_INSIGHTS_PROMPT = """公开样本（仅标题/价格/评分/评论数，不代表真实销量）：
+__SAMPLE__
+
+计算指标：
+__METRICS__
+
+请输出 JSON：
+{
+  "summary": "一段总结",
+  "opportunities": ["机会点"],
+  "risks": ["风险点"],
+  "actions": ["下一步可执行动作"]
+}
+禁止编造样本外数据（销量、搜索量、利润率等）。"""
+
+
+_LISTING_PROMPT = """用户 Brief：__QUERY__
+关键词：__KEYWORDS__
+校验反馈（如为空则忽略）：__FEEDBACK__
+
+请输出 Listing JSON：
+{
+  "title": "标题（≤75 字符，含核心词）",
+  "bulletPoints": ["4-5 条卖点，每条约 100-200 字符"],
+  "productDescription": "产品描述，基于 Brief 事实",
+  "searchTerms": "后台搜索词，≤240 字节"
+}
+禁止编造尺寸、材质、认证、保修、性能等未提供的事实。"""
+
+
+def _compact_products(products: list[dict[str, Any]], limit: int = 20) -> str:
+    """把商品样本压缩成 LLM 可读的紧凑文本。"""
+
+    lines: list[str] = []
+    for item in products[:limit]:
+        title = str(item.get("title") or "?")[:80]
+        price = item.get("price")
+        rating = item.get("rating")
+        reviews = item.get("reviewCount")
+        lines.append(
+            f"- {title} | price={price} | rating={rating} | reviews={reviews}"
+        )
+    return "\n".join(lines)
+
+
 def _last_write(_current: Any, update: Any) -> Any:
     """并行分支写同一键时采用“最后一次写入”的归并策略。"""
 
@@ -83,12 +152,17 @@ class ResearchState(TypedDict):
     products: list[dict[str, Any]]
     metrics: dict[str, Any]
     insights: dict[str, Any]
+    insights_source: str
     report: dict[str, Any]
     is_demo: bool
     platform_status: Annotated[list[dict[str, Any]], operator.add]
 
 
-def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
+def build_research_graph(
+    body: CommerceRequest,
+    credentials: dict[str, str],
+    llm: LlmConfig | None = None,
+):
     """构建市场研究 LangGraph。"""
 
     marketplace = get_marketplace(body.marketplace)
@@ -100,6 +174,30 @@ def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
     }
 
     async def intent_node(state: ResearchState) -> dict[str, Any]:
+        if llm is not None:
+            analysis = await try_complete_json(
+                llm,
+                system_prompt=(
+                    "你是跨境电商品类分析师。根据用户问题输出结构化品类分析，"
+                    "只返回一个 JSON 对象，禁止 Markdown 围栏。"
+                ),
+                user_prompt=_CATEGORY_PROMPT.replace(
+                    "__QUERY__", state["query"]
+                ).replace("__MARKET__", marketplace_meta["label"]),
+                schema_cls=CommerceCategoryAnalysis,
+            )
+            if analysis is not None:
+                category = analysis.model_dump()
+                category["analysisDimensions"] = [
+                    "价格带",
+                    "公开评分",
+                    "评论量",
+                    "竞争格局",
+                    "商品可见度",
+                ]
+                category["researchGoal"] = state["query"]
+                category["llmEnhanced"] = True
+                return {"category": category}
         category = resolve_category(state["query"])
         return {"category": category}
 
@@ -270,8 +368,30 @@ def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
             products,
             marketplace_meta["currency"],
         )
+        insights_source = "template"
         insights = build_insights(metrics, is_demo)
-        return {"metrics": metrics, "insights": insights, "is_demo": is_demo}
+        if llm is not None and products:
+            llm_insights = await try_complete_json(
+                llm,
+                system_prompt=(
+                    "你是跨境电商选品分析师。基于给定的真实公开样本推理机会、风险和行动建议，"
+                    "禁止编造样本中不存在的数据（如销量、搜索量、利润率）。"
+                    "只返回一个 JSON 对象，禁止 Markdown 围栏。"
+                ),
+                user_prompt=_INSIGHTS_PROMPT.replace(
+                    "__SAMPLE__", _compact_products(products)
+                ).replace("__METRICS__", str(metrics)),
+                schema_cls=CommerceInsights,
+            )
+            if llm_insights is not None:
+                insights = llm_insights.model_dump()
+                insights_source = "llm"
+        return {
+            "metrics": metrics,
+            "insights": insights,
+            "insights_source": insights_source,
+            "is_demo": is_demo,
+        }
 
     async def report_node(state: ResearchState) -> dict[str, Any]:
         observations = state.get("observations") or []
@@ -281,6 +401,8 @@ def build_research_graph(body: CommerceRequest, credentials: dict[str, str]):
         report = {
             "version": 3,
             "runMode": "demo" if is_demo else "market-intelligence",
+            "llmEnhanced": state.get("insights_source") == "llm"
+            or bool((state.get("category") or {}).get("llmEnhanced")),
             "generatedAt": datetime.now(UTC).isoformat(),
             "query": body.query,
             "marketplace": body.marketplace,
@@ -399,12 +521,18 @@ class ListingState(TypedDict):
     mock_erp: dict[str, Any]
     keywords: list[dict[str, Any]]
     draft: dict[str, Any]
+    draft_source: str
+    draft_feedback: str
+    draft_id: str
     validation: dict[str, Any]
     report: dict[str, Any]
     retries: int
 
 
-def build_listing_graph(body: CommerceRequest):
+def build_listing_graph(
+    body: CommerceRequest,
+    llm: LlmConfig | None = None,
+):
     """构建 Listing LangGraph（校验失败回炉重写一次）。"""
 
     marketplace = get_marketplace(body.marketplace)
@@ -447,22 +575,70 @@ def build_listing_graph(body: CommerceRequest):
 
     async def draft_node(state: ListingState) -> dict[str, Any]:
         keywords = state.get("keywords") or []
-        return {"draft": _draft(state["query"], keywords)}
+        feedback = state.get("draft_feedback") or ""
+        if llm is not None:
+            draft = await try_complete_json(
+                llm,
+                system_prompt=(
+                    "你是亚马逊 Listing 文案专家。基于用户 Brief 和关键词生成合规、"
+                    "可读、事实安全的 Listing 草稿。禁止编造尺寸、材质、认证、保修、"
+                    "性能等用户未提供的事实。只返回一个 JSON 对象，禁止 Markdown 围栏。"
+                ),
+                user_prompt=_LISTING_PROMPT.replace(
+                    "__QUERY__", state["query"]
+                ).replace("__KEYWORDS__", str([item.get("phrase") for item in keywords]))
+                .replace("__FEEDBACK__", feedback),
+                schema_cls=CommerceListingDraft,
+            )
+            if draft is not None:
+                return {
+                    "draft": draft.model_dump(),
+                    "draft_source": "llm",
+                    "draft_feedback": "",
+                }
+        return {"draft": _draft(state["query"], keywords), "draft_source": "template"}
 
     async def validate_node(state: ListingState) -> dict[str, Any]:
         keywords = state.get("keywords") or []
         return {"validation": _validate(state.get("draft") or {}, keywords)}
+
+    async def retry_node(state: ListingState) -> dict[str, Any]:
+        """校验失败后把具体问题回传给 draft 节点，并递增重试计数。"""
+
+        validation = state.get("validation") or {}
+        issues = validation.get("issues") or []
+        feedback = "\n".join(
+            f"- {item.get('field')}: {item.get('message')}"
+            for item in issues
+            if item.get("severity") == "error"
+        )
+        return {
+            "draft_feedback": feedback,
+            "retries": int(state.get("retries") or 0) + 1,
+        }
 
     def after_validate(state: ListingState) -> str:
         validation = state.get("validation") or {}
         issues = validation.get("issues") or []
         has_error = any(item.get("severity") == "error" for item in issues)
         if has_error and int(state.get("retries") or 0) < 1:
-            return "draft"
+            return "retry"
         return "report"
 
     async def report_node(state: ListingState) -> dict[str, Any]:
         category = state.get("category") or {}
+        draft_source = state.get("draft_source") or "template"
+        draft_id = ""
+        try:
+            draft_id = await save_listing_draft(
+                session_id=body.session_id,
+                query=body.query,
+                marketplace=body.marketplace,
+                draft=state.get("draft") or {},
+                source=draft_source,
+            )
+        except Exception:
+            draft_id = ""
         report = {
             "version": 1,
             "mode": "listing-demo",
@@ -475,6 +651,17 @@ def build_listing_graph(body: CommerceRequest):
             "mockErp": state.get("mock_erp"),
             "keywords": state.get("keywords") or [],
             "draft": state.get("draft"),
+            "draftSource": draft_source,
+            "draftId": draft_id,
+            "requiresHumanConfirmation": True,
+            "humanConfirmation": {
+                "status": "pending" if draft_id else "not_persisted",
+                "checklist": [
+                    "核对标题长度与关键词覆盖",
+                    "补全并核对尺寸/材质/认证等事实字段",
+                    "由运营负责人确认后方可发布",
+                ],
+            },
             "validation": state.get("validation"),
             "competitors": [],
             "source": {
@@ -494,13 +681,19 @@ def build_listing_graph(body: CommerceRequest):
     graph.add_node("keywords", keywords_node)
     graph.add_node("draft", draft_node)
     graph.add_node("validate", validate_node)
+    graph.add_node("retry", retry_node)
     graph.add_node("report", report_node)
     graph.add_edge(START, "intent")
     graph.add_edge("intent", "collect")
     graph.add_edge("collect", "keywords")
     graph.add_edge("keywords", "draft")
     graph.add_edge("draft", "validate")
-    graph.add_conditional_edges("validate", after_validate, {"draft": "draft", "report": "report"})
+    graph.add_edge("retry", "draft")
+    graph.add_conditional_edges(
+        "validate",
+        after_validate,
+        {"retry": "retry", "report": "report"},
+    )
     graph.add_edge("report", END)
     return graph.compile()
 

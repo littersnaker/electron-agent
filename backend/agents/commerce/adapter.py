@@ -8,8 +8,10 @@ from typing import cast
 from backend.models.router import ModelSelection
 from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.schemas.commerce import CommerceRequest
+from backend.services.commerce.llm import LlmConfig
 from backend.services.commerce.listing import stream_listing
 from backend.services.commerce.service import stream_research
+from backend.services.llm.credentials import LlmCredentials
 
 
 class CommerceAgentAdapter:
@@ -30,9 +32,19 @@ class CommerceAgentAdapter:
         if not isinstance(request.payload, CommerceRequest):
             raise TypeError("Commerce Agent 只接受 CommerceRequest 请求对象")
 
+        llm_metadata = request.metadata.get("llm") or {}
+        llm_config = None
+        if isinstance(llm_metadata, dict):
+            credentials = llm_metadata.get("credentials")
+            if isinstance(credentials, LlmCredentials) and credentials.values:
+                llm_config = LlmConfig(
+                    credentials=credentials,
+                    model_id=str(llm_metadata.get("modelId") or "auto"),
+                )
+
         workflow = str(request.metadata.get("workflow") or "research").strip().lower()
         if workflow == "listing":
-            async for frame in stream_listing(request.payload):
+            async for frame in stream_listing(request.payload, llm=llm_config):
                 yield frame
             return
 
@@ -40,5 +52,9 @@ class CommerceAgentAdapter:
         if not isinstance(request.credentials, dict):
             raise TypeError("Commerce Agent 缺少有效的数据源凭证对象")
         credentials = cast(dict[str, str], request.credentials)
-        async for frame in stream_research(request.payload, credentials):
+        async for frame in stream_research(
+            request.payload,
+            credentials,
+            llm=llm_config,
+        ):
             yield frame

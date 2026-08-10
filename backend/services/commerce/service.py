@@ -19,11 +19,13 @@ def _progress(stage: str, progress: int, detail: str) -> str:
 
 
 async def stream_research(
-    body: CommerceRequest, credentials: dict[str, str]
+    body: CommerceRequest,
+    credentials: dict[str, str],
+    llm=None,
 ) -> AsyncIterator[str]:
     """通过 LangGraph 执行市场研究，并以 SSE 持续发送进度、报告和用量信息。"""
 
-    graph = build_research_graph(body, credentials)
+    graph = build_research_graph(body, credentials, llm=llm)
     initial: dict[str, object] = {
         "query": body.query,
         "marketplace": {},
@@ -36,6 +38,7 @@ async def stream_research(
         "products": [],
         "metrics": {},
         "insights": {},
+        "insights_source": "template",
         "report": {},
         "is_demo": False,
         "platform_status": [],

@@ -199,6 +199,22 @@ CREATE TABLE IF NOT EXISTS agent_memories (
   INSERT INTO agent_memories_fts(rowid, content, memory_type, scope_id)
   SELECT rowid, content, memory_type, scope_id FROM agent_memories
   WHERE NOT EXISTS (SELECT 1 FROM agent_memories_fts);
+
+  CREATE TABLE IF NOT EXISTS listing_drafts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL DEFAULT '',
+      query TEXT NOT NULL,
+      marketplace TEXT NOT NULL DEFAULT 'US',
+      draft_json TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'template',
+      status TEXT NOT NULL DEFAULT 'pending',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      confirmed_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_listing_drafts_status
+  ON listing_drafts(status, created_at DESC);
   """
 
 
