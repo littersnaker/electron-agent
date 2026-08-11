@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from backend.agents.commerce import CommerceAgentAdapter
-from backend.models.router import ModelSelection
-from backend.runtime.agent_registry import AgentRegistry
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.schemas.commerce import CommerceRequest
+from backend.services.agent.adapters.commerce import CommerceAgentAdapter
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.models.router import ModelSelection
+from backend.services.runtime.agent_registry import AgentRegistry
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def test_commerce_adapter_streams_listing_workflow() -> None:
 def test_application_agent_registry_contains_qa_code_and_commerce() -> None:
     """应用级配置必须同时注册 QA、Code 和 Commerce 三类 Agent。"""
 
-    project_root = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[5]
     registry = AgentRegistry(project_root / "agents")
     registry.load()
 

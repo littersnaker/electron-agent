@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from backend.software_factory.contracts import (
+from backend.services.software_factory.contracts import (
     EndpointSpec,
     EntitySpec,
     FactoryBlueprint,
     FieldSpec,
 )
-from backend.software_factory.frontend.detector import FrontendProjectProfile
+from backend.services.software_factory.frontend.detector import FrontendProjectProfile
 
 
 def build_commerce_blueprint(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.langgraph import build_research_graph

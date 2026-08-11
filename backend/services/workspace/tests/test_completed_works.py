@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.core.config import get_settings
-from backend.services.agent.task_planner import WorkItem, WorkLedger
+from backend.services.agent.planner.task_planner import WorkItem, WorkLedger
 from backend.services.workspace.completed_works import (
     record_completed_works,
     skip_redundant_works,

@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 
-from backend.software_factory.contract import (
+from backend.services.software_factory.contract import (
     build_openapi_document,
     render_database_schema,
 )
-from backend.software_factory.contracts import FactoryBlueprint, GeneratedArtifact
-from backend.software_factory.documents import render_requirements_document
-from backend.software_factory.frontend import (
+from backend.services.software_factory.contracts import FactoryBlueprint, GeneratedArtifact
+from backend.services.software_factory.documents import render_requirements_document
+from backend.services.software_factory.frontend import (
     render_api_client,
     render_contracts,
     render_data_source,
@@ -19,7 +19,7 @@ from backend.software_factory.frontend import (
     render_mock_data,
     render_mock_repository,
 )
-from backend.software_factory.mock import generate_mock_payload
+from backend.services.software_factory.mock import generate_mock_payload
 
 
 def build_artifacts(

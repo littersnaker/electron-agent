@@ -5,18 +5,18 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from backend.services.agent.filesystem_executor import (
-    FileSystemExecutionResult,
-    execute_filesystem_operations,
-)
-from backend.services.agent.loop_protocol import EditOperation
-from backend.services.agent.work_models import FileSystemOperation
-from backend.services.agent.workspace_tools import (
+from backend.services.agent.shared.loop_protocol import EditOperation
+from backend.services.agent.shared.work_models import FileSystemOperation
+from backend.services.agent.shared.workspace_tools import (
     EditBatchResult,
     ReadBatchResult,
     apply_edit_operations,
     read_workspace_files_with_versions,
     search_workspace,
+)
+from backend.services.agent.worker.filesystem_executor import (
+    FileSystemExecutionResult,
+    execute_filesystem_operations,
 )
 
 

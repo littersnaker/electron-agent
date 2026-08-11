@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from backend.models.router import ModelSelection
-from backend.runtime.agent_registry import AgentConfig, RegisteredAgent
-from backend.runtime.agent_runtime import AgentRuntime
-from backend.runtime.contracts import RuntimeContext, RuntimeMessage, RuntimeRequest
 from backend.services.llm.credentials import LlmCredentials
-from backend.skills.contracts import SkillDefinition
+from backend.services.models.router import ModelSelection
+from backend.services.runtime.agent_registry import AgentConfig, RegisteredAgent
+from backend.services.runtime.agent_runtime import AgentRuntime
+from backend.services.runtime.contracts import RuntimeContext, RuntimeMessage, RuntimeRequest
+from backend.services.skills.contracts import SkillDefinition
 
 
 class FakeAgent:

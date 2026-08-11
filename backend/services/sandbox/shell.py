@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.services.agent.command_runner import CommandResult, run_safe_command
+from backend.services.agent.shared.command_runner import CommandResult, run_safe_command
 
 
 class SandboxShell:

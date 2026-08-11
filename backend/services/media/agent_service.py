@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from backend.schemas.chat import ChatRequest
 from backend.schemas.media import MediaGenerateBody
-from backend.services.agent.pending import (
+from backend.services.agent.worker.pending import (
     parse_interactive_reply,
     pop_pending_action,
     save_pending_action,
@@ -55,7 +55,7 @@ def _lifecycle_frame(detail: str, status: str = "running") -> str:
                 "status": status.upper(),
                 "iteration": 0,
                 "detail": detail,
-                "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "createdAt": datetime.datetime.now(datetime.UTC).isoformat(),
             },
         }
     )
@@ -77,7 +77,7 @@ def _media_emit(queue: asyncio.Queue[str | None]):
                         "iteration": 0,
                         "detail": str(payload.get("detail") or ""),
                         "createdAt": datetime.datetime.now(
-                            datetime.timezone.utc
+                            datetime.UTC
                         ).isoformat(),
                     },
                 }

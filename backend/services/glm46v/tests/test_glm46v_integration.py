@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.services.glm46v.client import (
     GLM46VClient,
     GLM46VSettings,
@@ -15,6 +14,7 @@ from backend.services.glm46v.client import (
 )
 from backend.services.glm46v.enrichment import enrich_runtime_context_with_glm46v
 from backend.services.glm46v.skill import GLM46V_SKILL_ID
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
 class FakeCredentials:

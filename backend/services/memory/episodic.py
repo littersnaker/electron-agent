@@ -1,6 +1,6 @@
 """Episodic Memory：保存会话和历史执行摘要。"""
 
-from backend.memory.sqlite_store import SQLiteMemoryStore
+from backend.services.memory.sqlite_store import SQLiteMemoryStore
 
 
 class EpisodicMemoryStore(SQLiteMemoryStore):

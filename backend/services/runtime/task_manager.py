@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-from backend.runtime.contracts import RuntimeStatus, RuntimeTask
+from backend.services.runtime.contracts import RuntimeStatus, RuntimeTask
 
 
 class TaskManager:

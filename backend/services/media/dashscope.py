@@ -8,7 +8,6 @@ import mimetypes
 import os
 import re
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -185,7 +184,7 @@ async def generate_image(
             await _download_image(client, url, index) for index, url in enumerate(urls)
         ]
 
-    image_count = int(((payload.get("usage") or {}).get("image_count") or len(attachments)))
+    image_count = int((payload.get("usage") or {}).get("image_count") or len(attachments))
     return {
         "content": f"已使用 {model['name']} 完成图片生成。",
         "attachments": attachments,

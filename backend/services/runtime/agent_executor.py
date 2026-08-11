@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from backend.agents.base import BaseAgent
-from backend.models.router import ModelSelection
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
+from backend.services.agent.adapters.base import BaseAgent
+from backend.services.models.router import ModelSelection
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
 class AgentExecutor:

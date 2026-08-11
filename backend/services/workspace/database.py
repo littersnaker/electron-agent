@@ -16,7 +16,6 @@ from typing import Any
 
 from backend.core.config import get_settings
 
-
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;

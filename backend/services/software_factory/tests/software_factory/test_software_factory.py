@@ -6,16 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from backend.services.agent.loop_protocol import AgentAction, parse_agent_action
-from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
-from backend.services.agent.work_action_handler import (
+from backend.services.agent.shared.loop_protocol import AgentAction, parse_agent_action
+from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.work_action_handler import (
     WorkActionEnvironment,
     WorkActionHandler,
 )
-from backend.services.agent.work_state import WorkWorkerState
-from backend.services.agent.work_models import WorkItem
-from backend.software_factory import SOFTWARE_FACTORY
-from backend.software_factory.planning import enrich_software_factory_works
+from backend.services.software_factory import SOFTWARE_FACTORY
+from backend.services.software_factory.planning import enrich_software_factory_works
 
 
 def _create_react_project(root: Path) -> None:

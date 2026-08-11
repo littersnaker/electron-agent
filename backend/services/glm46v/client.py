@@ -62,7 +62,7 @@ class GLM46VSettings:
     max_total_mb: float = DEFAULT_MAX_TOTAL_MB
 
     @classmethod
-    def from_credentials(cls, credentials: object | None) -> "GLM46VSettings":
+    def from_credentials(cls, credentials: object | None) -> GLM46VSettings:
         """从当前请求凭证与环境变量构建设置，且不记录密钥。"""
 
         request_key = _credential_value(credentials, "get", "glm")

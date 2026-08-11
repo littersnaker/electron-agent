@@ -8,11 +8,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from backend.software_factory.artifacts import build_artifacts
-from backend.software_factory.contracts import FactoryBlueprint, FactoryValidation
-from backend.software_factory.domain import build_commerce_blueprint
-from backend.software_factory.frontend import detect_frontend_profile
-from backend.software_factory.validation import (
+from backend.services.software_factory.artifacts import build_artifacts
+from backend.services.software_factory.contracts import FactoryBlueprint, FactoryValidation
+from backend.services.software_factory.domain import build_commerce_blueprint
+from backend.services.software_factory.frontend import detect_frontend_profile
+from backend.services.software_factory.validation import (
     validate_factory_artifacts,
     validate_workspace_integration,
 )

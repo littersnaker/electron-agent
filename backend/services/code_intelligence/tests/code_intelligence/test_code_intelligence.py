@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from backend.code_intelligence.service import CodeIntelligenceService
+from backend.services.code_intelligence.service import CodeIntelligenceService
 
 
 def test_code_intelligence_reports_symbols_calls_and_impact(tmp_path: Path) -> None:

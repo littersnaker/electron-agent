@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.software_factory.contracts import EndpointSpec, EntitySpec, FactoryBlueprint, FieldSpec
+from backend.services.software_factory.contracts import (
+    EndpointSpec,
+    EntitySpec,
+    FactoryBlueprint,
+    FieldSpec,
+)
 
 
 def build_openapi_document(blueprint: FactoryBlueprint) -> dict[str, Any]:

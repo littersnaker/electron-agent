@@ -40,7 +40,7 @@ class ArtifactRecord:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ArtifactRecord":
+    def from_json(cls, value: dict[str, Any]) -> ArtifactRecord:
         """从旧索引宽松恢复一条 Artifact 记录。"""
 
         now = datetime.now(UTC).isoformat()

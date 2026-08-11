@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from backend.runtime.dag import TaskDagExecutionError, TaskDagExecutor, TaskDagNode
+from backend.services.runtime.dag import TaskDagExecutionError, TaskDagExecutor, TaskDagNode
 
 
 @pytest.mark.asyncio

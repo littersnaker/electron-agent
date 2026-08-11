@@ -9,11 +9,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
-from backend.core import request_audit
 from backend.services.agent.reflection.schema import extract_json_object
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY

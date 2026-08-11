@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from backend.software_factory.contracts import EntitySpec, FactoryBlueprint, FieldSpec
+from backend.services.software_factory.contracts import EntitySpec, FactoryBlueprint, FieldSpec
 
 
 def render_database_schema(blueprint: FactoryBlueprint) -> str:

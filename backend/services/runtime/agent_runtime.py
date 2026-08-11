@@ -8,24 +8,24 @@ import logging
 from collections.abc import AsyncIterator
 
 from backend.core import request_audit
-from backend.evaluation import RuntimeEvaluator
-from backend.memory import MemoryRouter
-from backend.models import ModelRouter
-from backend.runtime.agent_executor import AgentExecutor
-from backend.runtime.agent_registry import AgentRegistry
-from backend.runtime.context import ContextManager
-from backend.runtime.contracts import RuntimeRequest
-from backend.runtime.task_manager import TaskManager
+from backend.services.agent.reflection.eval import schedule_memory_eval
+from backend.services.agent.reflection.runner import schedule_runtime_review
+from backend.services.evaluation import RuntimeEvaluator
 from backend.services.glm46v import (
     builtin_skill_catalog,
     resolve_builtin_skills,
     split_registry_and_builtin_skill_ids,
 )
-from backend.services.agent.reflection.runner import schedule_runtime_review
-from backend.services.agent.reflection.eval import schedule_memory_eval
+from backend.services.memory import MemoryRouter
+from backend.services.models import ModelRouter
+from backend.services.runtime.agent_executor import AgentExecutor
+from backend.services.runtime.agent_registry import AgentRegistry
+from backend.services.runtime.context import ContextManager
+from backend.services.runtime.contracts import RuntimeRequest
+from backend.services.runtime.task_manager import TaskManager
+from backend.services.skills import SkillRegistry
 from backend.services.skills.installer import restore_installed_skills
-from backend.skills import SkillRegistry
-from backend.tools.code_tools import register_code_tools
+from backend.services.tools.code_tools import register_code_tools
 
 LOGGER = logging.getLogger(__name__)
 
@@ -261,7 +261,7 @@ class AgentRuntime:
     def catalog(self) -> dict[str, object]:
         """返回 Agent、Skill 和 Tool 的统一诊断目录。"""
 
-        from backend.tools.gateway import TOOL_GATEWAY
+        from backend.services.tools.gateway import TOOL_GATEWAY
 
         skills = list(self._skills.catalog())
         known_ids = {

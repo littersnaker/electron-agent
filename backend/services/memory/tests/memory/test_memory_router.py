@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from backend.core.config import get_settings
-from backend.memory.memory_router import MemoryRouter
+from backend.services.memory.memory_router import MemoryRouter
 from backend.services.workspace.database import initialize_database
 
 

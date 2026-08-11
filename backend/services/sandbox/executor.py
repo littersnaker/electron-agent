@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.sandbox.filesystem import SandboxFilesystem
-from backend.sandbox.shell import SandboxShell
+from backend.services.sandbox.filesystem import SandboxFilesystem
+from backend.services.sandbox.shell import SandboxShell
 
 
 class SandboxExecutor:

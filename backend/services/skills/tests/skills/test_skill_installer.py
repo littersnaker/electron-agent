@@ -263,14 +263,14 @@ def test_encode_decode_extra_files_roundtrip() -> None:
     """文本与二进制附加文件应可无损往返。"""
 
     source = {
-        "references/note.md": "中文文本".encode("utf-8"),
+        "references/note.md": "中文文本".encode(),
         "assets/icon.png": b"\x89PNG\r\n\x1a\nbinary",
     }
     encoded = installer._encode_extra_files(source)
     assert encoded["references/note.md"]["encoding"] == "utf-8"
     assert encoded["assets/icon.png"]["encoding"] == "base64"
     decoded = installer._decode_extra_files(encoded)
-    assert decoded["references/note.md"] == "中文文本".encode("utf-8")
+    assert decoded["references/note.md"] == "中文文本".encode()
     assert decoded["assets/icon.png"] == b"\x89PNG\r\n\x1a\nbinary"
 
 

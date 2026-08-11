@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.memory.contracts import MemoryRecord
-from backend.runtime.context.context_compressor import ContextCompressor, ContextSection
-from backend.runtime.contracts import RuntimeContext, RuntimeMessage
-from backend.skills.contracts import SkillDefinition
+from backend.services.memory.contracts import MemoryRecord
+from backend.services.runtime.context.context_compressor import ContextCompressor, ContextSection
+from backend.services.runtime.contracts import RuntimeContext, RuntimeMessage
+from backend.services.skills.contracts import SkillDefinition
 
 DEFAULT_TOKEN_BUDGET = 24_000
 CHARACTERS_PER_TOKEN_BUDGET = 2

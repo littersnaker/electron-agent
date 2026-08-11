@@ -9,7 +9,6 @@ from typing import Any
 
 import httpx
 
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.services.glm46v.client import (
     GLM46VClient,
     GLM46VError,
@@ -18,6 +17,7 @@ from backend.services.glm46v.client import (
     normalize_image_data,
 )
 from backend.services.glm46v.skill import GLM46V_SKILL_ID
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 LOGGER = logging.getLogger(__name__)
 RESULT_HEADER = "## Skill Tool Result · glm46v-vision"
@@ -90,7 +90,7 @@ def strip_image_attachments(payload: object) -> object:
 
     # 实际运行对象是 Pydantic ChatRequest，正常会走 model_copy。这里仅兼容测试替身。
     try:
-        setattr(payload, "attachments", remaining)
+        payload.attachments = remaining
     except (AttributeError, TypeError):
         return payload
     return payload

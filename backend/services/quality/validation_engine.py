@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from backend.services.agent.command_runner import CommandResult, run_safe_command
+from backend.services.agent.shared.command_runner import CommandResult, run_safe_command
 
 CommandRunner = Callable[[Path, str], Awaitable[CommandResult]]
 

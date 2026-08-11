@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 
 FACTORY_INTENT_TERMS = (
     "电商",

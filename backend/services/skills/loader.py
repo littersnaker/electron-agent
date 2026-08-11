@@ -6,8 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from backend.skills.contracts import SkillDefinition
-from backend.skills.validator import SkillValidator
+from backend.services.skills.contracts import SkillDefinition
+from backend.services.skills.validator import SkillValidator
 
 
 class SkillLoader:

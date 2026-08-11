@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.code_intelligence.ast.analyzer import PythonAstAnalyzer
+from backend.services.code_intelligence.ast.analyzer import PythonAstAnalyzer
 from backend.services.workspace.indexer import iter_project_files
 
 

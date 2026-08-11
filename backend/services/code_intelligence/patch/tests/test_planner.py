@@ -1,7 +1,7 @@
 """Patch Planner 模块测试。"""
 
-from backend.code_intelligence.patch.planner import PatchPlanner
-from backend.code_intelligence.patch.risk_score import RiskLevel
+from backend.services.code_intelligence.patch.planner import PatchPlanner
+from backend.services.code_intelligence.patch.risk_score import RiskLevel
 
 
 class TestPatchPlanner:

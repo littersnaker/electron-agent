@@ -11,7 +11,6 @@ import math
 
 from backend.services.llm.types import LlmMessage, LlmUsage
 
-
 _IMAGE_TOKEN_ESTIMATE = 256
 _MESSAGE_OVERHEAD_TOKENS = 4
 

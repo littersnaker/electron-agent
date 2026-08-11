@@ -7,12 +7,11 @@ Work 真正成功落盘后登记到 SQLite；下次 Planner 生成相同标题�
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
 
-from backend.services.agent.work_models import WorkLedger
+from backend.services.agent.shared.work_models import WorkLedger
 from backend.services.workspace.database import (
     dumps_json,
     loads_json,

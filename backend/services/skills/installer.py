@@ -23,13 +23,13 @@ import httpx
 import yaml
 
 from backend.core.config import get_settings
+from backend.services.skills.validator import SKILL_ID_PATTERN, SkillValidator
 from backend.services.workspace.database import (
     dumps_json,
     loads_json,
     open_database,
     utc_now_iso,
 )
-from backend.skills.validator import SKILL_ID_PATTERN, SkillValidator
 
 LOGGER = logging.getLogger(__name__)
 

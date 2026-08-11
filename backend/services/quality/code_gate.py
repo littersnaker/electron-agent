@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from backend.quality.regression_detector import RegressionReport
-from backend.quality.risk_engine import RiskAssessment, RiskLevel
-from backend.quality.validation_engine import ValidationReport
+from backend.services.quality.regression_detector import RegressionReport
+from backend.services.quality.risk_engine import RiskAssessment, RiskLevel
+from backend.services.quality.validation_engine import ValidationReport
 from backend.services.workspace.indexer import iter_project_files
 
 

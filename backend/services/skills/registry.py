@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.skills.contracts import SkillDefinition
-from backend.skills.loader import SkillLoader
-from backend.skills.matcher import SkillMatcher
+from backend.services.skills.contracts import SkillDefinition
+from backend.services.skills.loader import SkillLoader
+from backend.services.skills.matcher import SkillMatcher
 
 SCOPE_PRIORITY = {"system": 0, "project": 1, "user": 2, "task": 3}
 

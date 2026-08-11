@@ -8,15 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.services.workspace.database import open_database
-from backend.services.workspace.search_terms import extract_search_terms
 from backend.services.workspace.repository import (
     resolve_project_root,
     update_project_index_state,
 )
-from backend.utils.paths import is_probably_binary
-from backend.utils.paths import is_build_output_segment
+from backend.services.workspace.search_terms import extract_search_terms
+from backend.utils.paths import is_build_output_segment, is_probably_binary
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
-
 
 IGNORED_DIRECTORIES = {
     ".git",

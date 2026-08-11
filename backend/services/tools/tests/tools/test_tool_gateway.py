@@ -7,10 +7,10 @@ from typing import cast
 
 import pytest
 
-from backend.services.agent.workspace_tools import ReadBatchResult
-from backend.tools.code_tools import execute_code_tool, register_code_tools
-from backend.tools.contracts import ToolExecutionContext, ToolRequest
-from backend.tools.gateway import TOOL_GATEWAY
+from backend.services.agent.shared.workspace_tools import ReadBatchResult
+from backend.services.tools.code_tools import execute_code_tool, register_code_tools
+from backend.services.tools.contracts import ToolExecutionContext, ToolRequest
+from backend.services.tools.gateway import TOOL_GATEWAY
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_sensitive_read_is_soft_filtered_without_retry_failure(tmp_path: P
 async def test_write_alias_can_create_file_through_edit_tool(tmp_path: Path) -> None:
     """顶层 write 别名解析后应通过受控 edit 工具真实创建文件。"""
 
-    from backend.services.agent.loop_protocol import parse_agent_action
+    from backend.services.agent.shared.loop_protocol import parse_agent_action
 
     action = parse_agent_action(
         '{"action":"write","workId":"W001","path":"src/created.ts",'

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.tools.contracts import ToolDefinition, ToolExecutionContext, ToolRequest
+from backend.services.tools.contracts import ToolDefinition, ToolExecutionContext, ToolRequest
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 MAXIMUM_ARGUMENT_CHARACTERS = 2_500_000

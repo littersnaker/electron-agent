@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
-from backend.agents.base import BaseAgent
-from backend.agents.coding import CodeAgentAdapter
-from backend.agents.commerce import CommerceAgentAdapter
-from backend.agents.media import MediaAgentAdapter
-from backend.agents.qa import QAAgentAdapter
+from backend.services.agent.adapters.base import BaseAgent
+from backend.services.agent.adapters.coding import CodeAgentAdapter
+from backend.services.agent.adapters.commerce import CommerceAgentAdapter
+from backend.services.agent.adapters.media import MediaAgentAdapter
+from backend.services.agent.adapters.qa import QAAgentAdapter
 
 AgentFactory = Callable[[], BaseAgent]
 

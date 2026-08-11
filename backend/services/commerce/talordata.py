@@ -14,7 +14,6 @@ import httpx
 
 from backend.services.commerce.marketplaces import Marketplace
 
-
 CURRENT_ENDPOINT = "https://serpapi.talordata.net/serp/v1/request"
 COMPAT_ENDPOINT = "https://serpapi.talordata.net/request"
 RESULT_KEYS = {
@@ -249,7 +248,7 @@ async def _request_endpoint(
     if response.is_error:
         message = payload.get("message") if isinstance(payload, dict) else None
         error = RuntimeError(f"TalorData 请求失败（HTTP {response.status_code}）{f'：{message}' if message else ''}")
-        setattr(error, "status_code", response.status_code)
+        error.status_code = response.status_code
         raise error
     return payload, latency_ms
 

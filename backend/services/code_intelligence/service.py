@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.code_intelligence.ast.analyzer import PythonAstAnalyzer
-from backend.code_intelligence.graph.call_graph import CallGraphBuilder
-from backend.code_intelligence.patch.impact import ImpactAnalyzer
-from backend.code_intelligence.symbol.index import SymbolIndex
+from backend.services.code_intelligence.ast.analyzer import PythonAstAnalyzer
+from backend.services.code_intelligence.graph.call_graph import CallGraphBuilder
+from backend.services.code_intelligence.patch.impact import ImpactAnalyzer
+from backend.services.code_intelligence.symbol.index import SymbolIndex
 
 
 class CodeIntelligenceService:
@@ -64,7 +64,7 @@ class CodeIntelligenceService:
     def _render_python_analysis(self, analysis: object) -> str:
         """把 PythonFileAnalysis 转换成稳定文本，避免暴露内部 dataclass 表示。"""
 
-        from backend.code_intelligence.ast.analyzer import PythonFileAnalysis
+        from backend.services.code_intelligence.ast.analyzer import PythonFileAnalysis
 
         if not isinstance(analysis, PythonFileAnalysis):
             return "## Python AST\n分析结果类型无效"

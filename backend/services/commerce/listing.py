@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from backend.schemas.commerce import CommerceRequest
-from backend.services.commerce.analytics import resolve_category
-from backend.services.commerce.marketplaces import get_marketplace
 from backend.utils.sse import sse_packet
 
 

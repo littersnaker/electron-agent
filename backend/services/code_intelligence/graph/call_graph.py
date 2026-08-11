@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.code_intelligence.ast.analyzer import PythonAstAnalyzer
+from backend.services.code_intelligence.ast.analyzer import PythonAstAnalyzer
 
 
 @dataclass(frozen=True, slots=True)

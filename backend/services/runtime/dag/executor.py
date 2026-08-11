@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from backend.runtime.dag.contracts import TaskDagNode, TaskDagResult
+from backend.services.runtime.dag.contracts import TaskDagNode, TaskDagResult
 
 
 @dataclass(frozen=True, slots=True)

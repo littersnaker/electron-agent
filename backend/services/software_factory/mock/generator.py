@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from backend.software_factory.contracts import FactoryBlueprint
+from backend.services.software_factory.contracts import FactoryBlueprint
 
 
 def generate_mock_payload(blueprint: FactoryBlueprint) -> dict[str, list[dict[str, Any]]]:

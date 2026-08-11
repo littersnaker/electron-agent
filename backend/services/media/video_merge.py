@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 
 def resolve_ffmpeg() -> str | None:

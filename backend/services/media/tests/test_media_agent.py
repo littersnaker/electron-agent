@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from backend.runtime.agent_registry import AgentRegistry
 from backend.schemas.media import MediaGenerateBody
 from backend.services.media.video_merge import merge_videos, resolve_ffmpeg
+from backend.services.runtime.agent_registry import AgentRegistry
 
 
 def test_media_agent_registered_in_registry(tmp_path: Path) -> None:
     """Media Agent 配置应能被注册表加载，且使用批准的白名单适配器。"""
 
-    config_root = Path(__file__).resolve().parents[2] / "agents"
+    config_root = Path(__file__).resolve().parents[4] / "agents"
     registry = AgentRegistry(config_root)
     registry.load()
     ids = [item["id"] for item in registry.catalog()]

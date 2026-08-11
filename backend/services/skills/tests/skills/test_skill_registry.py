@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.skills.loader import SkillLoader
-from backend.skills.registry import SkillRegistry
+from backend.services.skills.loader import SkillLoader
+from backend.services.skills.registry import SkillRegistry
 
 
 def _write_skill(root: Path, folder: str, *, version: str, prompt: str) -> None:

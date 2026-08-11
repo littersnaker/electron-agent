@@ -15,7 +15,6 @@ from backend.services.llm.catalog import (
     ProviderId,
 )
 
-
 ENVIRONMENT_ALIASES: dict[ProviderId, tuple[str, ...]] = PROVIDER_ENV_KEYS
 
 # 当前只允许百炼使用随 Python 后端分发的共享兜底 Key。其他供应商仍要求用户

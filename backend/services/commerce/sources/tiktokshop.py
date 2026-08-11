@@ -22,7 +22,7 @@ DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=15.0)
 def _sign_sha256(client_secret: str, timestamp: str, path: str) -> str:
     """按 TikTok Shop 开放平台规范生成请求签名（SHA256）。"""
 
-    raw = f"{client_secret}{timestamp}{path}".encode("utf-8")
+    raw = f"{client_secret}{timestamp}{path}".encode()
     return hashlib.sha256(raw).hexdigest()
 
 

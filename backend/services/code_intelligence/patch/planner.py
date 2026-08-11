@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from backend.code_intelligence.patch.risk_score import PatchRiskAnalyzer, PatchRiskScore
+from backend.services.code_intelligence.patch.risk_score import PatchRiskAnalyzer, PatchRiskScore
 
 # impact 模块依赖链较重，延迟导入避免初始化失败。
 _ImpactAnalyzer: Any = None
@@ -19,7 +19,7 @@ def _get_impact_analyzer():
     """延迟加载 ImpactAnalyzer。"""
     global _ImpactAnalyzer
     if _ImpactAnalyzer is None:
-        from backend.code_intelligence.patch.impact import ImpactAnalyzer
+        from backend.services.code_intelligence.patch.impact import ImpactAnalyzer
         _ImpactAnalyzer = ImpactAnalyzer
     return _ImpactAnalyzer
 

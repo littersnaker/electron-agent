@@ -1,6 +1,6 @@
 """Semantic Memory：保存用户知识和项目知识。"""
 
-from backend.memory.sqlite_store import SQLiteMemoryStore
+from backend.services.memory.sqlite_store import SQLiteMemoryStore
 
 
 class SemanticMemoryStore(SQLiteMemoryStore):

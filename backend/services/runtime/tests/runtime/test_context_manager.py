@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-from backend.memory.contracts import MemoryRecord
-from backend.models.router import ModelRouter
-from backend.runtime.context import ContextManager
-from backend.runtime.contracts import RuntimeMessage
-from backend.skills.contracts import SkillDefinition
+from backend.services.memory.contracts import MemoryRecord
+from backend.services.models.router import ModelRouter
+from backend.services.runtime.context import ContextManager
+from backend.services.runtime.contracts import RuntimeMessage
+from backend.services.skills.contracts import SkillDefinition
 
 
 def test_context_manager_prioritizes_skill_and_respects_budget() -> None:

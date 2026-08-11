@@ -10,8 +10,8 @@ import pytest
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 from backend.services.media.comic_pipeline import (
-    build_comic_pipeline,
     _extract_storyboard,
+    build_comic_pipeline,
 )
 
 

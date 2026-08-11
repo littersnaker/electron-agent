@@ -2,11 +2,11 @@
 
 import asyncio
 
-from backend.quality.code_gate import CodeGate
-from backend.quality.patch_analyzer import PatchAnalyzer
-from backend.quality.regression_detector import RegressionDetector
-from backend.quality.validation_engine import ValidationEngine
-from backend.services.agent.command_runner import CommandResult
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.quality.code_gate import CodeGate
+from backend.services.quality.patch_analyzer import PatchAnalyzer
+from backend.services.quality.regression_detector import RegressionDetector
+from backend.services.quality.validation_engine import ValidationEngine
 
 
 def test_patch_analyzer_scales_validation_with_risk() -> None:
@@ -101,8 +101,8 @@ def test_code_gate_blocks_files_over_limit(tmp_path) -> None:
 def test_final_quality_report_exposes_ui_metrics(tmp_path) -> None:
     """验证最终审查会输出 UI 需要的变更、风险、验证和回归指标。"""
 
-    from backend.services.agent.final_quality import review_execution
-    from backend.services.agent.work_state import WorkWorkerState
+    from backend.services.agent.loop.final_quality import review_execution
+    from backend.services.agent.shared.work_state import WorkWorkerState
 
     target = tmp_path / "module.py"
     target.write_text('"""测试模块。"""\n\ndef value():\n    """返回稳定值。"""\n    return 1\n', "utf-8")

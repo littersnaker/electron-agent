@@ -1,6 +1,6 @@
 """Task Memory：保存当前任务和可恢复状态摘要。"""
 
-from backend.memory.sqlite_store import SQLiteMemoryStore
+from backend.services.memory.sqlite_store import SQLiteMemoryStore
 
 
 class TaskMemoryStore(SQLiteMemoryStore):

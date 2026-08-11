@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.memory.contracts import MemoryRecord, MemoryStore
-from backend.memory.episodic import EpisodicMemoryStore
-from backend.memory.semantic import SemanticMemoryStore
-from backend.memory.task import TaskMemoryStore
+from backend.services.memory.contracts import MemoryRecord, MemoryStore
+from backend.services.memory.episodic import EpisodicMemoryStore
+from backend.services.memory.semantic import SemanticMemoryStore
+from backend.services.memory.task import TaskMemoryStore
 
 
 class MemoryRouter:

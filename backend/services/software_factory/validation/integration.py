@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from backend.software_factory.contracts import FactoryValidation
+from backend.services.software_factory.contracts import FactoryValidation
 from backend.utils.paths import resolve_inside
 
 SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx"}

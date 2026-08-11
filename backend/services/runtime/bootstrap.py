@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.core.config import get_settings
-from backend.runtime.agent_registry import AgentRegistry
-from backend.runtime.agent_runtime import AgentRuntime
-from backend.skills import SkillRegistry
+from backend.services.runtime.agent_registry import AgentRegistry
+from backend.services.runtime.agent_runtime import AgentRuntime
+from backend.services.skills import SkillRegistry
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# bootstrap 位于 backend/services/runtime/，parents[3] 即项目根目录
+# （agents/、skills/ 等配置目录都在项目根）。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def create_runtime() -> AgentRuntime:

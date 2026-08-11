@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from backend.software_factory.contracts import EntitySpec, FactoryBlueprint, FieldSpec
+from backend.services.software_factory.contracts import EntitySpec, FactoryBlueprint, FieldSpec
 
 
 def render_contracts(blueprint: FactoryBlueprint) -> str:

@@ -464,7 +464,7 @@ class LlmGateway:
                 )
             except StopAsyncIteration:
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise ProviderRequestError(
                     f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
                     scope="provider",

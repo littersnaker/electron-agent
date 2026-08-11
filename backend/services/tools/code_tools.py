@@ -5,19 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
-from backend.code_intelligence.service import CodeIntelligenceService
-from backend.sandbox import SANDBOX
-from backend.services.agent.proposal import apply_proposal
-from backend.services.agent.workspace_tools import file_version
-from backend.tools.contracts import (
+from backend.services.agent.shared.proposal import apply_proposal
+from backend.services.agent.shared.workspace_tools import file_version
+from backend.services.code_intelligence.service import CodeIntelligenceService
+from backend.services.sandbox import SANDBOX
+from backend.services.tools.contracts import (
     ToolDefinition,
     ToolExecutionContext,
     ToolPermission,
     ToolRequest,
 )
-from backend.tools.gateway import TOOL_GATEWAY
-from backend.tools.software_factory_tools import register_software_factory_tools
-from backend.tools.validator import ToolValidator
+from backend.services.tools.gateway import TOOL_GATEWAY
+from backend.services.tools.software_factory_tools import register_software_factory_tools
+from backend.services.tools.validator import ToolValidator
 from backend.utils.sensitive_paths import (
     partition_safe_workspace_paths,
     render_sensitive_skip,

@@ -1,5 +1,5 @@
 """统一 Memory 系统。"""
 
-from backend.memory.memory_router import MemoryRouter
+from backend.services.memory.memory_router import MemoryRouter
 
 __all__ = ["MemoryRouter"]

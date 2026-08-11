@@ -10,8 +10,9 @@ import asyncio
 import json
 import operator
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Annotated, Any, Awaitable, Callable, TypedDict
+from typing import Annotated, Any, TypedDict
 
 import httpx
 
@@ -20,9 +21,9 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
 from backend.services.media.dashscope import generate_media, resolve_media_api_base
-from backend.services.media.volcengine import resolve_volcengine_base
 from backend.services.media.rate_limit import throttle_media_request
 from backend.services.media.video_merge import merge_videos
+from backend.services.media.volcengine import resolve_volcengine_base
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 

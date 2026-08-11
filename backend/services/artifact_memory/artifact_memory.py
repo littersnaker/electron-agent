@@ -34,7 +34,7 @@ class ArtifactMemory:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ArtifactMemory":
+    def from_json(cls, value: dict[str, Any]) -> ArtifactMemory:
         """从 JSON 恢复。"""
 
         return cls(

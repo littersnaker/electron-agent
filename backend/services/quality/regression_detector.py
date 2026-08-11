@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from backend.quality.validation_engine import ValidationReport
+from backend.services.quality.validation_engine import ValidationReport
 
 _EXPORT_PATTERN = re.compile(
     r"^\s*export\s+(?:default\s+)?(?:async\s+)?"
@@ -35,7 +35,7 @@ class ContractSnapshot:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ContractSnapshot":
+    def from_json(cls, value: dict[str, Any]) -> ContractSnapshot:
         """从 Checkpoint 恢复修改前快照。"""
 
         return cls(

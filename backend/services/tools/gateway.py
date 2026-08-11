@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.tools.contracts import (
+from backend.services.tools.contracts import (
     ToolDefinition,
     ToolExecutionContext,
     ToolExecutionResult,
     ToolRequest,
 )
-from backend.tools.result_filter import ToolResultFilter
-from backend.tools.validator import ToolValidator
+from backend.services.tools.result_filter import ToolResultFilter
+from backend.services.tools.validator import ToolValidator
 
 LOGGER = logging.getLogger(__name__)
 

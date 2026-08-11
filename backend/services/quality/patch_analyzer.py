@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.quality.risk_engine import RiskAssessment, RiskEngine
+from backend.services.quality.risk_engine import RiskAssessment, RiskEngine
 
 
 @dataclass(slots=True)

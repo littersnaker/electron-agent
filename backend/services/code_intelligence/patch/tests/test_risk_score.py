@@ -1,6 +1,6 @@
 """Patch Risk Score 模块测试。"""
 
-from backend.code_intelligence.patch.risk_score import (
+from backend.services.code_intelligence.patch.risk_score import (
     PatchRiskAnalyzer,
     PatchRiskScore,
     RiskLevel,

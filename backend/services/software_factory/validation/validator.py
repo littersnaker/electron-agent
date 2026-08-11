@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from typing import Any
 
-from backend.software_factory.contracts import (
+from backend.services.software_factory.contracts import (
     FactoryBlueprint,
     FactoryValidation,
     GeneratedArtifact,

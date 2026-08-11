@@ -14,7 +14,6 @@ from typing import Any
 
 import httpx
 
-
 MCP_PROTOCOL_VERSION = "2025-11-25"
 ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 

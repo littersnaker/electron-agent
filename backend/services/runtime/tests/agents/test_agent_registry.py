@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.runtime.agent_registry import AgentRegistry
+from backend.services.runtime.agent_registry import AgentRegistry
 
 
 def test_agent_registry_loads_approved_adapter(tmp_path: Path) -> None:

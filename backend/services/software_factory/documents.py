@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.software_factory.contracts import FactoryBlueprint
+from backend.services.software_factory.contracts import FactoryBlueprint
 
 
 def render_requirements_document(blueprint: FactoryBlueprint) -> str:

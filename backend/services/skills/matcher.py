@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.skills.contracts import SkillDefinition
+from backend.services.skills.contracts import SkillDefinition
 
 
 class SkillMatcher:

@@ -8,6 +8,8 @@ from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.langgraph import build_research_graph
 from backend.services.commerce.sources.ali1688 import (
     _normalize as normalize_1688,
+)
+from backend.services.commerce.sources.ali1688 import (
     _sign_params,
 )
 from backend.services.commerce.sources.tiktokshop import (

@@ -10,7 +10,6 @@ from backend.services.workspace.database import (
     utc_now_iso,
 )
 
-
 THEME_PREFERENCE_KEY = "appearance.theme"
 
 

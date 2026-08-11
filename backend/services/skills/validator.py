@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from backend.skills.contracts import SkillScope
+from backend.services.skills.contracts import SkillScope
 
 SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
 VALID_SCOPES: set[str] = {"system", "project", "user", "task"}

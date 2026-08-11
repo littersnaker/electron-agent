@@ -7,7 +7,6 @@ import os
 
 from fastapi import Request
 
-
 HEADER_TO_FIELD = {
     "x-commerce-talordata-token": "talordata",
     "x-commerce-keepa-key": "keepa",

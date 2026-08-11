@@ -6,7 +6,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from backend.memory.contracts import MemoryRecord
+from backend.services.memory.contracts import MemoryRecord
 from backend.services.workspace.database import (
     dumps_json,
     loads_json,

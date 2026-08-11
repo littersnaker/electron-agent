@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.software_factory import SOFTWARE_FACTORY
-from backend.tools.contracts import ToolDefinition, ToolExecutionContext
-from backend.tools.gateway import TOOL_GATEWAY
+from backend.services.software_factory import SOFTWARE_FACTORY
+from backend.services.tools.contracts import ToolDefinition, ToolExecutionContext
+from backend.services.tools.gateway import TOOL_GATEWAY
 
 _REGISTERED = False
 

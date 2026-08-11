@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.code_intelligence.ast.analyzer import PythonAstAnalyzer
+from backend.services.code_intelligence.ast.analyzer import PythonAstAnalyzer
 from backend.services.workspace.indexer import iter_project_files
 
 TS_SYMBOL_PATTERN = re.compile(

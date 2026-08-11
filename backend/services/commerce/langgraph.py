@@ -24,6 +24,7 @@ from backend.services.commerce.analytics import (
     resolve_category,
 )
 from backend.services.commerce.drafts import save_listing_draft
+from backend.services.commerce.listing import _draft, _keywords, _validate
 from backend.services.commerce.llm import (
     CommerceCategoryAnalysis,
     CommerceInsights,
@@ -31,10 +32,9 @@ from backend.services.commerce.llm import (
     LlmConfig,
     try_complete_json,
 )
-from backend.services.commerce.listing import _draft, _keywords, _validate
 from backend.services.commerce.marketplaces import get_marketplace
-from backend.services.commerce.sources.amazon import search_amazon
 from backend.services.commerce.sources.ali1688 import search_1688
+from backend.services.commerce.sources.amazon import search_amazon
 from backend.services.commerce.sources.tiktokshop import (
     fetch_tiktok_access_token,
     search_tiktok_shop,
