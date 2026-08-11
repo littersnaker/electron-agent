@@ -12,7 +12,7 @@ from backend.services.agent.context.context_compactor import (
 )
 from backend.services.agent.context.context_store import ContextStore
 from backend.services.agent.context.work_context import WorkContext
-from backend.services.agent.project_context import (
+from backend.services.agent.planner.project_context import (
     _fallback_overview_files,
     ensure_context,
     render_context,

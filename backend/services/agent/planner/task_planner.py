@@ -8,19 +8,20 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.services.agent.plan_optimizer import optimize_work_granularity
-from backend.services.agent.planner_context import build_planner_prompt
-from backend.services.agent.target_preflight import is_greenfield_project
-from backend.services.agent.work_models import (
+from backend.services.agent.planner.plan_optimizer import optimize_work_granularity
+from backend.services.agent.planner.planner_context import build_planner_prompt
+from backend.services.agent.planner.target_preflight import is_greenfield_project
+from backend.services.agent.shared.work_models import (
     FileSystemOperation,
     WorkItem,
     WorkLedger,
 )
-from backend.services.agent.worklist_reviewer import review_worklist
+from backend.services.agent.worker.worklist_reviewer import review_worklist
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
-from backend.software_factory.planning import enrich_software_factory_works
+from backend.services.software_factory.planning import enrich_software_factory_works
+
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     """读取整数环境变量并限制在安全区间。"""

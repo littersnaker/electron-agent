@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from backend.models.router import ModelSelection
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.schemas.chat import ChatRequest
 from backend.services.glm46v import (
     enrich_runtime_context_with_glm46v,
@@ -14,7 +12,9 @@ from backend.services.glm46v import (
 )
 from backend.services.glm46v.client import GLM46VError
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.models.router import ModelSelection
 from backend.services.qa import stream_qa_agent
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.utils.sse import encode_sse
 
 

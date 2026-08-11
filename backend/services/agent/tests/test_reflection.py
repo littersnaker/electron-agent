@@ -11,7 +11,6 @@ import pytest
 
 from backend.core import request_audit
 from backend.core.config import get_settings
-from backend.memory.semantic import SemanticMemoryStore
 from backend.services.agent.reflection import digest as digest_module
 from backend.services.agent.reflection import eval as eval_module
 from backend.services.agent.reflection import runner as runner_module
@@ -30,7 +29,8 @@ from backend.services.agent.reflection.settings import (
     write_review_settings,
 )
 from backend.services.llm.credentials import LlmCredentials
-from backend.skills.loader import SkillLoader
+from backend.services.memory.semantic import SemanticMemoryStore
+from backend.services.skills.loader import SkillLoader
 from backend.services.workspace.database import initialize_database
 
 

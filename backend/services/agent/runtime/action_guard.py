@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.quality.regression_detector import ContractSnapshot, RegressionDetector
-from backend.services.agent.loop_protocol import EditOperation
 from backend.services.agent.runtime.decision_gate import DecisionGate, DecisionGateResult
 from backend.services.agent.runtime.reasoning_controller import ReasoningController
 from backend.services.agent.runtime.reasoning_state import ReasoningState
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.loop_protocol import EditOperation
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.quality.regression_detector import ContractSnapshot, RegressionDetector
 
 
 def guard_edit(

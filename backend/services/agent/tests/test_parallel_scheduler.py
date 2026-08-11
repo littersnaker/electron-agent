@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services.agent.loop import stream_autonomous_loop
-from backend.services.agent.resource_coordinator import (
+from backend.services.agent.loop.runner import stream_autonomous_loop
+from backend.services.agent.planner.task_planner import CodeTaskPlan, WorkItem
+from backend.services.agent.shared.resource_coordinator import (
     WorkspaceResourceCoordinator,
     select_parallel_wave,
 )
-from backend.services.agent.task_planner import CodeTaskPlan, WorkItem
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -61,7 +61,7 @@ def test_parallel_wave_respects_target_file_conflicts_and_priority() -> None:
 def test_rolling_candidates_mix_independent_and_conflicting_works() -> None:
     """滚动补位时应同时选择不冲突 Work，并让同文件冲突项等待高优先级完成。"""
 
-    from backend.services.agent.resource_coordinator import select_parallel_candidates
+    from backend.services.agent.shared.resource_coordinator import select_parallel_candidates
 
     ready = [
         WorkItem("W001", "模块 A", "修改 A", priority=20, target_files=["a.ts"]),
@@ -151,7 +151,7 @@ async def test_independent_works_execute_concurrently(tmp_path, monkeypatch) -> 
             SimpleNamespace(name="Worker Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -208,7 +208,7 @@ async def test_same_target_file_runs_serially_in_priority_order(tmp_path, monkey
             SimpleNamespace(name="Worker Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     async for _ in stream_autonomous_loop(
         root=tmp_path,
         task_plan=_plan(
@@ -327,7 +327,7 @@ async def test_parallel_wave_replans_once_with_full_success_and_failure_json(
             SimpleNamespace(name="Worker Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -393,7 +393,7 @@ async def test_rolling_scheduler_starts_unlocked_work_before_slow_peer_finishes(
             SimpleNamespace(name="Worker Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,

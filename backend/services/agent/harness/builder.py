@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from backend.services.agent.harness.models import ProjectHarness
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.domain_rules import harness_rules
+from backend.services.agent.shared.domain_rules import harness_rules
+from backend.services.agent.shared.work_models import WorkItem
 from backend.services.workspace.indexer import iter_project_files
 from backend.utils.paths import is_probably_binary
 from backend.utils.sensitive_paths import is_sensitive_workspace_path

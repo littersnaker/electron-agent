@@ -1,5 +1,5 @@
 """Commerce Agent Runtime 适配器。"""
 
-from backend.agents.commerce.adapter import CommerceAgentAdapter
+from backend.services.agent.adapters.commerce.adapter import CommerceAgentAdapter
 
 __all__ = ["CommerceAgentAdapter"]

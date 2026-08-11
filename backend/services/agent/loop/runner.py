@@ -7,16 +7,15 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from backend.services.agent.checkpoint_runtime import (
+from backend.services.agent.harness import ProjectHarness, build_project_harness
+from backend.services.agent.loop.checkpoint_runtime import (
     command_from_json,
     ledger_from_json,
     save_loop_checkpoint,
     usage_from_json,
 )
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.harness import ProjectHarness, build_project_harness
-from backend.services.agent.final_quality import review_execution
-from backend.services.agent.loop_runtime import (
+from backend.services.agent.loop.final_quality import review_execution
+from backend.services.agent.loop.loop_runtime import (
     CheckpointThrottle,
     load_worker_states,
     max_replan_rounds,
@@ -24,27 +23,32 @@ from backend.services.agent.loop_runtime import (
     max_work_attempts,
     merge_worker_result,
 )
-from backend.services.agent.loop_snapshot import build_scheduler_snapshot
-from backend.services.agent.loop_support import ExecutionMode, perform_batch_replan, usage_add
-from backend.services.agent.resource_coordinator import (
+from backend.services.agent.loop.loop_snapshot import build_scheduler_snapshot
+from backend.services.agent.planner.target_preflight import preflight_plan_works
+from backend.services.agent.planner.task_planner import CodeTaskPlan, WorkLedger
+from backend.services.agent.reflection.runner import schedule_work_review
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.loop_support import (
+    ExecutionMode,
+    perform_batch_replan,
+    usage_add,
+)
+from backend.services.agent.shared.resource_coordinator import (
     WorkspaceResourceCoordinator,
     max_parallel_workers,
     select_parallel_candidates,
 )
-from backend.services.agent.reflection.runner import schedule_work_review
-from backend.services.agent.task_planner import CodeTaskPlan, WorkLedger
-from backend.services.agent.target_preflight import preflight_plan_works
-from backend.services.agent.work_dispatcher import (
+from backend.services.agent.shared.work_state import WorkExecutionResult, WorkWorkerState
+from backend.services.agent.shared.workspace_tools import render_workspace_tree
+from backend.services.agent.worker.work_dispatcher import (
     WorkDispatchEnvironment,
     WorkDispatcher,
 )
-from backend.services.agent.worklist_normalizer import split_works_by_size
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
-from backend.services.agent.workspace_tools import render_workspace_tree
-from backend.services.workspace.completed_works import skip_redundant_works
+from backend.services.agent.worker.worklist_normalizer import split_works_by_size
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY  # noqa: F401 - 测试通过共享网关打补丁。
 from backend.services.llm.types import LlmUsage
+from backend.services.workspace.completed_works import skip_redundant_works
 
 
 @dataclass(slots=True)

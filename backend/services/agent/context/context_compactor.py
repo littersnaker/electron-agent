@@ -24,6 +24,12 @@ SLIDING_WINDOW_ENTRIES = 10
 MAX_WINDOW_TOKENS = 40_000
 # 折叠时保留的头部结构条目最大字符数（防止 WORK CONTEXT 内嵌大文件全文）。
 _PRESERVE_HEAD_ENTRY_CHARS = 1_500
+# 折叠时保留的最近一次 edit 结果最大字符数：模型需要知道"上一轮改了什么"，
+# 否则会基于旧内容盲重复 edit（日志实测：成功 edit 后下一轮重复同内容再失配）。
+_PRESERVE_EDIT_RESULT_CHARS = 2_500
+# 折叠时保留的最近一次 read 观察最大字符数：模型需要看到最近读到的文件内容，
+# 否则"读而不见"会触发循环 read（日志实测：4 次 read 同一组文件、0 次 edit）。
+_PRESERVE_READ_RESULT_CHARS = 12_000
 
 
 @dataclass(slots=True)
@@ -228,8 +234,21 @@ class ContextCompactor:
         # 避免模型在后期失去依赖结论；超大条目（如 RELATED FILES 全文）不保留，
         # 需要时由模型重新 read（折叠时指纹已清空）。
         head = self._preserve_head_context(older)
+        # 保留窗口外最近一次 edit 的修改结果（CHANGED/DIFF）：模型据此知道
+        # 上一轮改了什么，不会基于旧内容盲重复 edit。
+        last_edit = self._last_edit_result(older)
+        # 保留窗口外最近一次 read 的完整观察：模型据此能看到最近读到的文件
+        # 内容，不会因"读而不见"而循环 read 同一批文件。
+        last_read = self._last_read_result(older)
+        preserved_middle: list[str] = []
+        if last_edit:
+            preserved_middle.append(last_edit)
+        if last_read:
+            preserved_middle.append(last_read)
+        if summary:
+            preserved_middle.append(summary)
         windowed = self._fit_window_to_budget(recent_tail)
-        result = [*head, summary, *windowed] if summary else [*head, *windowed]
+        result = [*head, *preserved_middle, *windowed]
         after_tokens = sum(self._estimate_tokens(item) for item in result)
         return result, {
             "removed": max(0, len(entries) - len(result)),
@@ -237,6 +256,53 @@ class ContextCompactor:
             "after_tokens": after_tokens,
             "saved_tokens": max(0, before_tokens - after_tokens),
         }
+
+    def _last_edit_result(self, entries: list[str]) -> str:
+        """保留窗口外最近一次 edit 的修改结果，供模型判断文件现状。
+
+        edit 结果条目形如 "ACTION edit: <summary>\\nCHANGED: [files]\\nDIFF:\\n<diff>"。
+        折叠历史时若把 DIFF 一并摘要掉，模型会不知道上一轮改了什么，从而
+        基于旧内容重复编辑；这里从窗口外倒序找最近的 edit 结果并完整保留，
+        超长时截断并提示模型"请基于此判断现状，勿用更早内容重复编辑"。
+        """
+
+        for entry in reversed(entries):
+            if "ACTION edit" not in entry and "\nCHANGED:" not in entry:
+                continue
+            marker = "\n（上次编辑结果已保留，请基于此判断文件现状，勿用更早内容重复编辑）"
+            limit = _PRESERVE_EDIT_RESULT_CHARS
+            if len(entry) <= limit:
+                return entry
+            return entry[: max(0, limit - len(marker))] + marker
+        return ""
+
+    def _last_read_result(self, entries: list[str]) -> str:
+        """保留窗口外最近一次 read 的完整观察，供模型掌握文件现场。
+
+        read 观察条目形如 "ACTION read paths=[...]\\nOBSERVATION:\\n<文件内容>"。
+        折叠历史时若把观察一并摘要掉，模型会"读而不见"——知道自己 read 过但
+        看不到内容，从而循环 read 同一批文件。这里从窗口外倒序找最近的、
+        含真实内容的 read 观察并完整保留；超长时截断并提示用 offsets 分页
+        读取指定区域，而不是全量重读。
+
+        "未变化"瘦身提示（OBSERVATION（以下文件未变化…））不含文件内容，
+        不视为有效观察，跳过。
+        """
+
+        for entry in reversed(entries):
+            if "ACTION read" not in entry or "OBSERVATION:" not in entry:
+                continue
+            if "以下文件未变化" in entry:
+                continue
+            marker = (
+                "\n（最近一次读取结果已保留；内容过长已截断，如需完整内容"
+                "请用 read offsets 分页读取指定区域，不要全量重读）"
+            )
+            limit = _PRESERVE_READ_RESULT_CHARS
+            if len(entry) <= limit:
+                return entry
+            return entry[: max(0, limit - len(marker))] + marker
+        return ""
 
     def _preserve_head_context(self, entries: list[str]) -> list[str]:
         """保留 transcript 头部短小的结构上下文条目，超出阈值即停止。"""

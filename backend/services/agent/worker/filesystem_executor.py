@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
 
-from backend.services.agent.work_models import FileSystemOperation
+from backend.services.agent.shared.work_models import FileSystemOperation
 from backend.utils.paths import resolve_inside
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 

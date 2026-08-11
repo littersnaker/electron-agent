@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from backend.models.router import ModelSelection
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.schemas.chat import ChatRequest
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.media.agent_service import stream_media_agent
+from backend.services.models.router import ModelSelection
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
 class MediaAgentAdapter:

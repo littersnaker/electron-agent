@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from backend.services.agent.runtime.reasoning_state import ReasoningLevel, ReasoningState
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 
 REASONING_BUDGET = {
     "simple": 1_000,

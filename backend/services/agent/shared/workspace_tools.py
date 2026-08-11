@@ -7,8 +7,8 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from backend.services.agent.loop_protocol import EditOperation
-from backend.services.agent.icon_assets import backfill_placeholder_icons
+from backend.services.agent.shared.icon_assets import backfill_placeholder_icons
+from backend.services.agent.shared.loop_protocol import EditOperation
 from backend.services.workspace.indexer import TEXT_EXTENSIONS, iter_project_files
 from backend.services.workspace.search_terms import extract_search_terms
 from backend.utils.paths import is_probably_binary, resolve_inside
@@ -17,7 +17,6 @@ from backend.utils.sensitive_paths import (
     partition_safe_workspace_paths,
     render_sensitive_skip,
 )
-
 
 MAX_SEARCH_FILE_BYTES = 1_500_000
 MAX_WRITE_FILE_CHARS = 2_000_000
@@ -326,8 +325,8 @@ def apply_edit_operations(
                 current = file_version(root, operation.path)
                 if current != expected:
                     raise ValueError(
-                        f"并行冲突：{operation.path} 在读取后已被其他 Work 修改，"
-                        "请重新 read 后再生成补丁"
+                        f"内容已变化：{operation.path} 自上次读取后已被修改"
+                        "（可能来自本 Work 此前的编辑或并行写入），请重新 read 后再生成补丁"
                     )
             if target not in backups:
                 backups[target] = target.read_bytes() if target.exists() else None

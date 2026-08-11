@@ -14,47 +14,47 @@ from typing import cast
 from uuid import uuid4
 
 from backend.schemas.chat import ChatRequest
-from backend.services.agent.classifier import classify_request
-from backend.services.agent.context import ensure_context, render_context
-from backend.services.agent.request_routing import route_code_request
-from backend.services.agent.task_planner import (
-    CodeTaskPlan,
-    PreparedTask,
-    prepare_code_task,
-)
-from backend.services.agent.read_only_loop import stream_read_only_tool_answer
-from backend.services.agent.autonomous_stream import stream_prepared_autonomous
-from backend.services.agent.checkpoint_runtime import plan_from_json
-from backend.services.checkpoints.store import update_checkpoint
-from backend.services.agent.run_checkpoint import resolve_run_checkpoint
-from backend.services.agent.service_events import lifecycle, usage_packet, workspace_info_text
-from backend.services.agent.pending import (
-    parse_interactive_reply,
-    pop_pending_action,
-    save_pending_action,
-)
-from backend.services.agent.proposal import generate_proposal, proposal_to_json
-from backend.services.agent.plan_screen import (
-    refine_plan_works,
-    screen_plan_anomalies,
-)
-from backend.services.agent.filesystem_executor import parse_direct_filesystem_request
-from backend.services.agent.work_models import FileSystemOperation, WorkItem
-from backend.services.agent.workspace_tools import (
-    render_workspace_tree,
-    score_workspace_paths,
-)
-from backend.services.agent.trace import (
+from backend.services.agent.loop.autonomous_stream import stream_prepared_autonomous
+from backend.services.agent.loop.checkpoint_runtime import plan_from_json
+from backend.services.agent.loop.read_only_loop import stream_read_only_tool_answer
+from backend.services.agent.loop.service_events import lifecycle, usage_packet, workspace_info_text
+from backend.services.agent.loop.trace import (
     TraceHandle,
     add_trace_event,
     finish_trace,
     start_trace,
 )
+from backend.services.agent.planner.classifier import classify_request
+from backend.services.agent.planner.plan_screen import (
+    refine_plan_works,
+    screen_plan_anomalies,
+)
+from backend.services.agent.planner.request_routing import route_code_request
+from backend.services.agent.planner.task_planner import (
+    CodeTaskPlan,
+    PreparedTask,
+    prepare_code_task,
+)
+from backend.services.agent.shared.context import ensure_context, render_context
+from backend.services.agent.shared.proposal import generate_proposal, proposal_to_json
+from backend.services.agent.shared.work_models import FileSystemOperation, WorkItem
+from backend.services.agent.shared.workspace_tools import (
+    render_workspace_tree,
+    score_workspace_paths,
+)
+from backend.services.agent.worker.filesystem_executor import parse_direct_filesystem_request
+from backend.services.agent.worker.pending import (
+    parse_interactive_reply,
+    pop_pending_action,
+    save_pending_action,
+)
+from backend.services.agent.worker.run_checkpoint import resolve_run_checkpoint
+from backend.services.checkpoints.store import update_checkpoint
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
+from backend.services.tools.code_tools import execute_code_tool
 from backend.services.workspace.indexer import index_project
 from backend.services.workspace.repository import get_project, resolve_project_root
-from backend.tools.code_tools import execute_code_tool
 from backend.utils.sse import encode_sse, encode_sse_comment
 
 LOGGER = logging.getLogger(__name__)

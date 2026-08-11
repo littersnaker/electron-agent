@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from backend.services.agent.failure_summary import FailureSummary
 from backend.services.agent.runtime.reasoning_memory import ReasoningMemory
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.failure_summary import FailureSummary
+from backend.services.agent.shared.work_models import WorkItem
 
 
 class Replanner:
@@ -77,8 +77,8 @@ class Replanner:
             return "验证或工具执行超时，需要缩小命令范围或拆分步骤"
         if "protocol" in lowered or "json" in lowered:
             return "模型工具协议不合法，需要恢复为单动作 JSON"
-        if "并行冲突" in error:
-            return "文件在读取后被其他 Work 更新，旧版本补丁已失效"
+        if "内容已变化" in error:
+            return "文件自上次读取后已被修改（可能来自本 Work 此前的编辑或并行写入），旧版本补丁已失效，需重新读取最新内容"
         if "test" in lowered or "lint" in lowered or "type" in lowered:
             return "质量验证失败，需基于真实输出修复代码或测试"
         return error.strip()[:1_000] or "尚未识别根因"

@@ -10,11 +10,11 @@ from typing import Any
 from uuid import uuid4
 
 from backend.schemas.chat import ChatRequest
-from backend.services.agent.loop import AgentLoopResult, stream_autonomous_loop
-from backend.services.agent.task_planner import PreparedTask
-from backend.services.agent.trace import TraceHandle, add_trace_event
-from backend.services.workspace.completed_works import record_completed_works
+from backend.services.agent.loop.runner import AgentLoopResult, stream_autonomous_loop
+from backend.services.agent.loop.trace import TraceHandle, add_trace_event
+from backend.services.agent.planner.task_planner import PreparedTask
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.workspace.completed_works import record_completed_works
 from backend.services.workspace.indexer import index_project
 from backend.utils.sse import encode_sse
 

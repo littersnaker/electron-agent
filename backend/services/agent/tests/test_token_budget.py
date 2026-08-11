@@ -1,6 +1,6 @@
 """Token Budget 模块测试。"""
 
-from backend.services.agent.token_budget import TokenBudget, TokenBudgetGuard, TOKEN_LIMITS
+from backend.services.agent.shared.token_budget import TOKEN_LIMITS, TokenBudget, TokenBudgetGuard
 
 
 class TestTokenBudget:

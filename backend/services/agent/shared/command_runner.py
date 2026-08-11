@@ -16,7 +16,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-
 MAX_COMMAND_OUTPUT_CHARS = 80_000
 DEFAULT_TIMEOUT_SECONDS = 180
 SHELL_META_PATTERN = re.compile(r"[;&|><`\r\n]")
@@ -28,7 +27,7 @@ def _load_extra_whitelist() -> tuple[set[str], set[str]]:
     try:
         raw = json.loads(
             (
-                Path(__file__).resolve().parents[3]
+                Path(__file__).resolve().parents[4]
                 / "config"
                 / "command-whitelist.json"
             ).read_text("utf-8")

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.worklist_reviewer import review_worklist
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.worker.worklist_reviewer import review_worklist
 
 
 def _work(

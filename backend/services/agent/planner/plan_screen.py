@@ -13,9 +13,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from backend.services.agent.task_planner import CodeTaskPlan
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.workspace_tools import score_workspace_paths
+from backend.services.agent.planner.task_planner import CodeTaskPlan
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.workspace_tools import score_workspace_paths
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage

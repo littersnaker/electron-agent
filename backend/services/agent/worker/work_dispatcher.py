@@ -5,25 +5,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.services.agent.factory_work import (
+from backend.services.agent.harness import ProjectHarness
+from backend.services.agent.planner.task_planner import CodeTaskPlan
+from backend.services.agent.shared.loop_support import ExecutionMode
+from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import (
+    CheckpointCallback,
+    EmitCallback,
+    WorkExecutionResult,
+    WorkWorkerState,
+)
+from backend.services.agent.worker.factory_audit_work import execute_factory_audit_work
+from backend.services.agent.worker.factory_work import (
     execute_factory_validation_work,
     execute_factory_work,
 )
-from backend.services.agent.factory_audit_work import execute_factory_audit_work
-from backend.services.agent.fast_work import execute_fast_filesystem_work
-from backend.services.agent.harness import ProjectHarness
-from backend.services.agent.loop_support import ExecutionMode
-from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
-from backend.services.agent.task_planner import CodeTaskPlan
-from backend.services.agent.validation_work import execute_validation_work
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_router import WorkRouter
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
-from backend.services.agent.work_worker import (
-    CheckpointCallback,
-    EmitCallback,
-    execute_work,
-)
+from backend.services.agent.worker.fast_work import execute_fast_filesystem_work
+from backend.services.agent.worker.validation_work import execute_validation_work
+from backend.services.agent.worker.work_router import WorkRouter
+from backend.services.agent.worker.work_worker import execute_work
 from backend.services.llm.credentials import LlmCredentials
 
 

@@ -10,8 +10,8 @@ import json
 import os
 from dataclasses import dataclass
 
-from backend.services.agent.loop_protocol import AgentAction
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.loop_protocol import AgentAction
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 _CONTEXT_ACTIONS = {"search", "read", "inspect"}
 _PROGRESS_ACTIONS = {"edit", "factory"}
@@ -29,7 +29,7 @@ class ExecutionLimits:
     max_stall_rounds: int = 4
 
     @classmethod
-    def from_environment(cls, target_file_count: int = 0) -> "ExecutionLimits":
+    def from_environment(cls, target_file_count: int = 0) -> ExecutionLimits:
         """读取环境变量并把异常值限制在安全范围。"""
 
         base = cls(

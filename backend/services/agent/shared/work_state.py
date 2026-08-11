@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from backend.services.agent.command_runner import CommandResult
+from backend.services.agent.shared.command_runner import CommandResult
 from backend.services.llm.types import LlmUsage
+
+# 执行回调类型：向调度层上报生命周期/用量事件，或触发 Checkpoint 持久化。
+EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+CheckpointCallback = Callable[[], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -141,7 +146,7 @@ class WorkWorkerState:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "WorkWorkerState":
+    def from_json(cls, value: dict[str, Any]) -> WorkWorkerState:
         """从 Checkpoint 恢复 Worker 状态。"""
 
         commands = [

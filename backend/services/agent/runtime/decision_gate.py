@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from backend.services.agent.loop_protocol import EditOperation
 from backend.services.agent.runtime.reasoning_state import ReasoningState
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.loop_protocol import EditOperation
+from backend.services.agent.shared.work_models import WorkItem
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
 
 

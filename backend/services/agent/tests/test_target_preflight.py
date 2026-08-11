@@ -1,14 +1,13 @@
 """targetFiles 确定性预检测试。"""
 
-from backend.services.agent.target_preflight import (
+from backend.services.agent.planner.target_preflight import (
     count_project_source_files,
     extract_tree_paths,
     is_greenfield_project,
     preflight_plan_works,
     probe_target_files,
 )
-from backend.services.agent.work_models import WorkItem
-
+from backend.services.agent.shared.work_models import WorkItem
 
 PROJECT_PATHS = [
     "app/cart/CartPage.tsx",

@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from backend.services.agent.domain_rules import work_router_rules
-from backend.services.agent.work_models import WorkItem
-
+from backend.services.agent.shared.domain_rules import work_router_rules
+from backend.services.agent.shared.work_models import WorkItem
 
 WorkHandler = Callable[..., Awaitable[Any]]
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 
 def test_single_entry_is_preserved_fully() -> None:

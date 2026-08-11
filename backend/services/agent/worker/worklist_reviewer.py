@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from backend.services.agent.domain_rules import worklist_reviewer_rules
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_router import is_factory_audit_work
-from backend.services.agent.worklist_normalizer import (
+from backend.services.agent.shared.domain_rules import worklist_reviewer_rules
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.worker.work_router import is_factory_audit_work
+from backend.services.agent.worker.worklist_normalizer import (
     MAX_WORK_TARGET_FILES,
     split_oversized_works,
 )

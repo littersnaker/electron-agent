@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from backend.services.agent.factory_work import execute_factory_work
 from backend.services.agent.harness import ProjectHarness
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.factory_work import execute_factory_work
 
 
 @pytest.mark.asyncio

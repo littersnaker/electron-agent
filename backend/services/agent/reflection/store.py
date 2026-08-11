@@ -7,7 +7,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from backend.memory.semantic import SemanticMemoryStore
+from backend.services.memory.semantic import SemanticMemoryStore
 from backend.services.workspace.database import (
     dumps_json,
     loads_json,

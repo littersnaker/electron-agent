@@ -25,8 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from backend.services.agent.domain_rules import default_factory_domain_id
-
+from backend.services.agent.shared.domain_rules import default_factory_domain_id
 
 ActionKind = Literal[
     "search",

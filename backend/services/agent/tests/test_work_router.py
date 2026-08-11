@@ -1,7 +1,7 @@
 """Work Router 测试。"""
 
-from backend.services.agent.work_models import WorkItem, FileSystemOperation
-from backend.services.agent.work_router import WorkRouter
+from backend.services.agent.shared.work_models import FileSystemOperation, WorkItem
+from backend.services.agent.worker.work_router import WorkRouter
 
 
 class TestWorkRouter:

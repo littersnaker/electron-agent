@@ -1,6 +1,6 @@
 """UI Metrics 模块测试。"""
 
-from backend.services.agent.ui_metrics import ExecutionMetrics, MetricsCollector
+from backend.services.agent.shared.ui_metrics import ExecutionMetrics, MetricsCollector
 
 
 class TestExecutionMetrics:

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import struct
 
-from backend.services.agent.icon_assets import (
+from backend.services.agent.shared.icon_assets import (
     backfill_placeholder_icons,
     extract_icon_paths,
     generate_placeholder_icon,
 )
-from backend.services.agent.loop_protocol import EditOperation
-from backend.services.agent.workspace_tools import apply_edit_operations
+from backend.services.agent.shared.loop_protocol import EditOperation
+from backend.services.agent.shared.workspace_tools import apply_edit_operations
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 

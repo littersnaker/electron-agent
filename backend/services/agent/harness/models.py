@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 
 
 @dataclass(slots=True)
@@ -38,7 +38,7 @@ class ProjectHarness:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ProjectHarness":
+    def from_json(cls, value: dict[str, Any]) -> ProjectHarness:
         """从 Checkpoint 恢复工程 Harness，并容忍旧版本缺失字段。"""
 
         return cls(

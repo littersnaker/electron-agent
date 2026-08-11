@@ -1,11 +1,11 @@
 """单 Work 执行收敛守卫测试。"""
 
-from backend.services.agent.loop_protocol import AgentAction, EditOperation
 from backend.services.agent.runtime.execution_guard import (
     ExecutionLimits,
     WorkExecutionGuard,
 )
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.loop_protocol import AgentAction, EditOperation
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 
 def _limits() -> ExecutionLimits:

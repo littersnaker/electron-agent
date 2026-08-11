@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from backend.services.agent.domain_rules import plan_optimizer_rules
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.domain_rules import plan_optimizer_rules
+from backend.services.agent.shared.work_models import WorkItem
 
 
 def _load_commerce_terms() -> tuple[str, ...]:

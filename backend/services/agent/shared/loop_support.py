@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.task_planner import (
+from backend.services.agent.planner.task_planner import (
     CodeTaskPlan,
     ReplanResult,
     WorkItem,
@@ -13,6 +12,7 @@ from backend.services.agent.task_planner import (
     replan_after_failure,
     replan_after_failures,
 )
+from backend.services.agent.shared.command_runner import CommandResult
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from backend.services.agent.planner_input import PlannerInputBuilder
+from backend.services.agent.planner.planner_input import PlannerInputBuilder
 
 _FILE_HEADER = re.compile(r"^--- FILE:\s*(.+?)\s*---$", re.MULTILINE)
 _SKILL_HEADER = re.compile(r"^## Skill · ([^@\n]+)@[^\n]+$", re.MULTILINE)

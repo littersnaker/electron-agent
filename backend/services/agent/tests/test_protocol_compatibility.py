@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from backend.services.agent.loop_protocol import parse_agent_action
 import pytest
+
+from backend.services.agent.shared.loop_protocol import parse_agent_action
 
 
 def test_parser_uses_first_balanced_json_and_accepts_trailing_comma() -> None:

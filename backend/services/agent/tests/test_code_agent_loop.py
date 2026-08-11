@@ -8,17 +8,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services.agent.command_runner import validate_command
-from backend.services.agent.loop import stream_autonomous_loop
-from backend.services.agent.loop_protocol import parse_agent_action
-from backend.services.agent.task_planner import (
+from backend.services.agent.loop.runner import stream_autonomous_loop
+from backend.services.agent.planner.task_planner import (
     CodeTaskPlan,
     ReplanResult,
     WorkItem,
     WorkLedger,
     prepare_code_task,
 )
-from backend.services.agent.workspace_tools import apply_edit_operations
+from backend.services.agent.shared.command_runner import validate_command
+from backend.services.agent.shared.loop_protocol import parse_agent_action
+from backend.services.agent.shared.workspace_tools import apply_edit_operations
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -110,7 +110,7 @@ async def test_prompt_optimizer_preserves_explicit_model_and_base_url(monkeypatc
             SimpleNamespace(name="Planner Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.task_planner.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.planner.task_planner.GATEWAY.complete", fake_complete)
     prepared = await prepare_code_task(
         user_request=(
             "不要修改 model=qwen3.7-plus，Base URL 是 "
@@ -161,7 +161,7 @@ async def test_planner_receives_candidate_files_context(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.task_planner.GATEWAY.complete",
+        "backend.services.agent.planner.task_planner.GATEWAY.complete",
         fake_complete,
     )
     await prepare_code_task(
@@ -255,7 +255,7 @@ async def test_agent_loop_can_edit_many_files_and_finish(tmp_path: Path, monkeyp
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -306,7 +306,7 @@ async def test_empty_project_generation_work_uses_one_shot_path(
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -355,7 +355,7 @@ async def test_empty_edit_feedback_leads_to_complete_work(
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -418,7 +418,7 @@ async def test_non_empty_project_creation_work_uses_one_shot_create_missing(
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -527,8 +527,8 @@ async def test_failed_work_replans_with_full_snapshot_without_repeating_success(
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
-    monkeypatch.setattr("backend.services.agent.task_planner.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.planner.task_planner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -595,7 +595,7 @@ async def test_runtime_protocol_failure_retries_with_clean_attempt_state(
             SimpleNamespace(name="Worker Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,
@@ -648,7 +648,7 @@ async def test_planner_adds_greenfield_directive_for_empty_project(monkeypatch) 
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.task_planner.GATEWAY.complete",
+        "backend.services.agent.planner.task_planner.GATEWAY.complete",
         fake_complete,
     )
     await prepare_code_task(
@@ -697,7 +697,7 @@ async def test_planner_omits_greenfield_directive_for_existing_project(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.task_planner.GATEWAY.complete",
+        "backend.services.agent.planner.task_planner.GATEWAY.complete",
         fake_complete,
     )
     tree = "\n".join(
@@ -778,9 +778,9 @@ async def test_guard_stop_work_goes_to_replanner_with_failure_reason(
             SimpleNamespace(name="Fake Coding Model"),
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
     monkeypatch.setattr(
-        "backend.services.agent.task_planner.GATEWAY.complete", fake_complete
+        "backend.services.agent.planner.task_planner.GATEWAY.complete", fake_complete
     )
     result = None
     async for event in stream_autonomous_loop(

@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from backend.services.agent.harness import ProjectHarness
-from backend.services.agent.domain_rules import default_factory_domain_id
-from backend.services.agent.loop_support import ExecutionMode
-from backend.services.agent.validation_work import execute_validation_work
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
-from backend.tools.code_tools import execute_code_tool
+from backend.services.agent.shared.domain_rules import default_factory_domain_id
+from backend.services.agent.shared.loop_support import ExecutionMode
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkExecutionResult, WorkWorkerState
+from backend.services.agent.worker.validation_work import execute_validation_work
+from backend.services.tools.code_tools import execute_code_tool
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 CheckpointCallback = Callable[[], Awaitable[None]]

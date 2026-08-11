@@ -12,16 +12,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.services.agent.context import ContextCompactor, WorkContext
-from backend.services.agent.failure_summary import FailureSummary
 from backend.services.agent.runtime.reasoning_controller import ReasoningController
 from backend.services.agent.runtime.reasoning_memory import ReasoningMemory
 from backend.services.agent.runtime.reasoning_state import ReasoningState
 from backend.services.agent.runtime.reflection_engine import ReflectionEngine
 from backend.services.agent.runtime.replanner import Replanner
-from backend.services.agent.token_budget import TokenBudgetGuard
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
-from backend.services.agent.workspace_tools import file_version
+from backend.services.agent.shared.failure_summary import FailureSummary
+from backend.services.agent.shared.token_budget import TokenBudgetGuard
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.shared.workspace_tools import file_version
 
 _FILE_HEADER = re.compile(r"^--- FILE:\s*(.+?)\s*---$", re.MULTILINE)
 _MEMORY_HEADER = re.compile(r"^## Memory · ([^\n]+)$", re.MULTILINE)

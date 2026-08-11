@@ -10,8 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from backend.services.agent.target_preflight import extract_tree_paths
-
+from backend.services.agent.planner.target_preflight import extract_tree_paths
 
 # 默认过滤的无关目录和大文件阈值
 IGNORED_DIRS = {

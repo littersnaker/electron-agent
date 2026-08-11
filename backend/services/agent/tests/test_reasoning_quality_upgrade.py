@@ -1,10 +1,10 @@
 """P0 推理智能和 P1 上下文稳定性接入测试。"""
 
-from backend.services.agent.loop_protocol import EditOperation
 from backend.services.agent.runtime.action_guard import guard_edit
 from backend.services.agent.runtime.work_session import WorkIntelligenceSession
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.loop_protocol import EditOperation
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 
 def test_work_session_isolates_relevant_context() -> None:

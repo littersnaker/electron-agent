@@ -1,7 +1,7 @@
 """Planner Input Builder 测试。"""
 
-from backend.services.agent.planner_context import build_planner_prompt
-from backend.services.agent.planner_input import (
+from backend.services.agent.planner.planner_context import build_planner_prompt
+from backend.services.agent.planner.planner_input import (
     PlannerInput,
     PlannerInputBuilder,
 )

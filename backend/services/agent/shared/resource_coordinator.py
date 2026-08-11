@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import AsyncIterator
 
-from backend.services.agent.work_models import WorkItem
-
+from backend.services.agent.shared.work_models import WorkItem
 
 SPECIAL_TERMINAL_RESOURCE = "@terminal"
 

@@ -7,10 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
-from backend.services.agent.work_worker import _try_batch_write, _try_write_then_review
+from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.work_batch_writer import _try_batch_write
+from backend.services.agent.worker.work_generation import _try_write_then_review
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -54,7 +55,7 @@ async def test_batch_write_applies_all_files_in_one_call(tmp_path, monkeypatch) 
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -103,7 +104,7 @@ async def test_batch_write_falls_back_when_model_returns_read(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -158,7 +159,7 @@ async def test_batch_write_empty_operations_marks_satisfied(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -230,7 +231,7 @@ async def test_write_then_review_completes_generation_work(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -304,7 +305,7 @@ async def test_write_then_review_cannot_fix_goes_to_planner(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -373,7 +374,7 @@ async def test_write_then_review_generates_all_files_when_targets_empty(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.work_worker.GATEWAY.complete",
+        "backend.services.agent.worker.work_batch_writer.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()

@@ -1,15 +1,15 @@
 """Work Context 隔离模块测试。"""
 
-from backend.services.agent.runtime.work_session import WorkIntelligenceSession
 from backend.services.agent.context import (
+    MAX_WORK_CONTEXT_TOKEN,
     CompactionResult,
     ContextCompactor,
     ContextStore,
     WorkContext,
-    MAX_WORK_CONTEXT_TOKEN,
 )
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.runtime.work_session import WorkIntelligenceSession
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 
 class TestWorkContext:
@@ -213,6 +213,82 @@ def test_compact_transcript_preserves_huge_tool_outputs() -> None:
     assert stats["after_tokens"] == stats["before_tokens"]
     assert compacted == transcript
     assert ("代码内容" * 2_000) in compacted[1]
+
+
+def test_compact_transcript_keeps_last_edit_result_for_stale_context() -> None:
+    """折叠窗口外历史时，必须保留最近一次 edit 的修改结果，避免模型盲重复。"""
+
+    compactor = ContextCompactor()
+    old_reads = [
+        f"ACTION read paths=['src/file_{index}.ts']\nOBSERVATION:\n" + ("旧内容" * 200)
+        for index in range(12)
+    ]
+    edit_result = (
+        "ACTION edit: 修改 .profile 布局\n"
+        "CHANGED: ['src/pages/profile/index.scss']\n"
+        "DIFF:\n--- a/src/pages/profile/index.scss\n+++ b/src/pages/profile/index.scss\n"
+        "-  min-height: 100vh;\n+  height: 100vh;"
+    )
+    recent = [
+        "ACTION complete_work\nDONE: 完成",
+    ]
+    transcript = [*old_reads, edit_result, *recent]
+
+    compacted, stats = compactor.compact_transcript(transcript)
+
+    # 窗口外最近的 edit 修改结果被完整保留，模型能知道上一轮改了什么。
+    assert any("上次编辑结果" in item or "DIFF:" in item for item in compacted)
+    assert any("CHANGED: ['src/pages/profile/index.scss']" in item for item in compacted)
+    assert stats["saved_tokens"] > 0
+
+
+def test_compact_transcript_keeps_last_read_observation() -> None:
+    """折叠窗口外历史时，必须保留最近一次 read 的完整观察，避免"读而不见"循环。"""
+
+    compactor = ContextCompactor()
+    old_reads = [
+        f"ACTION read paths=['src/old_{index}.ts']\nOBSERVATION:\n" + ("历史内容" * 150)
+        for index in range(12)
+    ]
+    latest_read = (
+        "ACTION read paths=['src/pages/profile/index.scss']\n"
+        "OBSERVATION:\n"
+        ".profile {\n  min-height: 100vh;\n  background-color: var(--color-bg-page);"
+    )
+    recent = [
+        "ACTION complete_work\nDONE: 完成",
+    ]
+    transcript = [*old_reads, latest_read, *recent]
+
+    compacted, stats = compactor.compact_transcript(transcript)
+
+    # 窗口外最近的 read 完整观察被保留，模型能看到最近读到的文件内容。
+    assert any(".profile {" in item for item in compacted)
+    assert any(
+        "最近一次读取结果已保留" in item or "min-height: 100vh;" in item
+        for item in compacted
+    )
+    assert stats["saved_tokens"] > 0
+
+
+def test_compact_transcript_drops_stale_unchanged_read_hint() -> None:
+    """"未变化"瘦身提示不含文件内容，不视为有效 read 观察。"""
+
+    compactor = ContextCompactor()
+    filler = [f"ACTION search query='q{index}'" for index in range(8)]
+    unchanged_hint = (
+        "ACTION read paths=['src/pages/profile/index.tsx']\n"
+        "OBSERVATION（以下文件未变化，完整内容已在上下文中，无需再次读取）:\n"
+        "src/pages/profile/index.tsx"
+    )
+    recent = ["ACTION complete_work\nDONE: 完成" for _ in range(10)]
+    transcript = [*filler, unchanged_hint, *recent]
+
+    compacted, stats = compactor.compact_transcript(transcript)
+
+    # 未变化提示不含文件内容，折叠后不保留为 read 观察。
+    assert not any("OBSERVATION（以下文件未变化" in item for item in compacted)
+    assert stats["saved_tokens"] > 0
 
 
 def test_worker_session_includes_memory_notes() -> None:

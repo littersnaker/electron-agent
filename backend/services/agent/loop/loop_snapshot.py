@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.services.agent.task_planner import WorkLedger
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.planner.task_planner import WorkLedger
+from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.llm.types import LlmUsage
 
 

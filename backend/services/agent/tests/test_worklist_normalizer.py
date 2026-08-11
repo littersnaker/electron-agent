@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.worklist_normalizer import (
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.worker.worklist_normalizer import (
     MAX_WORK_TARGET_FILES,
     split_oversized_works,
     split_works_by_size,

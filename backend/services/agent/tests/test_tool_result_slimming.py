@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from backend.services.agent.loop_protocol import AgentAction, EditOperation
-from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
 from backend.services.agent.runtime.work_session import WorkIntelligenceSession
-from backend.services.agent.work_action_handler import (
+from backend.services.agent.shared.loop_protocol import AgentAction, EditOperation
+from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.work_action_handler import (
     WorkActionEnvironment,
     WorkActionHandler,
 )
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
 
 
 async def _ignore_emit(_role: str, _payload: dict[str, object]) -> None:

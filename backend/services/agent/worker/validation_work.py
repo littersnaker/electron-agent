@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.quality.validation_engine import ValidationEngine
-from backend.services.agent.command_runner import run_safe_command
-from backend.services.agent.loop_support import ExecutionMode
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
-from backend.services.agent.work_worker import CheckpointCallback, EmitCallback
+from backend.services.agent.shared.command_runner import run_safe_command
+from backend.services.agent.shared.loop_support import ExecutionMode
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import (
+    CheckpointCallback,
+    EmitCallback,
+    WorkExecutionResult,
+    WorkWorkerState,
+)
+from backend.services.quality.validation_engine import ValidationEngine
 
 
 async def execute_validation_work(

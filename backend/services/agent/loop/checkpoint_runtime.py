@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.task_planner import CodeTaskPlan, WorkItem, WorkLedger
-from backend.services.agent.work_models import FileSystemOperation
+from backend.services.agent.planner.task_planner import CodeTaskPlan, WorkItem, WorkLedger
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.work_models import FileSystemOperation
 from backend.services.llm.types import LlmUsage
 
 

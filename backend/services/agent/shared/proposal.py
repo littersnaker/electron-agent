@@ -13,7 +13,6 @@ from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.utils.paths import resolve_inside
 
-
 LINE_LIMITED_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".md"}
 MAXIMUM_SOURCE_LINES = 500
 

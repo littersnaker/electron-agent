@@ -5,19 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from backend.services.agent.filesystem_executor import (
-    FileSystemExecutionResult,
-    operation_resources,
-)
-from backend.services.agent.resource_coordinator import WorkspaceResourceCoordinator
-from backend.services.agent.work_models import WorkItem
-from backend.tools.code_tools import execute_code_tool
-from backend.services.agent.work_worker import (
+from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import (
     CheckpointCallback,
     EmitCallback,
     WorkExecutionResult,
     WorkWorkerState,
 )
+from backend.services.agent.worker.filesystem_executor import (
+    FileSystemExecutionResult,
+    operation_resources,
+)
+from backend.services.tools.code_tools import execute_code_tool
 
 
 async def execute_fast_filesystem_work(

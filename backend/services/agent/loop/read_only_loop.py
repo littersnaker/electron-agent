@@ -12,14 +12,14 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, cast
 
-from backend.services.agent.loop_protocol import coerce_read_paths
-from backend.services.agent.service_events import lifecycle, usage_packet
-from backend.services.agent.tool_registry import render_tool_catalog
-from backend.services.agent.workspace_tools import ReadBatchResult, render_workspace_tree
-from backend.tools.code_tools import execute_code_tool
+from backend.services.agent.loop.service_events import lifecycle, usage_packet
+from backend.services.agent.shared.loop_protocol import coerce_read_paths
+from backend.services.agent.shared.tool_registry import render_tool_catalog
+from backend.services.agent.shared.workspace_tools import ReadBatchResult, render_workspace_tree
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
+from backend.services.tools.code_tools import execute_code_tool
 from backend.utils.sse import encode_sse
 
 MAX_READ_ONLY_ITERATIONS = 12

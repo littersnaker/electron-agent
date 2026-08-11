@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.services.agent.harness import build_project_harness, build_work_seed_context
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 
 
 def test_harness_detects_taro_skills_and_quality_commands(tmp_path: Path) -> None:

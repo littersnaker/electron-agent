@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, cast
+from typing import Any, Literal, cast
 
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.loop_protocol import AgentAction
-from backend.services.agent.loop_support import ExecutionMode, command_observation
-from backend.services.agent.resource_coordinator import (
+from backend.services.agent.runtime.action_guard import guard_edit, record_factory_decision
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.loop_protocol import AgentAction
+from backend.services.agent.shared.loop_support import ExecutionMode, command_observation
+from backend.services.agent.shared.resource_coordinator import (
     SPECIAL_TERMINAL_RESOURCE,
     WorkspaceResourceCoordinator,
 )
-from backend.services.agent.runtime.action_guard import guard_edit, record_factory_decision
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
-from backend.services.agent.workspace_tools import EditBatchResult, ReadBatchResult
-from backend.tools.code_tools import execute_code_tool
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.shared.workspace_tools import EditBatchResult, ReadBatchResult
+from backend.services.tools.code_tools import execute_code_tool
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 CheckpointCallback = Callable[[], Awaitable[None]]
@@ -231,7 +232,7 @@ class WorkActionHandler:
                     result = await self._tool(tool_name, arguments, permission)
             else:
                 result = await self._tool(tool_name, arguments, permission)
-        except FileExistsError as exc:
+        except FileExistsError:
             reuse = await self._reuse_existing_factory_artifacts(action)
             if reuse is not None:
                 return reuse
@@ -354,7 +355,7 @@ class WorkActionHandler:
                 await self._refresh_versions(edit_result.changed_files)
         except Exception as exc:
             error_text = str(exc)
-            if "并行冲突" in error_text:
+            if "内容已变化" in error_text:
                 self._env.state.append_transcript(
                     f"EDIT RETRY REQUIRED: {exc}\n"
                     "请先 read 冲突文件，再基于最新内容重新 edit。"
@@ -476,7 +477,7 @@ class WorkActionHandler:
         写完页面却无法 complete_work，只能空转。
         """
 
-        from backend.services.agent.domain_rules import complete_work_rules
+        from backend.services.agent.shared.domain_rules import complete_work_rules
 
         searchable = " ".join(
             [self._env.work.title, self._env.work.objective]

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 
 MAX_WORK_TARGET_FILES = 15
 MAX_SPLIT_CHARS = 40_000

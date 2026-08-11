@@ -10,16 +10,16 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, uuid5
 
-from backend.quality.code_gate import CodeGate
-from backend.quality.patch_analyzer import PatchAnalyzer
-from backend.quality.regression_detector import ContractSnapshot, RegressionDetector
-from backend.quality.validation_engine import ValidationEngine
-from backend.services.agent.command_runner import CommandResult, run_safe_command
-from backend.services.agent.loop_support import ExecutionMode
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.command_runner import CommandResult, run_safe_command
+from backend.services.agent.shared.loop_support import ExecutionMode
+from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.artifact_memory import ArtifactIndex, ArtifactRecord
+from backend.services.quality.code_gate import CodeGate
+from backend.services.quality.patch_analyzer import PatchAnalyzer
+from backend.services.quality.regression_detector import ContractSnapshot, RegressionDetector
+from backend.services.quality.validation_engine import ValidationEngine
 
 
 @dataclass(slots=True)

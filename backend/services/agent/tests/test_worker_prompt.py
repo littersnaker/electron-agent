@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 from backend.services.agent.harness.models import ProjectHarness
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
-from backend.services.agent.work_worker import _worker_prompt
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.work_worker import _worker_prompt
 
 
 def _work() -> WorkItem:
@@ -68,3 +68,23 @@ def test_worker_prompt_keeps_factory_and_retry_hints() -> None:
 
     assert "CURRENT WORK:" in prompt
     assert "当前是重试尝试" in prompt
+
+
+def test_worker_prompt_forbids_stale_replace_content() -> None:
+    """提示词必须禁止用旧内容对已被本 Work 改过的文件做 replace。"""
+
+    prompt = _worker_prompt(_work(), ProjectHarness(), "auto_edit")
+
+    assert "replace 的 old 必须来自最近 read" in prompt
+    assert "不得再用旧内容做 replace" in prompt
+
+
+def test_worker_prompt_minimizes_replace_output() -> None:
+    """提示词必须引导 replace 输出最小定位片段，并给出示例。"""
+
+    prompt = _worker_prompt(_work(), ProjectHarness(), "auto_edit")
+
+    assert "最小片段" in prompt
+    assert "禁止把整个" in prompt
+    assert "大段代码块作为 old/new 输出" in prompt
+    assert "replace 最小示例" in prompt

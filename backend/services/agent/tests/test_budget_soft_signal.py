@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from backend.services.agent.context.context_compactor import ContextCompactor
 from backend.services.agent.runtime.work_session import WorkIntelligenceSession
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
 
 
 def _session() -> tuple[WorkIntelligenceSession, WorkWorkerState]:

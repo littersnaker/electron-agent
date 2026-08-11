@@ -100,7 +100,7 @@ class FailureSummary:
         return "\n".join(line for line in lines if line)
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "FailureSummary":
+    def from_json(cls, value: dict[str, Any]) -> FailureSummary:
         """从 Checkpoint 宽松恢复失败摘要，兼容旧版本缺失字段。"""
 
         return cls(
@@ -119,7 +119,7 @@ class FailureSummary:
         *,
         changed_files: list[str] | None = None,
         root_cause: str = "",
-    ) -> "FailureSummary":
+    ) -> FailureSummary:
         """从单次错误快速创建摘要。"""
 
         summary = cls(error=error, root_cause=root_cause)

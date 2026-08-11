@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from backend.models.router import ModelSelection
-from backend.runtime.contracts import RuntimeContext, RuntimeRequest
+from backend.services.models.router import ModelSelection
+from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
 class BaseAgent(Protocol):

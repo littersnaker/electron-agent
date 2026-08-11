@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.llm.types import LlmUsage
 
 

@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.services.agent.factory_audit_work import execute_factory_audit_work
 from backend.services.agent.harness.models import ProjectHarness
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkWorkerState
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.agent.worker.factory_audit_work import execute_factory_audit_work
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -57,11 +57,11 @@ async def test_audit_reuse_completes_with_single_llm_call(tmp_path, monkeypatch)
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -108,11 +108,11 @@ async def test_audit_ignores_page_binding_errors(tmp_path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -173,11 +173,11 @@ async def test_audit_patch_applies_operations(tmp_path, monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
     state = WorkWorkerState()
@@ -217,11 +217,11 @@ async def test_audit_cannot_fix_fails_with_reason(tmp_path, monkeypatch) -> None
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
 
@@ -260,11 +260,11 @@ async def test_audit_invalid_verdict_is_runtime_failure(tmp_path, monkeypatch) -
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
 
@@ -307,11 +307,11 @@ async def test_audit_generates_when_manifest_missing(tmp_path, monkeypatch) -> N
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.execute_code_tool",
+        "backend.services.agent.worker.factory_audit_work.execute_code_tool",
         fake_tool,
     )
     monkeypatch.setattr(
-        "backend.services.agent.factory_audit_work.GATEWAY.complete",
+        "backend.services.agent.worker.factory_audit_work.GATEWAY.complete",
         fake_complete,
     )
 

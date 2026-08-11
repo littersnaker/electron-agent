@@ -10,9 +10,9 @@ import asyncio
 
 import pytest
 
-from backend.services.agent.plan_screen import refine_plan_works
-from backend.services.agent.task_planner import CodeTaskPlan
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.planner.plan_screen import refine_plan_works
+from backend.services.agent.planner.task_planner import CodeTaskPlan
+from backend.services.agent.shared.work_models import WorkItem
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -50,7 +50,7 @@ def _anomalies() -> list[dict[str, object]]:
 async def test_refine_plan_works_falls_back_on_gateway_error(monkeypatch) -> None:
     """GATEWAY 抛任意异常时，refine_plan_works 不抛错、不改 plan。"""
 
-    from backend.services.agent import plan_screen as plan_screen_module
+    from backend.services.agent.planner import plan_screen as plan_screen_module
 
     async def _boom(**_: object) -> object:
         raise ValueError("已选择 DeepSeek flash-0731，但未配置 DeepSeek API Key。")
@@ -76,7 +76,7 @@ async def test_refine_plan_works_falls_back_on_gateway_error(monkeypatch) -> Non
 async def test_refine_plan_works_falls_back_on_provider_error(monkeypatch) -> None:
     """供应商运行期错误同样降级，不终止任务。"""
 
-    from backend.services.agent import plan_screen as plan_screen_module
+    from backend.services.agent.planner import plan_screen as plan_screen_module
     from backend.services.llm.protocols import ProviderRequestError
 
     async def _boom(**_: object) -> object:
@@ -98,7 +98,7 @@ async def test_refine_plan_works_falls_back_on_provider_error(monkeypatch) -> No
 async def test_refine_plan_works_falls_back_on_timeout(monkeypatch) -> None:
     """超时异常同样降级。"""
 
-    from backend.services.agent import plan_screen as plan_screen_module
+    from backend.services.agent.planner import plan_screen as plan_screen_module
 
     async def _boom(**_: object) -> object:
         raise TimeoutError("model response timeout")

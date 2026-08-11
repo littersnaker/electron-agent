@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.shared.work_models import WorkItem
 from backend.utils.paths import is_build_output_segment
 
 MAX_PREFLIGHT_FILES = 15

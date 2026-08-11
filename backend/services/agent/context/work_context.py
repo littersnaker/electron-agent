@@ -71,7 +71,7 @@ class WorkContext:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "WorkContext":
+    def from_json(cls, value: dict[str, Any]) -> WorkContext:
         """从 JSON 恢复 WorkContext。"""
 
         return cls(

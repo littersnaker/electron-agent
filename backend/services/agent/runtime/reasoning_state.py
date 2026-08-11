@@ -33,7 +33,7 @@ class DecisionRecord:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "DecisionRecord":
+    def from_json(cls, value: dict[str, Any]) -> DecisionRecord:
         """从旧 Checkpoint 的宽松 JSON 安全恢复决策记录。"""
 
         return cls(
@@ -136,7 +136,7 @@ class ReasoningState:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ReasoningState":
+    def from_json(cls, value: dict[str, Any]) -> ReasoningState:
         """从 Checkpoint 恢复推理状态，并兼容缺失的新字段。"""
 
         raw_level = str(value.get("level") or "normal")

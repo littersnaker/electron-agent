@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.services.agent.plan_optimizer import optimize_work_granularity
-from backend.services.agent.work_models import WorkItem
+from backend.services.agent.planner.plan_optimizer import optimize_work_granularity
+from backend.services.agent.shared.work_models import WorkItem
 
 
 def test_medium_commerce_work_keeps_single_work() -> None:

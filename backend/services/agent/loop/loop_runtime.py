@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
-from typing import Awaitable, Callable
 
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.work_models import WorkLedger
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.work_models import WorkLedger
+from backend.services.agent.shared.work_state import WorkExecutionResult, WorkWorkerState
 
 CheckpointWriter = Callable[[], Awaitable[None]]
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from backend.schemas.chat import ChatRequest
-from backend.services.agent.classifier import classify_request
-from backend.services.agent.request_routing import route_code_request
+from backend.services.agent.planner.classifier import classify_request
+from backend.services.agent.planner.request_routing import route_code_request
 
 
 @pytest.mark.parametrize(

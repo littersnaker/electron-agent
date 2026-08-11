@@ -1,6 +1,6 @@
 """Failure Summary 模块测试。"""
 
-from backend.services.agent.failure_summary import FailureSummary, FailureSummaryStore
+from backend.services.agent.shared.failure_summary import FailureSummary, FailureSummaryStore
 
 
 class TestFailureSummary:

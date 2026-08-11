@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "config" / "agent-domain-rules.json"
+    Path(__file__).resolve().parents[4] / "config" / "agent-domain-rules.json"
 )
 
 

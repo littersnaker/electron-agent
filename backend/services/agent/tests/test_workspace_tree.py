@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.services.agent.workspace_tools import render_workspace_tree
+from backend.services.agent.shared.workspace_tools import render_workspace_tree
 from backend.services.workspace.indexer import iter_project_files
 
 

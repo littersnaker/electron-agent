@@ -31,7 +31,7 @@ class ReasoningMemoryEntry:
         }
 
     @classmethod
-    def from_json(cls, value: dict[str, Any]) -> "ReasoningMemoryEntry":
+    def from_json(cls, value: dict[str, Any]) -> ReasoningMemoryEntry:
         """从 Checkpoint 宽松恢复一条记忆。"""
 
         raw_category = str(value.get("category") or "decision")
@@ -97,7 +97,7 @@ class ReasoningMemory:
         return [item.to_json() for item in self._entries]
 
     @classmethod
-    def from_json(cls, value: list[dict[str, Any]]) -> "ReasoningMemory":
+    def from_json(cls, value: list[dict[str, Any]]) -> ReasoningMemory:
         """从 Checkpoint 数组恢复记忆。"""
 
         return cls(

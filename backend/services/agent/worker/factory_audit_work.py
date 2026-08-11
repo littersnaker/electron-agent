@@ -10,27 +10,27 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from backend.services.agent.domain_rules import (
+from backend.services.agent.harness import ProjectHarness
+from backend.services.agent.shared.domain_rules import (
     default_factory_domain_id,
     factory_audit_rules,
 )
-from backend.services.agent.harness import ProjectHarness
-from backend.services.agent.loop_protocol import _parse_operations
-from backend.services.agent.loop_support import usage_add
-from backend.services.agent.work_models import WorkItem
-from backend.services.agent.work_state import WorkExecutionResult, WorkWorkerState
-from backend.services.agent.workspace_tools import apply_edit_operations
-from backend.tools.code_tools import execute_code_tool
-from backend.services.agent.factory_work import (
-    EmitCallback,
+from backend.services.agent.shared.loop_protocol import _parse_operations
+from backend.services.agent.shared.loop_support import usage_add
+from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.work_state import WorkExecutionResult, WorkWorkerState
+from backend.services.agent.shared.workspace_tools import apply_edit_operations
+from backend.services.agent.worker.factory_work import (
     CheckpointCallback,
+    EmitCallback,
     _default_output_root,
 )
-from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
+from backend.services.tools.code_tools import execute_code_tool
 
 MAX_AUDIT_CONTEXT_CHARS = 24_000
 MAX_AUDIT_FILES = 8

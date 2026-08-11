@@ -9,12 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.schemas.chat import ChatRequest
-from backend.services.agent.classifier import (
+from backend.services.agent.planner.classifier import (
     RequestMode,
     classify_request,
     resolve_effective_code_request,
 )
-from backend.services.agent.tool_registry import tool_names_for_mode
+from backend.services.agent.shared.tool_registry import tool_names_for_mode
 
 
 @dataclass(frozen=True, slots=True)
