@@ -273,12 +273,17 @@ class LlmGateway:
         timeout_seconds: float | None = None,
         stall_timeout_seconds: float | None = None,
         audit: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
         """收集完整响应；Auto 在没有收到任何内容时允许降级。
 
         ``timeout_seconds`` 控制单次模型调用的总时长上限；``stall_timeout_seconds``
         控制“没有新数据”的卡死阈值。默认只杀卡死流，不杀慢速但持续输出的长生成。
         每次调用都会写入请求审计日志（requestId + Agent 身份 + 参数 + 结果）。
+
+        ``tools`` 为 OpenAI 兼容 Function Calling 工具 Schema。模型返回工具调用时，
+        返回文本为该工具调用的 ``arguments`` JSON（与文本协议的 ``{"action":...}``
+        格式一致，解析方无需改动）。
         """
 
         audit_info = request_audit.effective_audit(audit)
@@ -290,6 +295,8 @@ class LlmGateway:
             "messages": self._audit_messages_payload(messages),
             "candidates": [],
         }
+        if tools:
+            request_payload["tools"] = tools
         try:
             request_payload["candidates"] = [
                 {"model": model.model, "provider": model.provider}
@@ -307,6 +314,7 @@ class LlmGateway:
                 temperature=temperature,
                 timeout_seconds=timeout_seconds,
                 stall_timeout_seconds=stall_timeout_seconds,
+                tools=tools,
             )
         except Exception as exc:
             request_audit.record(
@@ -347,6 +355,7 @@ class LlmGateway:
         temperature: float = 0.2,
         timeout_seconds: float | None = None,
         stall_timeout_seconds: float | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> tuple[str, LlmUsage, ModelDefinition]:
         """原始完整响应实现，供 complete() 审计包装调用。"""
 
@@ -368,6 +377,9 @@ class LlmGateway:
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
             usage = LlmUsage()
+            # 流式 Function Calling 按 id 分片累加 arguments，结束后拼接成完整 JSON。
+            tool_calls_map: dict[str, dict[str, str]] = {}
+            tool_calls_order: list[str] = []
             try:
                 async for chunk in self._stream_with_deadline(
                     model=model,
@@ -376,6 +388,7 @@ class LlmGateway:
                     temperature=temperature,
                     total_budget=total_budget,
                     stall_budget=stall_budget,
+                    tools=tools,
                 ):
                     if chunk.reasoning_delta:
                         reasoning_parts.append(chunk.reasoning_delta)
@@ -383,9 +396,24 @@ class LlmGateway:
                         text_parts.append(chunk.text_delta)
                     if chunk.usage:
                         usage = chunk.usage
-                result = "".join(text_parts).strip() or "".join(
-                    reasoning_parts
-                ).strip()
+                    for call in chunk.tool_calls:
+                        key = call.id or f"call_{len(tool_calls_order)}"
+                        if key not in tool_calls_map:
+                            tool_calls_map[key] = {"name": "", "arguments": ""}
+                            tool_calls_order.append(key)
+                        if call.name:
+                            tool_calls_map[key]["name"] = call.name
+                        if call.arguments:
+                            tool_calls_map[key]["arguments"] += call.arguments
+                if tool_calls_order:
+                    # 工具调用优先：返回第一个 tool_call 的 arguments JSON，
+                    # 与文本协议 {"action":...} 兼容，worker 解析无需改动。
+                    first = tool_calls_map[tool_calls_order[0]]
+                    result = first["arguments"].strip()
+                else:
+                    result = "".join(text_parts).strip() or "".join(
+                        reasoning_parts
+                    ).strip()
                 # Moonshot 等兼容端点的流式响应可能不返回 usage。此处使用
                 # 本地估算补齐统计，保证 Token Budget 与前端用量始终可用。
                 usage = ensure_usage(usage, messages=messages, output_text=result)
@@ -440,6 +468,7 @@ class LlmGateway:
         temperature: float,
         total_budget: float,
         stall_budget: float,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[LlmChunk]:
         """流式读取模型输出：卡住才中断，慢速长生成不误杀。"""
 
@@ -449,6 +478,7 @@ class LlmGateway:
             credentials=credentials,
             messages=messages,
             temperature=temperature,
+            tools=tools,
         ).__aiter__()
         while True:
             remaining = deadline - monotonic()
@@ -533,6 +563,7 @@ class LlmGateway:
         credentials: LlmCredentials,
         messages: list[LlmMessage],
         temperature: float,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[LlmChunk]:
         """按供应商协议执行一次模型请求，并处理同供应商区域端点回退。"""
 
@@ -559,6 +590,7 @@ class LlmGateway:
             endpoint_override=model.base_url or credentials.get_endpoint(model.provider),
             messages=messages,
             temperature=temperature,
+            tools=tools,
         ):
             yield chunk
 
@@ -571,6 +603,7 @@ class LlmGateway:
         endpoint_override: str | None,
         messages: list[LlmMessage],
         temperature: float,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[LlmChunk]:
         """依次尝试供应商区域端点；收到内容后绝不切换端点。"""
 
@@ -586,6 +619,7 @@ class LlmGateway:
                     api_key=api_key,
                     messages=messages,
                     temperature=request_temperature,
+                    tools=tools,
                 ):
                     emitted = True
                     yield chunk

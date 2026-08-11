@@ -22,6 +22,7 @@ from backend.services.agent.shared.loop_protocol import parse_agent_action
 from backend.services.agent.shared.loop_support import ExecutionMode, usage_add
 from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
 from backend.services.agent.shared.work_models import WorkItem
+from backend.services.agent.shared.tool_registry import build_openai_tools
 from backend.services.agent.shared.work_state import (
     CheckpointCallback,
     EmitCallback,
@@ -238,6 +239,9 @@ async def execute_work(
                     "agentRole": "worker_loop",
                     "parentRequestId": work.id,
                 },
+                # 原生 Function Calling：让模型直接输出结构化工具调用，
+                # 而不是自由文本里写 JSON（避免大段自然语言分析白烧轮次）。
+                tools=build_openai_tools(execution_mode=execution_mode),
             )
         except (TimeoutError, ProviderRequestError) as exc:
             if isinstance(exc, ProviderRequestError) and "超时" not in str(exc):

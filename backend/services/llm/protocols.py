@@ -16,7 +16,7 @@ import httpx
 
 from backend.core.config import get_settings
 from backend.services.llm.catalog import ModelDefinition
-from backend.services.llm.types import LlmChunk, LlmMessage, LlmUsage
+from backend.services.llm.types import LlmChunk, LlmMessage, LlmToolCall, LlmUsage
 
 ErrorScope = Literal["model", "provider", "request"]
 
@@ -148,6 +148,7 @@ class LlmProtocolClient:
         api_key: str,
         messages: list[LlmMessage],
         temperature: float | None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[LlmChunk]:
         """调用 OpenAI 兼容 ``chat/completions`` 流式接口。
 
@@ -161,6 +162,9 @@ class LlmProtocolClient:
             "messages": [self._to_openai_message(item) for item in messages],
             "stream": True,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
         if model.provider in {"kimi", "openai"}:
             # 优先获取供应商真实计费数据；网关仍保留本地估算作为兼容兜底。
             payload["stream_options"] = {"include_usage": True}
@@ -213,11 +217,25 @@ class LlmProtocolClient:
                         or ""
                     )
                     usage = self._read_openai_usage(packet.get("usage"))
-                    if text or reasoning or usage:
+                    tool_calls: list[LlmToolCall] = []
+                    for call in delta.get("tool_calls") or []:
+                        function = call.get("function") or {}
+                        name = str(function.get("name") or "")
+                        arguments = str(function.get("arguments") or "")
+                        if name or arguments:
+                            tool_calls.append(
+                                LlmToolCall(
+                                    name=name,
+                                    arguments=arguments,
+                                    id=str(call.get("id") or ""),
+                                )
+                            )
+                    if text or reasoning or usage or tool_calls:
                         yield LlmChunk(
                             text_delta=text,
                             reasoning_delta=reasoning,
                             usage=usage,
+                            tool_calls=tool_calls,
                         )
         except ProviderRequestError:
             raise
@@ -306,6 +324,30 @@ class LlmProtocolClient:
     def _to_openai_message(self, message: LlmMessage) -> dict[str, Any]:
         """把统一消息转换成 OpenAI 兼容格式。"""
 
+        if message.role == "tool":
+            # 工具执行结果回填：必须携带对应的 tool_call_id。
+            return {
+                "role": "tool",
+                "content": message.content,
+                "tool_call_id": message.tool_call_id,
+            }
+        if message.tool_calls:
+            # assistant 携带模型返回的原生 Function Call。
+            return {
+                "role": "assistant",
+                "content": message.content or None,
+                "tool_calls": [
+                    {
+                        "id": call.id or f"call_{index}",
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        },
+                    }
+                    for index, call in enumerate(message.tool_calls)
+                ],
+            }
         if not message.images:
             return {"role": message.role, "content": message.content}
         parts: list[dict[str, Any]] = [{"type": "text", "text": message.content}]

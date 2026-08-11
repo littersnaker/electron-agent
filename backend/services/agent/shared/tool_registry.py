@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 ToolScope = Literal["read", "write", "execute", "control"]
 ExecutionMode = Literal["auto_edit", "full_auto"]
@@ -149,3 +149,128 @@ def public_tool_catalog() -> list[dict[str, str]]:
         }
         for tool in CODE_AGENT_TOOLS
     ]
+
+
+def build_openai_tools(
+    *,
+    execution_mode: ExecutionMode = "full_auto",
+) -> list[dict[str, Any]]:
+    """把当前模式的工具目录转换为 OpenAI Function Calling Schema。
+
+    每个工具对应一个 OpenAI 兼容 ``function`` 定义。模型收到这些 tools 后
+    会直接返回结构化的 ``tool_calls``，不再输出大段自然语言分析再给 JSON，
+    与 ZCode/Claude Code 的“架构级工具约束”对齐。
+    """
+
+    from backend.services.agent.shared.loop_protocol import (
+        EditOperationModel,
+    )
+
+    allowed = set(
+        tool_names_for_mode(read_only=False, execution_mode=execution_mode)
+    )
+    # 每类动作的参数 Schema；关键字段保持与文本协议一致（parse_agent_action 兼容）。
+    schemas: dict[str, dict[str, Any]] = {
+        "search": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "search"},
+                "workId": {"type": "string", "description": "当前 Work ID"},
+                "query": {"type": "string", "description": "搜索关键词"},
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "限定搜索范围的文件路径",
+                },
+            },
+            "required": ["action", "query"],
+        },
+        "read": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "read"},
+                "workId": {"type": "string"},
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "要读取的相对路径",
+                },
+                "offsets": {
+                    "type": "object",
+                    "description": "超大文件分页：path -> 字符偏移",
+                    "additionalProperties": {"type": "integer"},
+                },
+            },
+            "required": ["action", "paths"],
+        },
+        "inspect": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "inspect"},
+                "workId": {"type": "string"},
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "query": {"type": "string"},
+            },
+            "required": ["action", "paths"],
+        },
+        "edit": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "edit"},
+                "workId": {"type": "string"},
+                "summary": {"type": "string"},
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": EditOperationModel.model_json_schema().get(
+                            "properties", {}
+                        ),
+                    },
+                    "description": "write 新建完整文件；replace 只给最小定位片段（3~8 行），禁止整段重写",
+                },
+            },
+            "required": ["action", "operations"],
+        },
+        "run": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "run"},
+                "workId": {"type": "string"},
+                "command": {"type": "string"},
+            },
+            "required": ["action", "command"],
+        },
+        "complete_work": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "complete_work"},
+                "workId": {"type": "string"},
+                "summary": {"type": "string"},
+            },
+            "required": ["action", "workId", "summary"],
+        },
+        "finish": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "finish"},
+                "summary": {"type": "string"},
+            },
+            "required": ["action", "summary"],
+        },
+    }
+    tools: list[dict[str, Any]] = []
+    for tool in CODE_AGENT_TOOLS:
+        if tool.name not in allowed or tool.name not in schemas:
+            continue
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": schemas[tool.name],
+                },
+            }
+        )
+    return tools
