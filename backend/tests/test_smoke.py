@@ -8,19 +8,19 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from backend.schemas.chat import ChatRequest
-from backend.core.config import get_settings
 from backend.api.models import ModelProbeRequest, _resolve_probe_models
+from backend.core.config import get_settings
 from backend.main import app
-from backend.services.agent.classifier import (
+from backend.schemas.chat import ChatRequest
+from backend.services.agent.planner.classifier import (
     classify_request,
     resolve_effective_code_request,
 )
-from backend.services.agent.request_routing import route_code_request
+from backend.services.agent.planner.request_routing import route_code_request
 from backend.services.commerce.analytics import calculate_metrics, resolve_category
+from backend.services.llm import credentials as credentials_module
 from backend.services.llm.availability import AVAILABILITY
 from backend.services.llm.catalog import get_model, get_provider
-from backend.services.llm import credentials as credentials_module
 from backend.services.llm.credentials import LlmCredentials, resolve_credentials
 from backend.services.llm.gateway import GATEWAY, LlmGateway
 from backend.services.llm.protocols import ProviderRequestError

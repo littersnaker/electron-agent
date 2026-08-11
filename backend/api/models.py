@@ -8,6 +8,7 @@ from typing import cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from backend.schemas.custom_models import CustomModelInput
 from backend.services.llm.catalog import (
     MODELS,
     ModelDefinition,
@@ -15,7 +16,6 @@ from backend.services.llm.catalog import (
     auto_models_for_provider,
     get_model,
 )
-from backend.schemas.custom_models import CustomModelInput
 from backend.services.llm.credentials import public_provider_status, resolve_credentials
 from backend.services.llm.custom_models import (
     create_custom_model,

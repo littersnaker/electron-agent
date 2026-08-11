@@ -7,7 +7,6 @@ from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-
 LOGGER = logging.getLogger(__name__)
 PACIFIC_TIMEZONE = "America/Los_Angeles"
 

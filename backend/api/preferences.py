@@ -10,7 +10,6 @@ from backend.services.workspace.preferences import (
     write_theme_preference,
 )
 
-
 router = APIRouter(prefix="/api/preferences", tags=["preferences"])
 
 

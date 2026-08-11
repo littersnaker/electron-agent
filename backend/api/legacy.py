@@ -7,7 +7,6 @@ from fastapi import APIRouter, Request
 from backend.api.qa import post_qa
 from backend.schemas.chat import ChatRequest
 
-
 router = APIRouter(tags=["legacy"])
 
 

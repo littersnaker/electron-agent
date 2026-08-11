@@ -5,13 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from backend.api.agents import router as agents_router
-from backend.api.code import router as code_router
 from backend.api.checkpoints import router as checkpoints_router
+from backend.api.code import router as code_router
 from backend.api.commerce import router as commerce_router
 from backend.api.health import router as health_router
+from backend.api.legacy import router as legacy_router
 from backend.api.mcp import router as mcp_router
 from backend.api.media import router as media_router
-from backend.api.legacy import router as legacy_router
 from backend.api.models import router as models_router
 from backend.api.observability import router as observability_router
 from backend.api.preferences import router as preferences_router
@@ -19,7 +19,6 @@ from backend.api.qa import router as qa_router
 from backend.api.review import router as review_router
 from backend.api.skills import router as skills_router
 from backend.api.workspace import router as workspace_router
-
 
 api_router = APIRouter()
 

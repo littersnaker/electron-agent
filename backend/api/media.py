@@ -15,13 +15,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from backend.schemas.media import MediaGenerateBody
 from backend.schemas.chat import ChatRequest
-from backend.runtime.bootstrap import RUNTIME
-from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
+from backend.schemas.media import MediaGenerateBody
 from backend.services.llm.catalog import AUTO_MODEL_ID
 from backend.services.llm.credentials import resolve_credentials, resolve_provider_key
 from backend.services.media.dashscope import generate_media
+from backend.services.runtime.bootstrap import RUNTIME
+from backend.services.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.utils.sse import create_sse_response
 
 router = APIRouter(tags=["media"])

@@ -12,17 +12,17 @@ from fastapi.testclient import TestClient
 
 from backend.core.config import get_settings
 from backend.main import app
-from backend.services.agent.checkpoint_runtime import (
+from backend.services.agent.loop.checkpoint_runtime import (
     command_from_json,
     ledger_from_json,
     plan_from_json,
     plan_to_json,
 )
-from backend.services.agent.command_runner import CommandResult
-from backend.services.agent.loop_protocol import parse_agent_action
-from backend.services.agent.loop import stream_autonomous_loop
-from backend.services.agent.task_planner import CodeTaskPlan, WorkItem, WorkLedger
-from backend.services.agent.workspace_tools import apply_edit_operations
+from backend.services.agent.loop.runner import stream_autonomous_loop
+from backend.services.agent.planner.task_planner import CodeTaskPlan, WorkItem, WorkLedger
+from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.loop_protocol import parse_agent_action
+from backend.services.agent.shared.workspace_tools import apply_edit_operations
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 
@@ -238,8 +238,8 @@ async def test_code_loop_checkpoints_after_safe_actions(
             }
         )
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fake_complete)
-    monkeypatch.setattr("backend.services.agent.loop.save_loop_checkpoint", fake_save)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fake_complete)
+    monkeypatch.setattr("backend.services.agent.loop.runner.save_loop_checkpoint", fake_save)
     plan = CodeTaskPlan(
         raw_request="创建 a.py",
         optimized_prompt="创建 a.py 并完成验证",

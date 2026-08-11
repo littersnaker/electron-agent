@@ -10,7 +10,6 @@ import argparse
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -24,11 +23,10 @@ from backend.core.config import get_settings
 from backend.core.logging import configure_console_encoding, configure_logging
 from backend.core.request_audit import RequestAuditMiddleware
 from backend.core.timezones import PACIFIC_TIMEZONE, timezone_source
-from backend.runtime.bootstrap import RUNTIME
 from backend.services.llm.custom_models import initialize_custom_models
 from backend.services.llm.gateway import GATEWAY
+from backend.services.runtime.bootstrap import RUNTIME
 from backend.services.workspace.database import initialize_database
-
 
 LOGGER = logging.getLogger(__name__)
 

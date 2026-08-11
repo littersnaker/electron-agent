@@ -6,7 +6,6 @@ from typing import Literal
 
 from backend.schemas.common import FlexibleModel
 
-
 ThemeMode = Literal["dark", "light"]
 
 

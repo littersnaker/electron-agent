@@ -6,18 +6,18 @@ import pytest
 
 from backend.core.config import get_settings
 from backend.schemas.chat import ChatRequest
-from backend.services.agent.checkpoint_runtime import plan_from_json, plan_to_json
-from backend.services.agent.filesystem_executor import (
+from backend.services.agent.loop.checkpoint_runtime import plan_from_json, plan_to_json
+from backend.services.agent.loop.runner import stream_autonomous_loop
+from backend.services.agent.planner.task_planner import CodeTaskPlan
+from backend.services.agent.shared.work_models import FileSystemOperation, WorkItem
+from backend.services.agent.worker.filesystem_executor import (
     execute_filesystem_operations,
     parse_direct_filesystem_request,
 )
-from backend.services.agent.loop import stream_autonomous_loop
-from backend.services.agent.run_checkpoint import resolve_run_checkpoint
-from backend.services.agent.task_planner import CodeTaskPlan
-from backend.services.agent.work_models import FileSystemOperation, WorkItem
+from backend.services.agent.worker.run_checkpoint import resolve_run_checkpoint
 from backend.services.checkpoints.store import create_checkpoint, get_checkpoint
-from backend.services.workspace.database import initialize_database
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.workspace.database import initialize_database
 
 
 def _filesystem_plan(*operations: FileSystemOperation) -> CodeTaskPlan:
@@ -90,7 +90,7 @@ async def test_filesystem_work_finishes_without_worker_llm(tmp_path, monkeypatch
 
         raise AssertionError("确定性文件 Work 不应调用大模型")
 
-    monkeypatch.setattr("backend.services.agent.loop.GATEWAY.complete", fail_if_called)
+    monkeypatch.setattr("backend.services.agent.loop.runner.GATEWAY.complete", fail_if_called)
     result = None
     async for event in stream_autonomous_loop(
         root=tmp_path,

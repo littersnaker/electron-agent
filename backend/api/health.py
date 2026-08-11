@@ -15,7 +15,6 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-
 router = APIRouter(tags=["health"])
 SOURCE_FILE = Path(__file__).resolve()
 SOURCE_ROOT = SOURCE_FILE.parents[2]

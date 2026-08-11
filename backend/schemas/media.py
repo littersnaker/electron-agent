@@ -8,7 +8,6 @@ from pydantic import Field
 
 from backend.schemas.common import FlexibleModel, FrontendAttachment
 
-
 MediaMode = Literal[
     "text-to-image",
     "image-edit",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.runtime.bootstrap import RUNTIME
+from backend.services.runtime.bootstrap import RUNTIME
 from backend.services.skills.installer import (
     install_skill,
     list_installed_skills,

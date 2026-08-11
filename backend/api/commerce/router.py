@@ -5,8 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.commerce.status import read_data_source_status, verify_data_source
-from backend.runtime.bootstrap import RUNTIME
-from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.credentials import read_credentials
 from backend.services.commerce.drafts import (
@@ -17,6 +15,8 @@ from backend.services.commerce.drafts import (
 )
 from backend.services.llm.catalog import AUTO_MODEL_ID
 from backend.services.llm.credentials import resolve_credentials
+from backend.services.runtime.bootstrap import RUNTIME
+from backend.services.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.utils.sse import create_sse_response
 
 router = APIRouter(tags=["commerce-agent"])

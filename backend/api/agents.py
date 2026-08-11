@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.runtime.bootstrap import RUNTIME
-from backend.services.agent.tool_registry import public_tool_catalog
+from backend.services.agent.shared.tool_registry import public_tool_catalog
+from backend.services.runtime.bootstrap import RUNTIME
 
 router = APIRouter(tags=["agents"])
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from backend.services.agent.trace import get_trace_events, list_recent_traces
+from backend.services.agent.loop.trace import get_trace_events, list_recent_traces
 
 router = APIRouter(tags=["observability"])
 

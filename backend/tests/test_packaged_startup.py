@@ -6,7 +6,6 @@ from pathlib import Path
 
 from backend.api import health as health_module
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 

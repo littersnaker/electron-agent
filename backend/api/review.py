@@ -5,13 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.services.agent.reflection.eval import memory_eval_stats
+from backend.services.agent.reflection.search import session_search
 from backend.services.agent.reflection.settings import (
     ReviewSettings,
     read_review_settings,
     write_review_settings,
 )
-from backend.services.agent.reflection.eval import memory_eval_stats
-from backend.services.agent.reflection.search import session_search
 from backend.services.agent.reflection.skills import apply_skill_updates
 from backend.services.agent.reflection.store import (
     get_review_artifact,
@@ -86,7 +86,7 @@ async def approve_review_artifact(artifact_id: str) -> dict[str, object]:
     if skill_updates:
         applied = apply_skill_updates(skill_updates)
         try:
-            from backend.runtime.bootstrap import RUNTIME
+            from backend.services.runtime.bootstrap import RUNTIME
 
             RUNTIME.reload_skills()
         except Exception:

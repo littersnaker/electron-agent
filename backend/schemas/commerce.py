@@ -8,7 +8,6 @@ from pydantic import Field
 
 from backend.schemas.common import FlexibleModel, FrontendMessage
 
-
 MarketplaceCode = Literal["US", "CA", "UK", "DE", "FR", "IT", "ES", "JP"]
 
 

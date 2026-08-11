@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.services.mcp.client import load_server_configs, resolve_tools
 from backend.services.workspace.repository import get_project
 
-
 router = APIRouter(tags=["mcp"])
 
 

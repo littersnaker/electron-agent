@@ -9,13 +9,13 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from backend.services.agent.context import _fallback_overview_files
-from backend.services.agent.read_only_loop import stream_read_only_tool_answer
-from backend.services.agent.tool_registry import (
+from backend.services.agent.loop.read_only_loop import stream_read_only_tool_answer
+from backend.services.agent.shared.context import _fallback_overview_files
+from backend.services.agent.shared.tool_registry import (
     public_tool_catalog,
     tool_names_for_mode,
 )
-from backend.services.agent.workspace_tools import (
+from backend.services.agent.shared.workspace_tools import (
     render_workspace_tree,
     search_workspace,
 )
@@ -210,7 +210,7 @@ async def test_read_only_agent_uses_search_and_read_before_answer(
         )
 
     monkeypatch.setattr(
-        "backend.services.agent.read_only_loop.GATEWAY.complete",
+        "backend.services.agent.loop.read_only_loop.GATEWAY.complete",
         fake_complete,
     )
     frames: list[str] = []

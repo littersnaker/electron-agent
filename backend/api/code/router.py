@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from backend.runtime.bootstrap import RUNTIME
-from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.schemas.chat import ChatRequest
 from backend.services.llm.catalog import AUTO_MODEL_ID
 from backend.services.llm.credentials import resolve_credentials
+from backend.services.runtime.bootstrap import RUNTIME
+from backend.services.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.utils.sse import create_sse_response
 
 router = APIRouter(tags=["code-agent"])

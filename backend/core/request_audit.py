@@ -37,7 +37,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -172,7 +172,7 @@ def _default_audit_dir() -> Path:
 def utc_now_iso() -> str:
     """返回带时区信息的 UTC 时间戳。"""
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_request_id(prefix: str = "req") -> str:

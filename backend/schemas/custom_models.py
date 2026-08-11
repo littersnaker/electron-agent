@@ -8,7 +8,6 @@ from pydantic import Field, field_validator
 
 from backend.schemas.common import FlexibleModel
 
-
 ProviderId = Literal["qwen", "openai", "gemini", "deepseek", "glm", "kimi"]
 
 
