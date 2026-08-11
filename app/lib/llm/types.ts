@@ -60,32 +60,11 @@ export interface LlmImagePart {
 
 export type LlmContentPart = LlmTextPart | LlmImagePart;
 
-export interface LlmToolCall {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
-
 /** Provider 无关的消息结构。 */
 export interface LlmMessage {
   role: LlmMessageRole;
   content: string;
   parts?: readonly LlmContentPart[];
-  toolCalls?: LlmToolCall[];
-  toolCallId?: string;
-  name?: string;
-}
-
-export interface LlmFunctionTool {
-  type: "function";
-  function: {
-    name: string;
-    description?: string;
-    parameters?: Record<string, unknown>;
-  };
 }
 
 export interface LlmTokenUsage {
@@ -98,7 +77,6 @@ export interface LlmChatResponse {
   choices: Array<{
     message: {
       content: string | null;
-      tool_calls?: LlmToolCall[];
     };
   }>;
   usage?: {
@@ -177,8 +155,6 @@ export interface LlmModelRoute {
 export interface LlmCompletionRequest {
   route: LlmModelRoute;
   messages: readonly LlmMessage[];
-  tools?: readonly LlmFunctionTool[];
-  toolChoice?: "auto" | "none";
   signal?: AbortSignal;
 }
 
@@ -193,8 +169,6 @@ export interface LlmGatewayRequest {
   preferredModelId?: string;
   credentials?: LlmCredentials;
   messages: readonly LlmMessage[] | readonly Record<string, unknown>[];
-  tools?: readonly LlmFunctionTool[] | readonly Record<string, unknown>[];
-  toolChoice?: "auto" | "none";
   requiredCapabilities?: readonly LlmCapability[];
   signal?: AbortSignal;
 }
