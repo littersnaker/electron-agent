@@ -53,3 +53,4 @@ python-dist/
 .vscode/
 .venv/
 .uploads/
+.zcode/
