@@ -310,7 +310,13 @@ def apply_edit_operations(
     *,
     expected_versions: dict[str, str] | None = None,
 ) -> EditBatchResult:
-    """事务式应用编辑，并拒绝覆盖并行 Work 已经改动的旧文件版本。"""
+    """事务式应用编辑，并拒绝覆盖并行 Work 已经改动的旧文件版本。
+
+    版本校验只在事务开始前对所有目标文件执行一次：本次 edit 内部多组
+    operations 连续修改同一文件是合法的（先改 import 再改 body），若逐
+    operation 校验，第一个写入后哈希变化会导致后续操作误报“内容已变化”
+    而整体回滚。
+    """
 
     expected_versions = expected_versions or {}
     backups: dict[Path, bytes | None] = {}
@@ -318,16 +324,19 @@ def apply_edit_operations(
     deleted: list[str] = []
     previews: list[str] = []
     try:
+        # 事务前一次性校验：所有目标文件必须与期望版本一致，之后不再逐 op 校验。
+        for operation in operations:
+            expected = expected_versions.get(operation.path)
+            if expected is None:
+                continue
+            current = file_version(root, operation.path)
+            if current != expected:
+                raise ValueError(
+                    f"内容已变化：{operation.path} 自上次读取后已被修改"
+                    "（可能来自本 Work 此前的编辑或并行写入），请重新 read 后再生成补丁"
+                )
         for operation in operations:
             target = resolve_inside(root, operation.path)
-            expected = expected_versions.get(operation.path)
-            if expected is not None:
-                current = file_version(root, operation.path)
-                if current != expected:
-                    raise ValueError(
-                        f"内容已变化：{operation.path} 自上次读取后已被修改"
-                        "（可能来自本 Work 此前的编辑或并行写入），请重新 read 后再生成补丁"
-                    )
             if target not in backups:
                 backups[target] = target.read_bytes() if target.exists() else None
             before, after = _apply_operation(target, operation)
