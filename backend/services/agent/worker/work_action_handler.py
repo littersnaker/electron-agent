@@ -330,6 +330,11 @@ class WorkActionHandler:
             await self._env.checkpoint()
             return WorkActionOutcome("continue")
 
+        # 记录"尝试过 edit"标记（无论成功、回滚还是被拒）：供 _complete 判断
+        # 本 Work 是否真的产生过写入尝试。只用字符串匹配会漏掉回滚分支
+        # （版本冲突写的是 EDIT RETRY REQUIRED，不是 ACTION edit）。
+        self._env.state.quality["editAttempted"] = True
+
         # 超长 replace 拦截：单个 replace 的 old/new 超过阈值视为整段重写，
         # 跳过该 operation 并要求模型用最小定位片段重发。write（新建文件）
         # 与其他合法 replace 照常执行——新文件不依赖旧文件修改，不能被超长
@@ -526,23 +531,20 @@ class WorkActionHandler:
         if (
             self._env.work.execution_type in {"coding", "agent"}
             and not self._env.state.changed_files
+            and self._env.state.quality.get("editAttempted")
         ):
-            # 编码类 Work 尝试过真实写入（transcript 出现成功的 ACTION edit）却
-            # 没有任何文件变更时，说明 edit 全部失败，禁止模型谎报成功
-            # （changed_files 为空时 review/质量门也会因无变更而校验失效）。
+            # 编码类 Work 尝试过写入（edit 被调用过，无论成功/回滚/被拒）却
+            # 没有任何文件变更时，禁止模型谎报成功（changed_files 为空时
+            # review/质量门也会因无变更而校验失效）。
             # 从没尝试过 edit 的 complete（如"目标已满足无需修改"）仍放行。
-            attempted_edit = any(
-                "ACTION edit" in entry for entry in self._env.state.transcript
+            self._env.state.append_transcript(
+                "COMPLETE REJECTED: 当前 Work 尝试过写入但没有任何文件变更，"
+                "不能标记完成。请基于最近一次 edit 的失败反馈重新生成"
+                "最小片段的 replace；若目标确实已满足且无需修改，请在"
+                "complete_work 中说明原因。"
             )
-            if attempted_edit:
-                self._env.state.append_transcript(
-                    "COMPLETE REJECTED: 当前 Work 尝试过写入但没有任何文件变更，"
-                    "不能标记完成。请基于最近一次 edit 的失败反馈重新生成"
-                    "最小片段的 replace；若目标确实已满足且无需修改，请在"
-                    "complete_work 中说明原因。"
-                )
-                await self._env.checkpoint()
-                return WorkActionOutcome("continue")
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
 
         return WorkActionOutcome(
             "success",

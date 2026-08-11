@@ -58,9 +58,9 @@ async def test_complete_rejected_when_edit_attempted_but_no_change() -> None:
     """尝试过 edit 但零变更时，complete_work 应被拒绝（防谎报成功）。"""
 
     state = WorkWorkerState()
-    # 模拟成功注入过一次 ACTION edit（_edit 成功分支会写该记录），
-    # 但 changed_files 为空——说明 edit 全部失败。
-    state.transcript.append("ACTION edit: 修改首页\nCHANGED: []\nDIFF:")
+    # 模拟 edit 被调用过（设置 editAttempted 标记），但 changed_files 为空
+    # ——说明 edit 全部失败（含版本冲突回滚分支）。
+    state.quality["editAttempted"] = True
     handler = _make_handler(tmp_path=Path("."), state=state)
     action = AgentAction(
         action="complete_work",
