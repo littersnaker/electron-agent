@@ -17,6 +17,13 @@ MAX_WORK_CONTEXT_TOKEN = 10_000
 MAX_TOOL_OUTPUT_TOKEN = 3_000
 # 预算紧急压缩时完整保留的最近观察条数（更早的观察只做工具结果瘦身）。
 BUDGET_KEEP_RECENT_ENTRIES = 6
+# 开窗透传：每次模型调用完整保留的最近条目数（一次编辑-验证周期约 3~6 条，
+# 窗口覆盖最近约两轮周期）；更早的历史折叠为动作摘要。
+SLIDING_WINDOW_ENTRIES = 10
+# 窗口内完整内容的总量保险（给 64k/128k 模型窗口留裕量，超出后从最老条目瘦身）。
+MAX_WINDOW_TOKENS = 40_000
+# 折叠时保留的头部结构条目最大字符数（防止 WORK CONTEXT 内嵌大文件全文）。
+_PRESERVE_HEAD_ENTRY_CHARS = 1_500
 
 
 @dataclass(slots=True)
@@ -180,18 +187,143 @@ class ContextCompactor:
     def compact_transcript(
         self, transcript: list[str]
     ) -> tuple[list[str], dict[str, Any]]:
-        """单次任务内完整透传 transcript，不做截断、去重或总量裁剪。
+        """开窗透传 transcript：完整保留最近若干轮，更早历史折叠为动作摘要。
 
-        文件大小未知，压缩会导致模型看不到完整内容而陷入循环读取；
-        因此本方法保留全部记录，仅返回统计信息供调用方使用。
+        旧实现每次模型调用都完整重发全部历史，导致单 Work 的输入量随轮数
+        平方级增长（第 N 轮重发前 N-1 轮的全部 ACTION/OBSERVATION 与文件内容）。
+        本方法改为滑动窗口：窗口内（最近 SLIDING_WINDOW_ENTRIES 条）逐字保留，
+        窗口外记录降级为动作轨迹摘要 + 工具输出瘦身，把单轮输入量控制在
+        O(窗口) 量级。
+
+        安全性：任务目标（objective）与验收标准（acceptanceCriteria）在
+        system prompt（_worker_prompt）中有独立备份，折叠 transcript 头部
+        不会让模型失忆；窗口内保留最近的文件观察，read 工具结果瘦身
+        （work_action_handler）仍保证"文件未变化不重复注入全文"。
+
+        调用方在折叠后必须清空 transcript_versions，防止 read 瘦身误以为
+        被折叠的文件内容仍在上下文中。
         """
 
-        before_tokens = sum(self._estimate_tokens(item) for item in transcript)
-        return list(transcript), {
-            "removed": 0,
+        entries = list(transcript)
+        if not entries:
+            return entries, {
+                "removed": 0,
+                "before_tokens": 0,
+                "after_tokens": 0,
+                "saved_tokens": 0,
+            }
+        before_tokens = sum(self._estimate_tokens(item) for item in entries)
+        if len(entries) <= SLIDING_WINDOW_ENTRIES:
+            # 未超过窗口，等价于完整透传。
+            return entries, {
+                "removed": 0,
+                "before_tokens": before_tokens,
+                "after_tokens": before_tokens,
+                "saved_tokens": 0,
+            }
+        recent_tail = entries[-SLIDING_WINDOW_ENTRIES:]
+        older = entries[:-SLIDING_WINDOW_ENTRIES]
+        summary = self._summarize_entries(older)
+        # 保留头部短小的结构上下文（WORK CONTEXT 依赖事实、任务规格等），
+        # 避免模型在后期失去依赖结论；超大条目（如 RELATED FILES 全文）不保留，
+        # 需要时由模型重新 read（折叠时指纹已清空）。
+        head = self._preserve_head_context(older)
+        windowed = self._fit_window_to_budget(recent_tail)
+        result = [*head, summary, *windowed] if summary else [*head, *windowed]
+        after_tokens = sum(self._estimate_tokens(item) for item in result)
+        return result, {
+            "removed": max(0, len(entries) - len(result)),
             "before_tokens": before_tokens,
-            "after_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "saved_tokens": max(0, before_tokens - after_tokens),
         }
+
+    def _preserve_head_context(self, entries: list[str]) -> list[str]:
+        """保留 transcript 头部短小的结构上下文条目，超出阈值即停止。"""
+
+        preserved: list[str] = []
+        for entry in entries:
+            stripped = entry.lstrip()
+            if not stripped.startswith(
+                ("WORK CONTEXT:", "TASK SPEC:", "MEMORY NOTES:", "RELATED FILES:")
+            ):
+                break
+            if len(entry) > _PRESERVE_HEAD_ENTRY_CHARS:
+                break
+            preserved.append(entry)
+        return preserved
+
+    def _summarize_entries(self, entries: list[str]) -> str:
+        """从窗口外记录生成动作轨迹摘要，让模型回顾前期进展而不是失忆。
+
+        零 LLM 成本的确定性摘要：提取每条记录的 ACTION 行与观察概要，
+        合并连续重复动作，最多保留 40 条轨迹。
+        """
+
+        lines: list[str] = []
+        previous_action = ""
+        for entry in entries:
+            action_line = self._action_line(entry)
+            if not action_line:
+                continue
+            if action_line == previous_action:
+                continue
+            previous_action = action_line
+            summary_line = action_line[:150]
+            observation = self._observation_summary(entry)
+            if observation:
+                summary_line += f" → {observation}"
+            lines.append(f"- {summary_line}")
+            if len(lines) >= 40:
+                break
+        if not lines:
+            return ""
+        return (
+            "== 前期动作摘要（详情已随窗口折叠，需要时可重新 read 查看）==\n"
+            + "\n".join(lines)
+        )
+
+    @staticmethod
+    def _action_line(entry: str) -> str:
+        """提取记录中的 ACTION 行（可能跨行，取首个 ACTION 前缀行）。"""
+
+        for line in entry.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("ACTION"):
+                return " ".join(stripped.split())[:200]
+        return ""
+
+    @staticmethod
+    def _observation_summary(entry: str) -> str:
+        """提取 OBSERVATION 后的首行内容摘要，用于动作轨迹的可读化。"""
+
+        marker = "OBSERVATION:"
+        index = entry.find(marker)
+        if index < 0:
+            return ""
+        tail = entry[index + len(marker) :].strip()
+        if not tail:
+            return ""
+        first_line = tail.splitlines()[0].strip()[:100]
+        return first_line or ""
+
+    def _fit_window_to_budget(self, entries: list[str]) -> list[str]:
+        """窗口内完整保留，但总量超过保险值时从最老条目开始瘦身。"""
+
+        fitted = list(entries)
+        total = sum(self._estimate_tokens(item) for item in fitted)
+        if total <= MAX_WINDOW_TOKENS:
+            return fitted
+        for index in range(len(fitted)):
+            if total <= MAX_WINDOW_TOKENS:
+                break
+            original = fitted[index]
+            slimmed = self._compact_transcript_entry(original)
+            if slimmed == original:
+                continue
+            total += self._estimate_tokens(slimmed) - self._estimate_tokens(original)
+            fitted[index] = slimmed
+        return fitted
 
     def compact_transcript_budget(
         self, transcript: list[str]

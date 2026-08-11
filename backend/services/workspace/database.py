@@ -328,10 +328,14 @@ async def open_database() -> AsyncIterator[AsyncConnection]:
 
 
 async def initialize_database() -> None:
-    """创建应用所需的数据表。"""
+    """创建应用所需的数据表，并应用版本化迁移。"""
 
     async with open_database() as connection:
         await connection.executescript(SCHEMA_SQL)
+    # 延迟导入避免与 migrations 模块的循环依赖。
+    from backend.services.workspace.migrations import apply_migrations
+
+    await apply_migrations()
 
 
 def dumps_json(value: object) -> str:

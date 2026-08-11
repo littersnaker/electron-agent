@@ -143,7 +143,7 @@ class WorkIntelligenceSession:
         return notes
 
     def build_prompt(self) -> WorkSessionPrompt:
-        """组装本轮模型输入：完整保留工作循环内的全部观察，不做压缩。"""
+        """组装本轮模型输入：开窗透传最近观察，更早历史折叠为动作摘要。"""
 
         compacted, stats = self.compactor.compact_transcript(self.state.transcript)
         before = int(stats.get("before_tokens") or 0)
@@ -151,6 +151,9 @@ class WorkIntelligenceSession:
         saved = max(0, before - after)
         if saved:
             self.budget.get("context").record_compressed(saved)
+            # 折叠后，被压缩的旧文件内容不再完整在上下文中，清空指纹，
+            # 防止 read 工具结果瘦身误判"文件未变化"而不再注入全文。
+            self.state.transcript_versions.clear()
         retry_prompt = self.failure.to_retry_prompt()
         directive = self.controller.build_directive(self.reasoning)
         prompt_parts = [*compacted, directive]

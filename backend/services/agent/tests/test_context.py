@@ -152,15 +152,6 @@ class TestContextCompactor:
         # 工具输出应该被截断
         assert len(ctx.recent_actions[0]) < len(long_output)
 
-    def test_compact_transcript(self):
-        """单次任务内 transcript 完整透传，不做压缩。"""
-        compactor = ContextCompactor()
-        transcript = [f"历史记录 {i}" for i in range(100)]
-        compacted, stats = compactor.compact_transcript(transcript)
-        assert compacted == transcript
-        assert stats["removed"] == 0
-        assert stats["before_tokens"] == stats["after_tokens"]
-
     def test_compact_transcript_small(self):
         """验证 test compact transcript small 场景的输入、执行结果与兼容行为。"""
         compactor = ContextCompactor()
@@ -179,18 +170,46 @@ class TestContextCompactor:
         assert result.estimated_tokens_after <= MAX_WORK_CONTEXT_TOKEN
 
 
+def test_compact_transcript_windows_recent_tail_and_summarizes_older() -> None:
+    """开窗透传：超过窗口时，最近条目逐字保留，更早的大观察折叠为动作摘要。"""
+
+    compactor = ContextCompactor()
+    old_entries = [
+        f"ACTION read paths=['file_{index}.ts']\nOBSERVATION:\n" + ("文件内容" * 600)
+        for index in range(15)
+    ]
+    recent = [
+        "ACTION edit a.ts\nCHANGED: a.ts\nDIFF: x",
+        "ACTION complete_work\nDONE: 完成",
+    ]
+    transcript = [*old_entries, *recent]
+
+    compacted, stats = compactor.compact_transcript(transcript)
+
+    # 窗口内最近条目完整保留在末尾。
+    assert compacted[-2:] == recent
+    # 窗口外历史被折叠为动作摘要，且存在"前期动作摘要"标记。
+    assert any(item.startswith("== 前期动作摘要") for item in compacted)
+    assert stats["removed"] > 0
+    # 折叠掉大观察后总量远小于原来的完整历史。
+    assert stats["saved_tokens"] > 0
+    assert stats["after_tokens"] < stats["before_tokens"]
+
+
 def test_compact_transcript_preserves_huge_tool_outputs() -> None:
-    """超大工具观察必须完整保留，不得按 Token 预算截断。"""
+    """超大工具观察在窗口内必须完整保留，不得按 Token 预算截断。"""
 
     compactor = ContextCompactor(max_work_context_token=500, max_tool_output_token=100)
+    huge = "ACTION read paths=['src/app.ts']\nOBSERVATION:\n" + ("代码内容" * 2_000)
     transcript = [
         "WORK CONTEXT: 商城改造",
-        "ACTION read paths=['src/app.ts']\nOBSERVATION:\n" + ("代码内容" * 2_000),
+        huge,
         "下一步应修改页面",
     ]
 
     compacted, stats = compactor.compact_transcript(transcript)
 
+    # 3 条记录未超过窗口，等价于完整透传。
     assert stats["after_tokens"] == stats["before_tokens"]
     assert compacted == transcript
     assert ("代码内容" * 2_000) in compacted[1]

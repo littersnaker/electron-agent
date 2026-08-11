@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from backend.api.commerce.status import read_data_source_status, verify_data_source
 from backend.runtime.bootstrap import RUNTIME
@@ -10,7 +10,9 @@ from backend.runtime.contracts import RuntimeMessage, RuntimeRequest
 from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.credentials import read_credentials
 from backend.services.commerce.drafts import (
+    DraftNotEditableError,
     list_listing_drafts,
+    update_listing_draft_content,
     update_listing_draft_status,
 )
 from backend.services.llm.catalog import AUTO_MODEL_ID
@@ -107,14 +109,41 @@ async def commerce_listing_drafts(
     }
 
 
+@router.put("/api/commerce/listing/drafts/{draft_id}")
+async def commerce_update_listing_draft(
+    draft_id: str,
+    body: dict[str, object],
+) -> dict[str, object]:
+    """更新一条待确认草稿的内容与备注。"""
+
+    draft = body.get("draft")
+    if not isinstance(draft, dict):
+        raise HTTPException(status_code=422, detail="draft 必须是对象")
+    notes = body.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise HTTPException(status_code=422, detail="notes 必须是字符串")
+    try:
+        updated = await update_listing_draft_content(
+            draft_id,
+            draft=draft,
+            notes=notes or "",
+        )
+    except DraftNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Listing 草稿不存在")
+    return {"ok": True}
+
+
 @router.post("/api/commerce/listing/drafts/{draft_id}/confirm")
 async def commerce_confirm_listing_draft(draft_id: str) -> dict[str, object]:
     """人工确认一条 Listing 草稿。"""
 
-    updated = await update_listing_draft_status(draft_id, "confirmed")
+    try:
+        updated = await update_listing_draft_status(draft_id, "confirmed")
+    except DraftNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not updated:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Listing 草稿不存在")
     return {"ok": True}
 
@@ -123,9 +152,10 @@ async def commerce_confirm_listing_draft(draft_id: str) -> dict[str, object]:
 async def commerce_reject_listing_draft(draft_id: str) -> dict[str, object]:
     """驳回一条 Listing 草稿。"""
 
-    updated = await update_listing_draft_status(draft_id, "rejected")
+    try:
+        updated = await update_listing_draft_status(draft_id, "rejected")
+    except DraftNotEditableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not updated:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Listing 草稿不存在")
     return {"ok": True}

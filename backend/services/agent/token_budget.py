@@ -160,9 +160,9 @@ class TokenBudgetGuard:
 
         # 根据超预算程度执行不同策略
         ratio = budget.usage_ratio
-        if ratio > 2.0:
+        if ratio > 1.5:
             actions.append("block")
-        elif ratio > 1.5:
+        elif ratio > 1.25:
             actions.append("downgrade")
             actions.append("clean")
         else:

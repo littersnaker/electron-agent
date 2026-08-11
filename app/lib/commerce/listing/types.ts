@@ -16,10 +16,7 @@ import type {
 
 export type CommerceWorkflowMode = "research" | "listing";
 
-export type AmazonListingFactSource =
-  | "user"
-  | "mock-erp"
-  | "amazon-competitor-inference";
+export type AmazonListingFactSource = "user" | "mock-erp" | "amazon-competitor-inference";
 
 export interface AmazonListingFact {
   id: string;
@@ -42,12 +39,7 @@ export interface AmazonMockErpProduct {
 }
 
 export type AmazonKeywordCluster =
-  | "core"
-  | "feature"
-  | "use-case"
-  | "audience"
-  | "attribute"
-  | "long-tail";
+  "core" | "feature" | "use-case" | "audience" | "attribute" | "long-tail";
 
 export type AmazonKeywordPlacement = "title" | "bullet" | "backend";
 
@@ -111,6 +103,11 @@ export interface AmazonListingSourceSummary {
   warnings: string[];
 }
 
+export interface AmazonListingHumanConfirmation {
+  status: "pending" | "confirmed" | "rejected" | "not_persisted";
+  checklist: string[];
+}
+
 export interface AmazonListingDemoReport {
   version: 1;
   mode: "listing-demo";
@@ -123,6 +120,11 @@ export interface AmazonListingDemoReport {
   mockErp: AmazonMockErpProduct;
   keywords: AmazonListingKeyword[];
   draft: AmazonListingDraft;
+  /** 生成时自动落库的草稿 id；空字符串表示未持久化。 */
+  draftId: string;
+  draftSource: "template" | "llm";
+  requiresHumanConfirmation: boolean;
+  humanConfirmation: AmazonListingHumanConfirmation;
   validation: AmazonListingValidation;
   competitors: CommerceProductSignal[];
   source: AmazonListingSourceSummary;

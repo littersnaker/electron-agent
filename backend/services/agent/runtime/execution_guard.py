@@ -21,7 +21,7 @@ _PROGRESS_ACTIONS = {"edit", "factory"}
 class ExecutionLimits:
     """保存可通过环境变量调整的 Worker 收敛阈值。"""
 
-    max_iterations: int = 12
+    max_iterations: int = 10
     max_context_actions: int = 5
     max_post_write_context_actions: int = 2
     max_guard_rejections: int = 2
@@ -33,7 +33,7 @@ class ExecutionLimits:
         """读取环境变量并把异常值限制在安全范围。"""
 
         base = cls(
-            max_iterations=_env_int("CODE_AGENT_MAX_WORK_ITERATIONS", 12, 6, 60),
+            max_iterations=_env_int("CODE_AGENT_MAX_WORK_ITERATIONS", 10, 6, 60),
             max_context_actions=_env_int("CODE_AGENT_MAX_CONTEXT_ACTIONS", 5, 3, 24),
             max_post_write_context_actions=_env_int(
                 "CODE_AGENT_MAX_POST_WRITE_CONTEXT_ACTIONS",
@@ -64,7 +64,7 @@ class ExecutionLimits:
         # 按目标文件数量自适应放宽，同时保留小任务的高收敛要求。
         files = max(0, int(target_file_count or 0))
         return cls(
-            max_iterations=max(6, min(24, base.max_iterations + files)),
+            max_iterations=max(6, min(18, base.max_iterations + files)),
             max_context_actions=max(3, min(10, base.max_context_actions + files // 2)),
             max_post_write_context_actions=max(
                 1,

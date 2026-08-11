@@ -79,19 +79,19 @@ class TestTokenBudgetGuard:
         assert "compress" in result["actions"]
 
     def test_mitigation_downgrade(self):
-        # 中度超预算 (1.5 < ratio <= 2.0) -> downgrade + clean
+        # 中度超预算 (1.25 < ratio <= 1.5) -> downgrade + clean
         """验证 test mitigation downgrade 场景的输入、执行结果与兼容行为。"""
         guard = TokenBudgetGuard(limits={"test": 100})
-        guard.consume("test", 170)
+        guard.consume("test", 130)
         result = guard.apply_mitigation("test")
         assert result["mitigated"] is True
         assert "downgrade" in result["actions"]
 
     def test_mitigation_block(self):
-        # 严重超预算 (ratio > 2.0) -> block
+        # 严重超预算 (ratio > 1.5) -> block（硬止损阈值 1.5×）
         """验证 test mitigation block 场景的输入、执行结果与兼容行为。"""
         guard = TokenBudgetGuard(limits={"test": 100})
-        guard.consume("test", 220)
+        guard.consume("test", 160)
         result = guard.apply_mitigation("test")
         assert result["mitigated"] is True
         assert "block" in result["actions"]

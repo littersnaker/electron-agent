@@ -7,6 +7,11 @@ import type {
   AmazonListingDraft,
   AmazonListingIssue,
 } from "../../../lib/commerce/listing/types";
+import {
+  confirmListingDraft,
+  rejectListingDraft,
+  saveListingDraft,
+} from "../../../lib/commerce/drafts-api";
 import { ListingEditor } from "./listing-editor";
 import { ListingMetrics } from "./listing-metrics";
 
@@ -14,6 +19,23 @@ function issueColor(severity: "error" | "warning" | "suggestion"): string {
   if (severity === "error") return "#ff453a";
   if (severity === "warning") return "#ff9f0a";
   return "#64b5ff";
+}
+
+const STATUS_STYLE: Record<string, { label: string; color: string; background: string }> = {
+  pending: { label: "待确认", color: "#ff9f0a", background: "rgba(255,159,10,0.12)" },
+  confirmed: { label: "已确认", color: "#30d158", background: "rgba(48,209,88,0.12)" },
+  rejected: { label: "已驳回", color: "#ff453a", background: "rgba(255,69,58,0.12)" },
+};
+
+function formatSavedAt(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 async function copyText(value: string): Promise<void> {
@@ -33,6 +55,10 @@ async function copyText(value: string): Promise<void> {
 
 export function AmazonListingCard({ report }: { report: AmazonListingDemoReport }) {
   const [draft, setDraft] = useState<AmazonListingDraft>(report.draft);
+  const [status, setStatus] = useState(report.humanConfirmation.status);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"save" | "confirm" | "reject" | null>(null);
+  const [actionError, setActionError] = useState("");
   const [copied, setCopied] = useState(false);
   const validation = useMemo(
     () =>
@@ -40,9 +66,7 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
         draft,
         keywords: report.keywords,
         mockErp: report.mockErp,
-        competitorBrands: report.competitors
-          .map((product) => product.brand || "")
-          .filter(Boolean),
+        competitorBrands: report.competitors.map((product) => product.brand || "").filter(Boolean),
       }),
     [draft, report.competitors, report.keywords, report.mockErp],
   );
@@ -54,6 +78,35 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
     : report.source.dataRoute === "crawler"
       ? "Amazon 爬虫"
       : "Amazon API";
+
+  const draftId = report.draftId;
+  const persisted = Boolean(draftId);
+  const terminal = status === "confirmed" || status === "rejected";
+  const statusStyle = STATUS_STYLE[status] ?? {
+    label: "未持久化",
+    color: "#8e8e93",
+    background: "rgba(142,142,147,0.12)",
+  };
+
+  const runAction = async (kind: "save" | "confirm" | "reject", action: () => Promise<void>) => {
+    if (!draftId || busy) return;
+    setBusy(kind);
+    setActionError("");
+    try {
+      await action();
+      if (kind === "confirm") setStatus("confirmed");
+      if (kind === "reject") setStatus("rejected");
+      if (kind === "save") setSavedAt(new Date().toISOString());
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "操作失败，请重试");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSave = () => void runAction("save", () => saveListingDraft(draftId, draft));
+  const handleConfirm = () => void runAction("confirm", () => confirmListingDraft(draftId));
+  const handleReject = () => void runAction("reject", () => rejectListingDraft(draftId));
 
   const handleCopy = async () => {
     await copyText(
@@ -84,6 +137,12 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
               </span>
               <span className="rounded-full bg-[rgba(255,159,10,0.12)] px-2 py-1 text-[8px] font-semibold text-[#ff9f0a]">
                 Mock ERP
+              </span>
+              <span
+                className="rounded-full px-2 py-1 text-[8px] font-semibold"
+                style={{ color: statusStyle.color, background: statusStyle.background }}
+              >
+                {statusStyle.label}
               </span>
               <span className="text-[8px] text-[var(--text-quaternary)]">
                 {report.marketplaceLabel} · {sourceLabel} {report.source.sampleSize} 条
@@ -118,34 +177,89 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
       </div>
 
       <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.75fr)]">
-        <ListingEditor draft={draft} setDraft={setDraft} validation={validation} />
+        <div className="min-w-0">
+          <ListingEditor draft={draft} setDraft={setDraft} validation={validation} />
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {persisted ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy !== null || terminal}
+                  onClick={handleSave}
+                  className="rounded-[11px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-1.5 text-[9px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {busy === "save" ? "保存中…" : "保存草稿"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy !== null || terminal}
+                  onClick={handleConfirm}
+                  className="rounded-[11px] border border-[rgba(48,209,88,0.35)] bg-[rgba(48,209,88,0.1)] px-3 py-1.5 text-[9px] font-semibold text-[#30d158] transition-colors hover:bg-[rgba(48,209,88,0.16)] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {busy === "confirm" ? "确认中…" : "确认草稿"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy !== null || terminal}
+                  onClick={handleReject}
+                  className="rounded-[11px] border border-[rgba(255,69,58,0.35)] bg-[rgba(255,69,58,0.08)] px-3 py-1.5 text-[9px] font-semibold text-[#ff453a] transition-colors hover:bg-[rgba(255,69,58,0.14)] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {busy === "reject" ? "驳回中…" : "驳回草稿"}
+                </button>
+                <span className="text-[8px] text-[var(--text-quaternary)]">
+                  {savedAt ? `上次保存 ${formatSavedAt(savedAt)}` : "编辑后点击保存可回写草稿"}
+                </span>
+              </>
+            ) : (
+              <span className="text-[8px] text-[var(--text-quaternary)]">
+                草稿未持久化（生成时保存失败），本卡片的编辑仅保留在本地。
+              </span>
+            )}
+            {actionError && (
+              <span className="text-[8px] font-semibold text-[#ff453a]">{actionError}</span>
+            )}
+          </div>
+        </div>
 
         <aside className="space-y-3">
           <div className="rounded-[14px] border border-[rgba(255,159,10,0.22)] bg-[rgba(255,159,10,0.07)] p-3 text-[9px] leading-4 text-[var(--text-secondary)]">
             <strong className="text-[#ff9f0a]">不可直接发布：</strong>
-            当前商品主数据来自模拟 ERP。尺寸、材质、包装、认证、兼容性和性能声明必须由真实 ERP 或人工确认。
+            当前商品主数据来自模拟 ERP。尺寸、材质、包装、认证、兼容性和性能声明必须由真实 ERP
+            或人工确认。
           </div>
 
-          <details open className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3">
+          <details
+            open
+            className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3"
+          >
             <summary className="cursor-pointer text-[10px] font-semibold text-[var(--text-secondary)]">
               商品事实 · {report.mockErp.facts.length}
             </summary>
             <div className="mt-2 space-y-1.5">
               {report.mockErp.facts.map((fact) => (
-                <div key={fact.id} className="rounded-[9px] border border-[var(--border)] bg-[var(--glass)] px-2.5 py-2">
+                <div
+                  key={fact.id}
+                  className="rounded-[9px] border border-[var(--border)] bg-[var(--glass)] px-2.5 py-2"
+                >
                   <div className="flex items-center justify-between gap-2 text-[8px] text-[var(--text-quaternary)]">
                     <span>{fact.label}</span>
                     <span style={{ color: fact.requiresConfirmation ? "#ff9f0a" : "#30d158" }}>
                       {fact.requiresConfirmation ? "待确认" : "用户提供"}
                     </span>
                   </div>
-                  <div className="mt-1 break-words text-[9px] text-[var(--text-secondary)]">{fact.value}</div>
+                  <div className="mt-1 break-words text-[9px] text-[var(--text-secondary)]">
+                    {fact.value}
+                  </div>
                 </div>
               ))}
             </div>
           </details>
 
-          <details open className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3">
+          <details
+            open
+            className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3"
+          >
             <summary className="cursor-pointer text-[10px] font-semibold text-[var(--text-secondary)]">
               关键词计划 · {report.keywords.length}
             </summary>
@@ -162,7 +276,10 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
             </div>
           </details>
 
-          <details open className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3">
+          <details
+            open
+            className="rounded-[14px] border border-[var(--border)] bg-[var(--glass-soft)] p-3"
+          >
             <summary className="cursor-pointer text-[10px] font-semibold text-[var(--text-secondary)]">
               校验结果 · {errors.length} 个错误 / {validation.issues.length} 项
             </summary>
@@ -171,9 +288,11 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
                 <div className="text-[9px] text-[#30d158]">本地 Demo 规则检查已通过。</div>
               ) : (
                 validation.issues.map((issue: AmazonListingIssue, index: number) => (
-                  <div key={`${issue.code}-${index}`} className="text-[9px] leading-4 text-[var(--text-secondary)]">
-                    <span style={{ color: issueColor(issue.severity) }}>●</span>{" "}
-                    {issue.message}
+                  <div
+                    key={`${issue.code}-${index}`}
+                    className="text-[9px] leading-4 text-[var(--text-secondary)]"
+                  >
+                    <span style={{ color: issueColor(issue.severity) }}>●</span> {issue.message}
                   </div>
                 ))
               )}

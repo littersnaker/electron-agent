@@ -75,15 +75,15 @@ def test_compact_for_budget_runs_once_and_clears_versions() -> None:
 
 
 def test_record_usage_compacts_before_blocking() -> None:
-    """首次触发终止阈值应压缩并允许继续收尾，压缩后仍超限才返回 False。"""
+    """首次触发硬止损阈值应压缩并允许继续收尾，压缩后仍超限才返回 False。"""
 
     session, state = _session()
     state.append_transcript("WORK CONTEXT: 目标")
     state.append_transcript("ACTION read a.ts\nOBSERVATION:\n" + "y" * 1_000)
 
-    assert session.record_usage(200_000) is True
-    assert session.record_usage(100_000) is True  # 触发 block，但先压缩
-    assert session.record_usage(10_000) is False  # 已压缩过，停止
+    assert session.record_usage(180_000) is True  # 未到 1.5× 硬止损阈值
+    assert session.record_usage(100_000) is True  # 触发 block，但先压缩放行收尾
+    assert session.record_usage(10_000) is False  # 已压缩过，硬止损
 
 
 def test_record_usage_blocks_immediately_when_nothing_to_compact() -> None:
