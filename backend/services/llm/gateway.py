@@ -397,8 +397,19 @@ class LlmGateway:
                     if chunk.usage:
                         usage = chunk.usage
                     for call in chunk.tool_calls:
-                        key = call.id or f"call_{len(tool_calls_order)}"
-                        if key not in tool_calls_map:
+                        if call.id:
+                            # 供应商带 id：按 id 分组累加同一次 tool_call 的分片。
+                            key = call.id
+                            if key not in tool_calls_map:
+                                tool_calls_map[key] = {"name": "", "arguments": ""}
+                                tool_calls_order.append(key)
+                        elif tool_calls_order:
+                            # DeepSeek 等供应商流式分片不带 id：续接到当前
+                            # 最后一个 tool_call，避免每个分片被当成独立调用
+                            # 导致 arguments 被拆散、首个为空。
+                            key = tool_calls_order[-1]
+                        else:
+                            key = f"call_{len(tool_calls_order)}"
                             tool_calls_map[key] = {"name": "", "arguments": ""}
                             tool_calls_order.append(key)
                         if call.name:

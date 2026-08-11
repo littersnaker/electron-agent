@@ -4,9 +4,20 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from backend.services.agent.shared.tool_registry import build_openai_tools
 from backend.services.llm.protocols import LlmProtocolClient
 from backend.services.llm.types import LlmMessage, LlmToolCall
+
+
+async def _iter_chunks(chunks: list[LlmToolCall]):
+    """把 tool_call 分片包装成网关可消费的 chunk 序列。"""
+
+    from backend.services.llm.types import LlmChunk
+
+    for call in chunks:
+        yield LlmChunk(tool_calls=[call])
 
 
 def test_build_openai_tools_covers_auto_edit_actions() -> None:
@@ -61,3 +72,38 @@ def test_openai_message_serializes_tool_calls_and_results() -> None:
     assert payload["role"] == "tool"
     assert payload["tool_call_id"] == "call_1"
     assert payload["content"] == "OBSERVATION: ..."
+
+
+@pytest.mark.asyncio
+async def test_complete_accumulates_unnamed_id_tool_call_fragments(monkeypatch) -> None:
+    """DeepSeek 流式 tool_calls 分片不带 id 时，arguments 应完整拼回而非拆散。"""
+
+    from backend.services.llm.catalog import get_model
+    from backend.services.llm.gateway import LlmCredentials, LlmGateway
+
+    gateway = LlmGateway()
+    fragments = [
+        LlmToolCall(name="edit", arguments="", id=""),
+        LlmToolCall(name="", arguments='{"action":"read","paths":["a.ts"]', id=""),
+        LlmToolCall(name="", arguments="}", id=""),
+    ]
+    monkeypatch.setattr(
+        gateway,
+        "_stream_with_deadline",
+        lambda **_: _iter_chunks(fragments),
+    )
+    model = get_model("deepseek-v4-flash")
+    assert model is not None
+    monkeypatch.setattr(gateway, "resolve_candidates", lambda *_: (model,))
+    monkeypatch.setattr(
+        "backend.services.llm.gateway.AVAILABILITY.mark_success",
+        lambda *_: None,
+    )
+
+    text, usage, _model = await gateway._complete_impl(
+        preferred_model_id="deepseek-v4-flash",
+        credentials=LlmCredentials(values={}),
+        messages=[LlmMessage("user", "hi")],
+    )
+
+    assert text == '{"action":"read","paths":["a.ts"]}'
