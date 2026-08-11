@@ -60,6 +60,7 @@ export function ApiKeyModal({
   const [testingAll, setTestingAll] = useState(false);
   const [reviewModelId, setReviewModelId] = useState("");
   const [reviewEnabled, setReviewEnabled] = useState(true);
+  const [reviewMinComplexity, setReviewMinComplexity] = useState(5);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,12 +75,16 @@ export function ApiKeyModal({
         const payload = (await response.json()) as {
           modelId?: string;
           enabled?: boolean;
+          minComplexity?: number;
         };
         if (typeof payload.modelId === "string") {
           setReviewModelId(payload.modelId);
         }
         if (typeof payload.enabled === "boolean") {
           setReviewEnabled(payload.enabled);
+        }
+        if (typeof payload.minComplexity === "number") {
+          setReviewMinComplexity(payload.minComplexity);
         }
       } catch {
         // Review settings are convenience UI only; backend keeps defaults.
@@ -230,6 +235,7 @@ export function ApiKeyModal({
         body: JSON.stringify({
           modelId: reviewModelId.trim(),
           enabled: reviewEnabled,
+          minComplexity: reviewMinComplexity,
         }),
       });
     } catch {
@@ -381,6 +387,30 @@ export function ApiKeyModal({
                 onChange={(event) => setReviewEnabled(event.target.checked)}
               />
               启用复盘循环
+            </label>
+            <label className="mt-2 block">
+              <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+                <span>最低复杂度门槛</span>
+                <span className="text-[8px] text-[var(--text-tertiary)]">
+                  成功任务需达到才复盘，失败任务始终复盘
+                </span>
+              </span>
+              <input
+                aria-label="复盘最低复杂度门槛"
+                type="number"
+                min={0}
+                max={100}
+                className="h-9 w-24 rounded-[10px] border bg-[var(--glass-black)] px-3 text-[11px] outline-none"
+                style={{ color: COLORS.text, borderColor: COLORS.border }}
+                value={reviewMinComplexity}
+                disabled={!reviewEnabled}
+                onChange={(event) => {
+                  const parsed = Number(event.target.value);
+                  setReviewMinComplexity(
+                    Number.isNaN(parsed) ? 5 : Math.max(0, Math.min(100, parsed)),
+                  );
+                }}
+              />
             </label>
           </section>
 

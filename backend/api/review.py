@@ -27,6 +27,7 @@ class ReviewSettingsUpdate(BaseModel):
 
     modelId: str = Field(default="", max_length=200)
     enabled: bool = True
+    minComplexity: int = Field(default=5, ge=0, le=100)
 
 
 @router.get("/review-settings")
@@ -43,7 +44,11 @@ async def put_review_settings(body: ReviewSettingsUpdate) -> dict[str, object]:
 
     try:
         settings = await write_review_settings(
-            ReviewSettings(model_id=body.modelId, enabled=body.enabled)
+            ReviewSettings(
+                model_id=body.modelId,
+                enabled=body.enabled,
+                min_complexity=body.minComplexity,
+            )
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

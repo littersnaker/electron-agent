@@ -17,6 +17,7 @@ interface WorkspaceHeaderProps {
   isStreaming: boolean;
   onStop: () => void;
   onOpenApiKey: () => void;
+  onOpenSkills: () => void;
 }
 
 function isMediaMode(mode: ComposerMode): boolean {
@@ -134,6 +135,7 @@ export default function WorkspaceHeader({
   isStreaming,
   onStop,
   onOpenApiKey,
+  onOpenSkills,
 }: WorkspaceHeaderProps) {
   const header = resolveHeaderText(activeSession, activeProject, composerMode);
 
@@ -217,6 +219,29 @@ export default function WorkspaceHeader({
           <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
             <circle cx="7" cy="10" r="3.1" stroke="currentColor" strokeWidth="1.45" />
             <path d="M10 10h6.7M14.3 10v2M16.4 10v1.2" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenSkills}
+          className="flex h-8 w-8 items-center justify-center rounded-[10px] border transition-colors hover:bg-[var(--glass-hover)]"
+          style={{
+            background: "var(--glass)",
+            borderColor: "var(--border)",
+            color: "var(--text-tertiary)",
+          }}
+          title="Skills 管理"
+          aria-label="打开 Skills 管理"
+        >
+          <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+            <path
+              d="M10 3.4 4 5.8v5.1c0 3 2.5 5.1 6 5.7 3.5-.6 6-2.7 6-5.7V5.8L10 3.4Z"
+              stroke="currentColor"
+              strokeWidth="1.45"
+              strokeLinejoin="round"
+            />
+            <path d="M4.6 6.3 10 8.5l5.4-2.2M10 8.5v8" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
           </svg>
         </button>
       </div>

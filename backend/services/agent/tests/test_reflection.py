@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -403,6 +404,7 @@ async def test_run_runtime_review_writes_pending_artifact(
         project_id="",
         session_id="session-1",
         marketplace="amazon",
+        complexity=12,
         credentials=LlmCredentials({"deepseek": "sk-test"}),
     )
     items = await store_module.list_review_artifacts(status="pending")
@@ -566,3 +568,61 @@ def test_review_api_router_registered() -> None:
     assert "/api/agent/review-artifacts" in paths
     assert "/api/agent/session-search" in paths
     assert "/api/agent/review-stats" in paths
+
+
+@pytest.mark.asyncio
+async def test_review_settings_roundtrip_min_complexity(db) -> None:
+    """最低复杂度门槛应可配置并持久化。"""
+
+    saved = await write_review_settings(
+        ReviewSettings(model_id="deepseek-v4-flash", enabled=True, min_complexity=8)
+    )
+    assert saved.min_complexity == 8
+    assert saved.to_json()["minComplexity"] == 8
+    reloaded = await read_review_settings()
+    assert reloaded.min_complexity == 8
+
+
+@pytest.mark.asyncio
+async def test_review_gate_complexity_threshold(db, monkeypatch) -> None:
+    """成功任务未达复杂度门槛跳过；达门槛或失败任务始终通过。"""
+
+    fake_model = types.SimpleNamespace(provider="deepseek")
+
+    async def fake_read_settings() -> ReviewSettings:
+        return ReviewSettings(
+            model_id="deepseek:deepseek-v4-flash",
+            enabled=True,
+            min_complexity=5,
+        )
+
+    monkeypatch.setattr(runner_module, "read_review_settings", fake_read_settings)
+    monkeypatch.setattr(runner_module, "resolve_review_model", lambda _model_id: fake_model)
+    credentials = LlmCredentials({"deepseek": "sk-test"})
+
+    # 成功任务，复杂度低于门槛 → 跳过。
+    low = await runner_module._review_gate(
+        credentials=credentials,
+        task_id="W-low",
+        succeeded=True,
+        complexity=3,
+    )
+    assert low is None
+
+    # 成功任务，复杂度达到门槛 → 通过。
+    reached = await runner_module._review_gate(
+        credentials=credentials,
+        task_id="W-ok",
+        succeeded=True,
+        complexity=5,
+    )
+    assert reached is fake_model
+
+    # 失败任务，复杂度为 0 → 始终通过（失败教训值得学）。
+    failed = await runner_module._review_gate(
+        credentials=credentials,
+        task_id="W-fail",
+        succeeded=False,
+        complexity=0,
+    )
+    assert failed is fake_model

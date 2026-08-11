@@ -215,6 +215,19 @@ CREATE TABLE IF NOT EXISTS agent_memories (
 
   CREATE INDEX IF NOT EXISTS idx_listing_drafts_status
   ON listing_drafts(status, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS installed_skills (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL DEFAULT '0.0.0',
+      description TEXT NOT NULL DEFAULT '',
+      source_url TEXT NOT NULL DEFAULT '',
+      source_format TEXT NOT NULL DEFAULT 'skill-md',
+      content_json TEXT NOT NULL,
+      files_json TEXT NOT NULL DEFAULT '{}',
+      installed_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+  );
   """
 
 

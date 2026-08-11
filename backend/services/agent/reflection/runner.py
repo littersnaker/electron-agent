@@ -241,11 +241,25 @@ async def _review_gate(
     *,
     credentials: LlmCredentials,
     task_id: str,
+    succeeded: bool,
+    complexity: int,
 ):
-    """通用门控：设置开关 → 模型注册 → 对应 provider key。返回 (model, None)。"""
+    """通用门控：设置开关 → 复杂度门槛 → 模型注册 → 对应 provider key。
+
+    - 失败任务始终值得学习（教训价值高）；
+    - 成功任务只有复杂度达到 ``min_complexity`` 才触发，避免每次对话都复盘。
+    """
 
     settings = await read_review_settings()
     if not settings.enabled:
+        return None
+    if succeeded and complexity < settings.min_complexity:
+        LOGGER.info(
+            "复盘触发门槛未达（complexity=%s < min_complexity=%s），跳过（task=%s）",
+            complexity,
+            settings.min_complexity,
+            task_id,
+        )
         return None
     model = resolve_review_model(settings.model_id)
     if model is None:
@@ -265,6 +279,7 @@ async def run_work_review(
     *,
     work_id: str,
     succeeded: bool,
+    complexity: int = 0,
     summary: str,
     error: str,
     failure_kind: str,
@@ -278,7 +293,12 @@ async def run_work_review(
     """Code Agent：单个 Work 完成/失败后的异步复盘。"""
 
     try:
-        model = await _review_gate(credentials=credentials, task_id=work_id)
+        model = await _review_gate(
+            credentials=credentials,
+            task_id=work_id,
+            succeeded=succeeded,
+            complexity=complexity,
+        )
         if model is None:
             return
         digest = build_work_digest(
@@ -316,6 +336,7 @@ async def run_runtime_review(
     task_id: str,
     agent_id: str,
     status: str,
+    complexity: int = 0,
     request_text: str,
     result_summary: str,
     error_message: str,
@@ -333,7 +354,12 @@ async def run_runtime_review(
     """
 
     try:
-        model = await _review_gate(credentials=credentials, task_id=task_id)
+        model = await _review_gate(
+            credentials=credentials,
+            task_id=task_id,
+            succeeded=status == "completed",
+            complexity=complexity,
+        )
         if model is None:
             return
         digest = build_runtime_digest(
@@ -409,6 +435,7 @@ def schedule_work_review(
     *,
     work_id: str,
     succeeded: bool,
+    complexity: int = 0,
     summary: str,
     error: str,
     failure_kind: str,
@@ -426,6 +453,7 @@ def schedule_work_review(
     payload: dict[str, Any] = {
         "work_id": work_id,
         "succeeded": succeeded,
+        "complexity": complexity,
         "summary": summary,
         "error": error,
         "failure_kind": failure_kind,
@@ -448,6 +476,7 @@ def schedule_runtime_review(
     task_id: str,
     agent_id: str,
     status: str,
+    complexity: int = 0,
     request_text: str,
     result_summary: str,
     error_message: str,
@@ -466,6 +495,7 @@ def schedule_runtime_review(
         "task_id": task_id,
         "agent_id": agent_id,
         "status": status,
+        "complexity": complexity,
         "request_text": request_text,
         "result_summary": result_summary,
         "error_message": error_message,

@@ -8,6 +8,7 @@ import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
 import TaskPlanningPanel from "./components/TaskPlanningPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
 import ApiKeyModal from "./components/ApiKeyModal";
+import SkillsManagerModal from "./components/skills-manager/SkillsManagerModal";
 import { ChatComposer } from "./components/ChatComposer";
 import CheckpointResumeBar from "./components/CheckpointResumeBar";
 import ChatList from "./components/ChatList";
@@ -67,6 +68,7 @@ export default function Home() {
   const [commerceMarketplace, setCommerceMarketplace] =
     useState<CommerceMarketplaceCode>("US");
   const [showPluginCenter, setShowPluginCenter] = useState(false);
+  const [showSkillsManager, setShowSkillsManager] = useState(false);
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
@@ -320,6 +322,9 @@ export default function Home() {
           onClose={() => setShowPluginCenter(false)}
         />
       )}
+      {showSkillsManager && (
+        <SkillsManagerModal onClose={() => setShowSkillsManager(false)} />
+      )}
 
       <CustomTitleBar
         theme={theme}
@@ -380,6 +385,7 @@ export default function Home() {
                     : chat.stop
               }
               onOpenApiKey={apiKey.openKeyModal}
+              onOpenSkills={() => setShowSkillsManager(true)}
             />
 
             <div className="flex min-h-0 flex-1 gap-4">

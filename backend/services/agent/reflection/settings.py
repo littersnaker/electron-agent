@@ -23,11 +23,16 @@ class ReviewSettings:
 
     model_id: str = DEFAULT_REVIEW_MODEL_ID
     enabled: bool = True
+    min_complexity: int = 5
 
     def to_json(self) -> dict[str, object]:
         model = resolve_review_model(self.model_id)
         display = model.model if model is not None else self.model_id
-        return {"modelId": display, "enabled": self.enabled}
+        return {
+            "modelId": display,
+            "enabled": self.enabled,
+            "minComplexity": self.min_complexity,
+        }
 
 
 def _normalize_model_id(model_id: str) -> str:
@@ -91,11 +96,20 @@ async def read_review_settings() -> ReviewSettings:
         return ReviewSettings()
     model_id = str(payload.get("modelId") or DEFAULT_REVIEW_MODEL_ID)
     enabled = bool(payload.get("enabled", True))
+    raw_complexity = payload.get("minComplexity", 5)
+    try:
+        min_complexity = max(0, min(100, int(raw_complexity)))
+    except (TypeError, ValueError):
+        min_complexity = 5
     try:
         model_id = _normalize_model_id(model_id)
     except ValueError:
         model_id = DEFAULT_REVIEW_MODEL_ID
-    return ReviewSettings(model_id=model_id, enabled=enabled)
+    return ReviewSettings(
+        model_id=model_id,
+        enabled=enabled,
+        min_complexity=min_complexity,
+    )
 
 
 async def write_review_settings(settings: ReviewSettings) -> ReviewSettings:
@@ -104,6 +118,7 @@ async def write_review_settings(settings: ReviewSettings) -> ReviewSettings:
     normalized = ReviewSettings(
         model_id=_normalize_model_id(settings.model_id),
         enabled=settings.enabled,
+        min_complexity=settings.min_complexity,
     )
     async with open_database() as connection:
         await connection.execute(
@@ -117,6 +132,7 @@ async def write_review_settings(settings: ReviewSettings) -> ReviewSettings:
                     {
                         "modelId": normalized.model_id,
                         "enabled": normalized.enabled,
+                        "minComplexity": normalized.min_complexity,
                     }
                 ),
                 utc_now_iso(),

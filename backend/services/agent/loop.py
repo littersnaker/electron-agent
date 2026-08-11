@@ -324,6 +324,7 @@ async def stream_autonomous_loop(
                     schedule_work_review(
                         work_id=work_id,
                         succeeded=result.succeeded,
+                        complexity=getattr(result.state, "iterations", 0),
                         summary=result.summary,
                         error=result.error,
                         failure_kind=getattr(result, "failure_kind", None) or "",

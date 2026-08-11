@@ -23,6 +23,7 @@ from backend.services.glm46v import (
 )
 from backend.services.agent.reflection.runner import schedule_runtime_review
 from backend.services.agent.reflection.eval import schedule_memory_eval
+from backend.services.skills.installer import restore_installed_skills
 from backend.skills import SkillRegistry
 from backend.tools.code_tools import register_code_tools
 
@@ -67,6 +68,12 @@ class AgentRuntime:
                 return
 
             # 配置扫描和工具注册均为本地操作；全部成功后再标记初始化完成。
+            try:
+                restored = await restore_installed_skills()
+                if restored:
+                    LOGGER.info("启动恢复 %s 个外部安装的 Skill", restored)
+            except Exception:
+                LOGGER.warning("外部 Skill 恢复失败，继续使用现有文件", exc_info=True)
             self._agents.load()
             self._skills.load()
             register_code_tools()
@@ -330,6 +337,7 @@ class AgentRuntime:
             task_id=task_id,
             agent_id=request.agent_id,
             status=status,
+            complexity=event_count,
             request_text=request.user_text,
             result_summary=result_summary,
             error_message=error_message,
