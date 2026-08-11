@@ -134,6 +134,11 @@ def classify_request(
         repair_followup = _matches(_REPAIR_FOLLOWUP_PATTERNS, normalized)
         if prior_write_intent and repair_followup:
             return "code_change"
+        # 陈述式修改需求（无“修改/实现/做”等动词，如“首页的swiper顶部固定，
+        # 为你推荐做滚动处理”）在可写模式下默认按代码修改处理。用户已选择
+        # 自动编辑/全自动模式，意图就是把目标落地成代码；只有显式只读或读
+        # 关键词（前面已判定）才退回只读分析。
+        return "code_change"
     return "read_only"
 
 

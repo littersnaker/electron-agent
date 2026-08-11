@@ -19,6 +19,8 @@ from backend.services.agent.planner.request_routing import route_code_request
         ("切回读写模式，继续完成当前任务", "code_change"),
         ("恢复全自动权限", "code_change"),
         ("先分析失败原因，不要修改任何文件", "read_only"),
+        # 陈述式修改需求（无“修改/实现/做”动词）在可写模式下默认按代码修改处理。
+        ("首页的swiper顶部固定，为你推荐做滚动处理", "code_change"),
     ],
 )
 def test_mixed_read_and_write_intent_is_classified_correctly(
@@ -34,6 +36,37 @@ def test_mixed_read_and_write_intent_is_classified_correctly(
     )
 
     assert result == expected
+
+
+def test_declarative_change_request_is_code_change_in_auto_edit() -> None:
+    """无动词陈述式修改需求在 auto_edit 下应进入 code_change。"""
+
+    result = classify_request(
+        "首页的swiper顶部固定，为你推荐做滚动处理",
+        agent_mode="auto_edit",
+    )
+
+    assert result == "code_change"
+
+
+def test_declarative_change_request_stays_read_only_in_suggest() -> None:
+    """同一陈述式需求在 suggest（纯建议）模式下仍只分析。"""
+
+    result = classify_request(
+        "首页的swiper顶部固定，为你推荐做滚动处理",
+        agent_mode="suggest",
+    )
+
+    assert result == "read_only"
+
+
+def test_read_keyword_wins_over_auto_edit_default() -> None:
+    """读关键词（“解释/怎么”）在 auto_edit 下仍保持只读，不被兜底改写。"""
+
+    assert (
+        classify_request("解释一下首页的布局结构", agent_mode="auto_edit")
+        == "read_only"
+    )
 
 
 def test_read_only_complaint_switches_back_to_full_auto_tools() -> None:
