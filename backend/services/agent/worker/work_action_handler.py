@@ -19,11 +19,17 @@ from backend.services.agent.shared.resource_coordinator import (
 from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.agent.shared.workspace_tools import EditBatchResult, ReadBatchResult
+from backend.services.agent.worker.work_batch_writer import _env_int
 from backend.services.tools.code_tools import execute_code_tool
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 CheckpointCallback = Callable[[], Awaitable[None]]
 OutcomeKind = Literal["continue", "success", "failure"]
+
+# 单个 replace 的 old/new 最大字符数：超过视为整段重写，工具层直接拒绝该
+# operation，要求模型用最小定位片段重发（对齐"改已有文件只给最小片段"的
+# 结构性约束）。write（新建文件）不受此限制，仍允许完整内容。
+MAX_REPLACE_TEXT_CHARS = _env_int("CODE_AGENT_MAX_REPLACE_CHARS", 3_000, 200, 200_000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +157,11 @@ class WorkActionHandler:
                 + ", ".join(unchanged)
             )
         if fresh_sections:
-            observation_parts.append("OBSERVATION:\n" + "\n\n".join(fresh_sections))
+            total_chars = sum(len(section) for section in fresh_sections)
+            observation_parts.append(
+                f"OBSERVATION（完整内容已读取，共 {total_chars} 字符，未截断）:\n"
+                + "\n\n".join(fresh_sections)
+            )
         if not unchanged and not fresh_sections:
             observation_parts.append(f"OBSERVATION:\n{result.content}")
         state.append_transcript("\n\n".join(observation_parts))
@@ -319,6 +329,55 @@ class WorkActionHandler:
             )
             await self._env.checkpoint()
             return WorkActionOutcome("continue")
+
+        # 超长 replace 拦截：单个 replace 的 old/new 超过阈值视为整段重写，
+        # 跳过该 operation 并要求模型用最小定位片段重发。write（新建文件）
+        # 与其他合法 replace 照常执行——新文件不依赖旧文件修改，不能被超长
+        # replace 拖死（整批拒绝会让 write 永远无法落盘）。
+        oversized = [
+            operation
+            for operation in action.operations
+            if operation.type == "replace"
+            and (
+                len(operation.old_text) > MAX_REPLACE_TEXT_CHARS
+                or len(operation.new_text) > MAX_REPLACE_TEXT_CHARS
+            )
+        ]
+        if oversized:
+            executable = [
+                operation
+                for operation in action.operations
+                if operation not in oversized
+            ]
+            if not executable:
+                # 全部 operation 都是超长 replace，无可执行内容，整批拒绝。
+                self._env.state.append_transcript(
+                    f"EDIT REJECTED（replace 过大，共 {len(oversized)} 处）:\n"
+                    + "\n".join(
+                        f"- {operation.path}(old={len(operation.old_text)}字符, "
+                        f"new={len(operation.new_text)}字符)"
+                        for operation in oversized[:5]
+                    )
+                    + f"\n单个 replace 的 old/new 不得超过 {MAX_REPLACE_TEXT_CHARS} 字符。"
+                    "请只输出足以唯一定位的最小片段（通常 3~8 行）；"
+                    "需要多处修改时用多组 operation，不要整段重写。"
+                    "新建文件请用 write，不受此限制。"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue")
+            # 部分超长：跳过超长 replace，其余（含新建文件）照常执行。
+            self._env.state.append_transcript(
+                f"EDIT PARTIAL REJECTED（{len(oversized)} 处 replace 过大，已跳过）:\n"
+                + "\n".join(
+                    f"- {operation.path}(old={len(operation.old_text)}字符, "
+                    f"new={len(operation.new_text)}字符)"
+                    for operation in oversized[:5]
+                )
+                + f"\n单个 replace 的 old/new 不得超过 {MAX_REPLACE_TEXT_CHARS} 字符。"
+                "本轮已执行其余操作（含新建文件）；请下一轮用最小片段重发"
+                "这些被跳过的 replace。"
+            )
+            action.operations = executable
 
         paths = {operation.path for operation in action.operations}
         await self._lifecycle(

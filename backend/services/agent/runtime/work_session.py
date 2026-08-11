@@ -21,7 +21,6 @@ from backend.services.agent.shared.failure_summary import FailureSummary
 from backend.services.agent.shared.token_budget import TokenBudgetGuard
 from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.work_state import WorkWorkerState
-from backend.services.agent.shared.workspace_tools import file_version
 
 _FILE_HEADER = re.compile(r"^--- FILE:\s*(.+?)\s*---$", re.MULTILINE)
 _MEMORY_HEADER = re.compile(r"^## Memory · ([^\n]+)$", re.MULTILINE)
@@ -86,18 +85,10 @@ class WorkIntelligenceSession:
             f"{harness_context}\n\n{initial_context}"
         )
         self.context.relevant_files = [path for path, _ in selected]
-        # 记录“完整内容已在 transcript 中”的文件指纹：这些文件首轮就在上下文里，
-        # 后续模型再 read 时若内容未变化，工具结果瘦身会直接复用，不再重复注入。
-        if root is not None:
-            for path, _ in selected:
-                version = file_version(root, path)
-                if version and version not in {
-                    "missing",
-                    "not-file",
-                    "unreadable",
-                    "blocked-sensitive",
-                }:
-                    self.state.transcript_versions[path] = version
+        # 注意：预读文件不登记 transcript_versions 指纹。若这里预置指纹，
+        # 模型首轮 read 同一文件时会命中"未变化"瘦身，完整内容被吞，导致
+        # 模型反复 read 却始终拿不到内容（日志实测连续 5 轮只读循环）。
+        # read 的真实指纹由 work_action_handler._read 在首次注入后写入。
         dependency_state = self._dependency_state(ledger_snapshot)
         metadata = self._project_metadata(project_tree)
         file_context = "\n\n".join(

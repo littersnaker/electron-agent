@@ -171,8 +171,12 @@ def test_dependency_state_renders_verified_facts() -> None:
     assert '{"id": "W002"' in text
 
 
-def test_initialize_records_transcript_versions(tmp_path: Path) -> None:
-    """首轮注入 RELATED FILES 的文件应登记内容指纹，供后续 read 瘦身。"""
+def test_initialize_does_not_preregister_transcript_versions(tmp_path: Path) -> None:
+    """预读文件不登记内容指纹：模型首轮 read 必须拿到完整内容。
+
+    若 initialize 预置指纹，模型 read 同一文件会命中"未变化"瘦身，
+    完整内容被吞导致反复 read 死循环（日志实测连续 5 轮只读）。
+    """
 
     (tmp_path / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
     work = WorkItem(
@@ -190,7 +194,8 @@ def test_initialize_records_transcript_versions(tmp_path: Path) -> None:
         root=tmp_path,
     )
 
-    assert session.state.transcript_versions.get("a.ts")
+    # 预读内容进入首轮上下文，但不登记指纹，模型可自由 read 获取完整内容。
+    assert session.state.transcript_versions.get("a.ts") is None
     assert "--- FILE: a.ts ---" in "\n".join(session.state.transcript)
 
 
