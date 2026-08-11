@@ -523,6 +523,27 @@ class WorkActionHandler:
             await self._env.checkpoint()
             return WorkActionOutcome("continue")
 
+        if (
+            self._env.work.execution_type in {"coding", "agent"}
+            and not self._env.state.changed_files
+        ):
+            # 编码类 Work 尝试过真实写入（transcript 出现成功的 ACTION edit）却
+            # 没有任何文件变更时，说明 edit 全部失败，禁止模型谎报成功
+            # （changed_files 为空时 review/质量门也会因无变更而校验失效）。
+            # 从没尝试过 edit 的 complete（如"目标已满足无需修改"）仍放行。
+            attempted_edit = any(
+                "ACTION edit" in entry for entry in self._env.state.transcript
+            )
+            if attempted_edit:
+                self._env.state.append_transcript(
+                    "COMPLETE REJECTED: 当前 Work 尝试过写入但没有任何文件变更，"
+                    "不能标记完成。请基于最近一次 edit 的失败反馈重新生成"
+                    "最小片段的 replace；若目标确实已满足且无需修改，请在"
+                    "complete_work 中说明原因。"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue")
+
         return WorkActionOutcome(
             "success",
             summary=action.summary or f"{self._env.work.title} 已完成",

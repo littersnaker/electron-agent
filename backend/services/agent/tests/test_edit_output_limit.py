@@ -54,6 +54,64 @@ def _make_handler(tmp_path: Path, state: WorkWorkerState) -> WorkActionHandler:
 
 
 @pytest.mark.asyncio
+async def test_complete_rejected_when_edit_attempted_but_no_change() -> None:
+    """尝试过 edit 但零变更时，complete_work 应被拒绝（防谎报成功）。"""
+
+    state = WorkWorkerState()
+    # 模拟成功注入过一次 ACTION edit（_edit 成功分支会写该记录），
+    # 但 changed_files 为空——说明 edit 全部失败。
+    state.transcript.append("ACTION edit: 修改首页\nCHANGED: []\nDIFF:")
+    handler = _make_handler(tmp_path=Path("."), state=state)
+    action = AgentAction(
+        action="complete_work",
+        work_id="W001",
+        summary="已完成",
+    )
+
+    outcome = await handler._complete(action)
+
+    assert outcome.kind == "continue"
+    joined = "\n".join(state.transcript)
+    assert "COMPLETE REJECTED" in joined
+    assert "尝试过写入但没有任何文件变更" in joined
+
+
+@pytest.mark.asyncio
+async def test_complete_accepted_without_edit_attempt() -> None:
+    """从未尝试过 edit 的 complete（目标已满足无需修改）应放行。"""
+
+    state = WorkWorkerState()
+    handler = _make_handler(tmp_path=Path("."), state=state)
+    action = AgentAction(
+        action="complete_work",
+        work_id="W001",
+        summary="目标已满足，无需修改",
+    )
+
+    outcome = await handler._complete(action)
+
+    assert outcome.kind == "success"
+
+
+@pytest.mark.asyncio
+async def test_complete_accepted_with_changed_files() -> None:
+    """coding Work 有真实文件变更时，complete_work 正常通过。"""
+
+    state = WorkWorkerState()
+    state.changed_files.append("a.ts")
+    handler = _make_handler(tmp_path=Path("."), state=state)
+    action = AgentAction(
+        action="complete_work",
+        work_id="W001",
+        summary="已完成",
+    )
+
+    outcome = await handler._complete(action)
+
+    assert outcome.kind == "success"
+
+
+@pytest.mark.asyncio
 async def test_oversized_replace_is_rejected_before_write(tmp_path, monkeypatch) -> None:
     """超长 replace 应在执行工具前被拒绝，文件不被修改。"""
 
