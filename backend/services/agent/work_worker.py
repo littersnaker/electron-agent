@@ -59,6 +59,8 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 MAX_BATCH_WRITE_FILES = _env_int("CODE_AGENT_BATCH_WRITE_FILES", 16, 1, 64)
+# 单轮模型输出上限：超过说明模型在整文件重写或冗余输出，注入警告引导精确修改。
+MAX_WORK_OUTPUT_TOKENS = _env_int("CODE_AGENT_MAX_OUTPUT_TOKENS", 8_000, 1_000, 200_000)
 
 
 async def _try_batch_write(
@@ -949,6 +951,12 @@ def _worker_prompt(
   read 验证，路径正确就直接 complete_work。
 - 如果确认目标文件已满足验收标准或无法确定修改点，直接 complete_work 说明原因，
   不要返回空 operations 的 edit。
+- 一次 edit 必须用多组 operations 完成本 Work 当前轮能确定的所有修改点；禁止
+  “改一处 → read 验证 → 再改下一处”的小步循环，也不要逐轮拆分成多个 edit。
+- edit 写入成功后不要 read 刚写过的文件验证：工具 OBSERVATION 已返回变更结果，
+  直接 complete_work。read 只用于首次了解文件或编辑前的现状核对。
+- write 只用于新建文件；修改已存在文件一律用 replace（可在同一 edit 内多组），
+  禁止对已存在文件整文件 write 重写。
 - 自动编辑模式无法运行命令：需要运行构建/测试才能验证的任务，做静态修复后应在
   complete_work 中说明“需切换全自动模式运行验证命令”。
 - 敏感路径在目录树和工具层都会被过滤；收到 SECURITY SKIP 后不得重试该路径，改读 .env.example 或配置类型。
@@ -1213,6 +1221,25 @@ async def execute_work(
             state.attempt_iterations,
             usage.total,
         )
+
+        # 大输出监控：单轮 completion 过大说明模型在整文件重写或冗余输出，
+        # 注入警告引导下一轮改用多组 replace 精确修改；连续两次升级措辞促收尾。
+        if usage.completion > MAX_WORK_OUTPUT_TOKENS:
+            large_outputs = int(state.quality.get("largeOutputCount") or 0) + 1
+            state.quality["largeOutputCount"] = large_outputs
+            if large_outputs >= 2:
+                state.append_transcript(
+                    f"LARGE OUTPUT WARNING（第 {large_outputs} 次）：上一轮输出 "
+                    f"{usage.completion} Tokens，已连续大段输出。禁止整文件 write "
+                    "重写，改用多组 replace 精确修改缺失部分，并在本轮 complete_work "
+                    "收尾；继续超大输出会拖慢执行并浪费 Token。"
+                )
+            else:
+                state.append_transcript(
+                    f"LARGE OUTPUT WARNING：上一轮输出 {usage.completion} Tokens，"
+                    f"超出单轮上限 {MAX_WORK_OUTPUT_TOKENS}。请改用多组 replace "
+                    "精确修改，禁止整文件 write 重写；输出只包含必要变更。"
+                )
 
         try:
             action = parse_agent_action(text)

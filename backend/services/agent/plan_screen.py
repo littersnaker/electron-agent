@@ -8,6 +8,7 @@ Planner 可能因幻觉把已存在文件分配成空 targetFiles 或不存在�
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.utils.paths import resolve_inside
+
+LOGGER = logging.getLogger(__name__)
 
 MAX_SCREEN_WORKS = 16
 MAX_CANDIDATES_PER_WORK = 8
@@ -157,17 +160,22 @@ async def refine_plan_works(
         {"currentWorklist": worklist, "anomalies": anomalies},
         ensure_ascii=False,
     )
-    text, usage, model = await GATEWAY.complete(
-        preferred_model_id=preferred_model_id,
-        credentials=credentials,
-        messages=[
-            LlmMessage("system", _REFINE_SYSTEM),
-            LlmMessage("user", user),
-        ],
-        temperature=0.1,
-        timeout_seconds=120,
-        audit={"agentRole": "plan_screen"},
-    )
+    try:
+        text, usage, model = await GATEWAY.complete(
+            preferred_model_id=preferred_model_id,
+            credentials=credentials,
+            messages=[
+                LlmMessage("system", _REFINE_SYSTEM),
+                LlmMessage("user", user),
+            ],
+            temperature=0.1,
+            timeout_seconds=120,
+            audit={"agentRole": "plan_screen"},
+        )
+    except Exception as exc:
+        # 计划细化失败不终止任务：保留基础计划继续执行，异常信息交给调用方提示。
+        LOGGER.warning("WorkList 计划细化失败，使用基础计划继续：%s", exc)
+        return LlmUsage(), "", []
     by_id = {work.id: work for work in plan.works}
     applied: list[str] = []
     try:

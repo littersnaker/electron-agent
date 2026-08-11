@@ -423,12 +423,30 @@ async def stream_code_agent(
                         ),
                     }
                 )
-                screen_usage, screen_model, applied_ids = await refine_plan_works(
-                    prepared.plan,
-                    anomalies,
-                    preferred_model_id,
-                    credentials,
-                )
+                try:
+                    screen_usage, screen_model, applied_ids = await refine_plan_works(
+                        prepared.plan,
+                        anomalies,
+                        preferred_model_id,
+                        credentials,
+                    )
+                except Exception as exc:
+                    # 计划细化 LLM 调用失败（缺 Key / 超时 / 供应商错误）不终止任务：
+                    # 使用基础计划继续执行，避免用户整次任务白等。
+                    yield encode_sse(
+                        {
+                            "type": "AGENT_LIFECYCLE",
+                            "payload": lifecycle(
+                                role="high_level_planner",
+                                status="completed",
+                                detail=(
+                                    f"计划细化失败（{str(exc)[:160]}），"
+                                    "使用基础计划继续执行。"
+                                ),
+                            ),
+                        }
+                    )
+                    screen_usage, screen_model, applied_ids = LlmUsage(), "", []
                 prepared.usage = LlmUsage(
                     prompt=prepared.usage.prompt + screen_usage.prompt,
                     completion=prepared.usage.completion + screen_usage.completion,
