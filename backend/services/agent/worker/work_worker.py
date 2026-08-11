@@ -46,7 +46,7 @@ from backend.services.llm.protocols import ProviderRequestError
 from backend.services.llm.types import LlmMessage
 
 LOGGER = logging.getLogger(__name__)
-MAX_INVALID_PROTOCOL_ROUNDS = 3
+MAX_INVALID_PROTOCOL_ROUNDS = 2
 # 单轮模型输出上限：超过说明模型在整文件重写或冗余输出，注入警告引导精确修改。
 MAX_WORK_OUTPUT_TOKENS = _env_int("CODE_AGENT_MAX_OUTPUT_TOKENS", 8_000, 1_000, 200_000)
 
@@ -282,7 +282,6 @@ async def execute_work(
             )
         state.model_name = model.name
         state.iterations += 1
-        state.attempt_iterations += 1
         await emit(
             "usage",
             {
@@ -323,6 +322,9 @@ async def execute_work(
             action = parse_agent_action(text)
             state.invalid_rounds = 0
             state.attempt_invalid_rounds = 0
+            # 只有协议合法的有效轮才消耗迭代预算：自然语言/非法 JSON 等协议
+            # 错误轮不占用 10 轮上限，避免模型反复出错把有效工作挤出预算。
+            state.attempt_iterations += 1
         except ValueError as exc:
             state.invalid_rounds += 1
             state.attempt_invalid_rounds += 1
@@ -348,10 +350,10 @@ async def execute_work(
                     '{"action":"complete_work","workId":"W001","summary":"说明原因"}，'
                     "不要返回空 operations 的 edit。"
                 )
-            if state.attempt_invalid_rounds >= 3:
+            if state.attempt_invalid_rounds >= 2:
                 feedback += (
-                    "\n严重警告：已连续 3 次协议错误。下一轮请直接复制上面的示例并只替换"
-                    "路径与 ID，不要改变 JSON 结构；再错将终止本次尝试。"
+                    "\n严重警告：已连续 2 次协议错误。下一轮必须直接复制上面的示例并只替换"
+                    "路径与 ID，不要改变 JSON 结构；再错将终止本次尝试并交回 Planner。"
                 )
             state.append_transcript(feedback)
             if state.attempt_invalid_rounds >= MAX_INVALID_PROTOCOL_ROUNDS:

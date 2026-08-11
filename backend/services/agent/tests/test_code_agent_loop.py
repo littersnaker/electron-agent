@@ -580,7 +580,7 @@ async def test_runtime_protocol_failure_retries_with_clean_attempt_state(
         worker_calls += 1
         content = (
             "我还需要继续分析"
-            if worker_calls <= 5
+            if worker_calls <= 2
             else json.dumps(
                 {
                     "action": "complete_work",
@@ -612,7 +612,7 @@ async def test_runtime_protocol_failure_retries_with_clean_attempt_state(
     assert result.replans == 0
     assert result.worklist["succeeded"] == 1
     assert result.worklist["items"][0]["attempts"] == 2
-    assert worker_calls == 6
+    assert worker_calls == 3
 
 
 @pytest.mark.asyncio
