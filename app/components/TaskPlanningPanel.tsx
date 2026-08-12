@@ -295,7 +295,7 @@ export default function TaskPlanningPanel({
                 width: `${displayProgress}%`,
                 background: displayFailed
                   ? "var(--accent-red)"
-                  : "linear-gradient(90deg, #0a84ff, #bf5af2)",
+                  : "linear-gradient(90deg, var(--accent-from), var(--accent-to))",
               }}
             />
           </div>

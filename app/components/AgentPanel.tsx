@@ -224,7 +224,8 @@ export default function AgentPanel({
           className="block h-full rounded-full transition-[width] duration-500"
           style={{
             width: `${summary.progress}%`,
-            background: "linear-gradient(90deg, #0a84ff, #bf5af2)",
+            background:
+              "linear-gradient(90deg, var(--accent-from), var(--accent-to))",
           }}
         />
       </div>

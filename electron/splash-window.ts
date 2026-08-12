@@ -12,6 +12,8 @@ interface StartupColors {
   muted: string;
   track: string;
   glow: string;
+  /** 进度条填充渐变（随主题深浅自动切换，对齐应用主色）。 */
+  bar: string;
 }
 
 /** 返回加载页的主题颜色。 */
@@ -24,6 +26,7 @@ function resolveStartupColors(theme: AppTheme): StartupColors {
         muted: "rgba(235,235,245,.58)",
         track: "rgba(255,255,255,.08)",
         glow: "rgba(10,132,255,.28)",
+        bar: "linear-gradient(90deg,#5c5c63,#3f3f46)",
       }
     : {
         panel: "rgba(250,251,253,.97)",
@@ -32,6 +35,7 @@ function resolveStartupColors(theme: AppTheme): StartupColors {
         muted: "rgba(30,30,35,.58)",
         track: "rgba(15,23,42,.08)",
         glow: "rgba(10,132,255,.2)",
+        bar: "linear-gradient(90deg,#168dff,#0071e3)",
       };
 }
 
@@ -49,7 +53,7 @@ function buildStartupHtml(theme: AppTheme): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  :root{--panel:${colors.panel};--border:${colors.border};--text:${colors.text};--muted:${colors.muted};--track:${colors.track};--glow:${colors.glow}}
+  :root{--panel:${colors.panel};--border:${colors.border};--text:${colors.text};--muted:${colors.muted};--track:${colors.track};--glow:${colors.glow};--bar:${colors.bar}}
   *{box-sizing:border-box}
   html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;user-select:none}
   body{display:grid;place-items:center;padding:10px}
@@ -63,7 +67,7 @@ function buildStartupHtml(theme: AppTheme): string {
   h1{min-height:26px;margin:0;color:var(--text);font-size:18px;font-weight:650;letter-spacing:-.02em}
   p{min-height:36px;max-width:340px;margin:8px 0 22px;color:var(--muted);font-size:12px;line-height:1.55}
   .progress{width:100%;height:6px;overflow:hidden;border-radius:999px;background:var(--track);box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
-  .bar{width:12%;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0a84ff,#5aa8ff,#bf5af2);box-shadow:0 0 16px rgba(10,132,255,.36);transition:width 380ms cubic-bezier(.2,.8,.2,1)}
+  .bar{width:12%;height:100%;border-radius:inherit;background:var(--bar);box-shadow:0 0 16px var(--glow);transition:width 380ms cubic-bezier(.2,.8,.2,1)}
   .footer{display:flex;width:100%;justify-content:space-between;margin-top:12px;color:var(--muted);font-size:10px;letter-spacing:.02em}
   .dots span{display:inline-block;animation:dots 1.2s ease-in-out infinite}.dots span:nth-child(2){animation-delay:.16s}.dots span:nth-child(3){animation-delay:.32s}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -116,7 +120,7 @@ export async function createStartupWindow(
     fullscreenable: false,
     show: false,
     center: true,
-    alwaysOnTop: true,
+    // 普通层级即可：启动窗口不应始终置顶挡住其他应用内容。
     skipTaskbar: true,
     hasShadow: true,
     webPreferences: {
