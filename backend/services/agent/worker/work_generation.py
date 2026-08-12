@@ -107,13 +107,30 @@ async def _try_generate_all_files(
     state.model_name = model.name
     try:
         action = parse_agent_action(text)
-    except ValueError:
+    except ValueError as exc:
+        # 解析失败注入反馈而不是静默放弃：模型能据此修正，而不是在常规
+        # 循环里盲目探索耗尽尝试次数（日志实测：缺 action 字段的 JSON 被
+        # 静默丢弃后任务反复 search/read 直到 CODE_AGENT_MAX_WORK_ATTEMPTS）。
+        state.append_transcript(
+            "GENERATE PROTOCOL ERROR: 返回的不是合法 edit 动作 JSON，"
+            f"原因：{str(exc)[:200]}\n"
+            "必须直接复制下面的示例并只替换路径与内容，不要改变结构：\n"
+            '{"action":"edit","workId":"W001","summary":"创建全部文件",'
+            '"operations":[{"type":"write","path":"相对路径",'
+            '"content":"完整文件内容","reason":"新建"}]}'
+        )
         return None
     if action.action != "edit" or not action.operations:
-        state.append_transcript("GENERATE ALL SKIPPED: 模型未返回创建动作")
+        state.append_transcript(
+            "GENERATE ALL SKIPPED: 模型未返回创建动作（action 必须为 edit 且 operations 非空）。"
+            "请直接返回带 action 字段的 edit JSON。"
+        )
         return None
     if any(operation.type != "write" for operation in action.operations):
-        state.append_transcript("GENERATE ALL SKIPPED: 一键生成只接受 write 新建操作")
+        state.append_transcript(
+            "GENERATE ALL SKIPPED: 一键生成只接受 write 新建操作；"
+            "如需修改已有文件请走常规 edit。"
+        )
         return None
     gate = guard_edit(
         root=root,

@@ -383,9 +383,20 @@ async def stream_autonomous_loop(
                             f"{item.id}({item.attempts} 次)"
                             for item in exhausted_runtime
                         )
+                        # 附上最近一次真实原因（如未配置 API Key），避免 UI
+                        # 只看到笼统的"连续错误"而无法定位配置问题。
+                        reasons = []
+                        for item in exhausted_runtime:
+                            reason = failure_observations.get(
+                                item.id, item.error or ""
+                            )
+                            reason = " ".join(str(reason).split())[:200]
+                            if reason:
+                                reasons.append(f"{item.id}：{reason}")
+                        suffix = f"；最近原因：{'；'.join(reasons)}" if reasons else ""
                         raise ValueError(
                             "以下 Work 连续发生模型协议、超时或守卫错误，"
-                            f"已停止创建无关代码返工项：{details}"
+                            f"已停止创建无关代码返工项：{details}{suffix}"
                         )
                     for item in runtime_failed:
                         ledger.retry_runtime_failure(

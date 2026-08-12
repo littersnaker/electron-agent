@@ -21,8 +21,8 @@ from backend.services.agent.runtime.work_session import WorkIntelligenceSession
 from backend.services.agent.shared.loop_protocol import parse_agent_action
 from backend.services.agent.shared.loop_support import ExecutionMode, usage_add
 from backend.services.agent.shared.resource_coordinator import WorkspaceResourceCoordinator
-from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.tool_registry import build_openai_tools
+from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.work_state import (
     CheckpointCallback,
     EmitCallback,
@@ -50,6 +50,35 @@ LOGGER = logging.getLogger(__name__)
 MAX_INVALID_PROTOCOL_ROUNDS = 2
 # 单轮模型输出上限：超过说明模型在整文件重写或冗余输出，注入警告引导精确修改。
 MAX_WORK_OUTPUT_TOKENS = _env_int("CODE_AGENT_MAX_OUTPUT_TOKENS", 8_000, 1_000, 200_000)
+
+
+def _missing_provider_key(
+    preferred_model_id: str, credentials: LlmCredentials
+) -> tuple[bool, str]:
+    """判断 worker 手动选定的模型是否缺供应商 Key。
+
+    返回 ``(missing, provider_label)``：
+    - auto 路由 / 未知模型 / 已配置 Key → ``(False, "")``（放行，交由 gateway 决策）
+    - 手动选定且该供应商未配置 Key → ``(True, provider_label)``
+    """
+
+    from backend.services.llm.catalog import get_model, get_provider
+    from backend.services.llm.custom_models import get_custom_model_definition
+
+    if not preferred_model_id or preferred_model_id == "auto":
+        return False, ""  # auto 路由交给 gateway 决策
+    model = get_custom_model_definition(preferred_model_id) or get_model(
+        preferred_model_id
+    )
+    if model is None:
+        return False, ""  # 未知模型交由 gateway 报错
+    if credentials.get(model.provider):
+        return False, ""
+    try:
+        label = get_provider(model.provider).name
+    except ValueError:
+        label = str(model.provider)
+    return True, label
 
 
 async def execute_work(
@@ -217,6 +246,28 @@ async def execute_work(
             next_attempt_iteration,
             session_prompt.estimated_tokens,
         )
+        # 未配置 Key 快速失败：确定性错误，重试 N 次结果一样，不应发起无效
+        # 调用或消耗运行时重试次数（否则会在 runner 层白等 2 次后才报"连续
+        # 错误"，且真实原因被吞成笼统汇总）。auto 路由交由 gateway 决策。
+        missing_key, provider_label = _missing_provider_key(
+            preferred_model_id, credentials
+        )
+        if missing_key:
+            error = (
+                f"未配置 {provider_label} API Key，请在设置中填写后再执行。"
+                "这是凭证配置问题，重试无法解决。"
+            )
+            session.record_failure(action="missing_api_key", error=error)
+            state.runtime_failures += 1
+            await checkpoint()
+            return WorkExecutionResult(
+                work.id,
+                False,
+                "",
+                error,
+                state,
+                failure_kind="runtime",
+            )
         try:
             text, usage, model = await GATEWAY.complete(
                 preferred_model_id=preferred_model_id,

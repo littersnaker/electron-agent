@@ -364,13 +364,17 @@ _REVIEW_SYSTEM = """你是写入结果审查 Agent。目标文件已经一次性
 
 _GENERATE_ALL_SYSTEM = """你是从零生成 Agent。项目为空，CURRENT WORK 定义了要构建的内容，
 目标文件尚未创建。请一次性返回一个 edit 动作 JSON，用 operations(type=write) 创建全部需要的文件，
-每个文件给出完整内容。禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。"""
+每个文件给出完整内容。禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。
+必须包含 action 字段，示例：
+{"action":"edit","workId":"W001","summary":"创建全部页面","operations":[{"type":"write","path":"src/pages/index/index.tsx","content":"完整文件内容","reason":"新建首页"}]}"""
 
 _GENERATE_MISSING_SYSTEM = """你是新增文件生成 Agent。CURRENT WORK 定义了要创建的内容，
 目标文件尚不存在；项目里已有其他代码，请只创建缺失的新文件，不要重写已有文件。
 一次性返回一个 edit 动作 JSON，用 operations(type=write) 创建全部缺失文件，
 每个文件给出完整可运行内容；禁止空文件、占位符或分步填空。
-禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。"""
+禁止 read/search/run，禁止附加 Markdown。输出必须能被 json.loads 解析。
+必须包含 action 字段，示例：
+{"action":"edit","workId":"W001","summary":"创建缺失模块","operations":[{"type":"write","path":"src/features/shop/data/products.js","content":"完整文件内容","reason":"新建数据层"}]}"""
 
 
 __all__ = [
