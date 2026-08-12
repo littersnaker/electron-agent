@@ -144,6 +144,7 @@ def _parse_github_spec(source: str) -> tuple[str, str, str, str]:
 
     if not GITHUB_REPO_PATTERN.fullmatch(f"{owner}/{repo}"):
         raise ValueError(f"GitHub 仓库名不合法：{owner}/{repo}")
+    repo = repo.removesuffix(".git")
     subpath = subpath.strip("/")
     if ".." in subpath.split("/"):
         raise ValueError("GitHub Skill 路径不能包含 ..")
@@ -281,6 +282,33 @@ def _extract_skill_files(
             skill_text = extracted.read().decode("utf-8", errors="replace")
 
     return skill_text, extra_files
+
+
+def _find_skill_directories(tarball_bytes: bytes) -> list[str]:
+    """扫描 tarball 中所有含 SKILL.md 的目录（相对仓库根路径，排序去重）。"""
+
+    try:
+        archive = tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz")
+    except tarfile.TarError as exc:
+        raise ValueError(f"仓库压缩包解析失败：{exc}") from exc
+
+    with archive:
+        members = [member for member in archive.getmembers() if member.isfile()]
+        if not members:
+            raise ValueError("仓库压缩包中没有文件")
+        root_name = members[0].name.split("/", 1)[0]
+        directories: set[str] = set()
+        for member in members:
+            full_relative = (
+                member.name[len(root_name) + 1 :]
+                if member.name.startswith(root_name)
+                else member.name
+            )
+            if full_relative.lower().endswith("skill.md"):
+                parent = full_relative.rsplit("/", 1)[0]
+                if parent:
+                    directories.add(parent)
+    return sorted(directories)
 
 
 def _encode_extra_files(extra_files: dict[str, bytes]) -> dict[str, dict[str, str]]:
@@ -461,8 +489,9 @@ async def _save_record(record: dict[str, Any]) -> None:
             """
             INSERT INTO installed_skills (
                 id, name, version, description, source_url, source_format,
-                content_json, files_json, installed_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enabled, agent_ids, content_json, files_json,
+                installed_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 version = excluded.version,
@@ -480,6 +509,8 @@ async def _save_record(record: dict[str, Any]) -> None:
                 record["description"],
                 record["source_url"],
                 record["source_format"],
+                record.get("enabled", 0),
+                dumps_json(record.get("agent_ids") or []),
                 record["content_json"],
                 record["files_json"],
                 record["installed_at"],
@@ -567,20 +598,17 @@ async def install_skill_from_url(url: str) -> dict[str, Any]:
     }
 
 
-async def install_skill_from_github(source: str) -> dict[str, Any]:
-    """GitHub 安装流：解析 → 下载 tarball → 提取目录 → 转换 → 导出 → 入库。"""
+async def _install_extracted(
+    *,
+    skill_text: str,
+    extra_files: dict[str, bytes],
+    display_url: str,
+) -> dict[str, Any]:
+    """把已提取的 Skill 内容完成 转换 → 导出 → 入库，返回摘要。"""
 
-    owner, repo, ref, subpath = _parse_github_spec(source)
-    tarball = await _download_github_tarball(owner, repo, ref)
-    skill_text, extra_files = _extract_skill_files(tarball, subpath)
-    converted = _convert_raw_content(skill_text, f"github:{owner}/{repo}")
+    converted = _convert_raw_content(skill_text, display_url)
     skill_yaml, prompt_text = _build_skill_yaml(converted)
     skill_id = str(skill_yaml["id"])
-    display_url = (
-        f"https://github.com/{owner}/{repo}"
-        + (f"/tree/{ref}" if ref else "")
-        + (f"/{subpath}" if subpath else "")
-    )
 
     try:
         _export_files(skill_id, skill_yaml, prompt_text, extra_files)
@@ -617,6 +645,78 @@ async def install_skill_from_github(source: str) -> dict[str, Any]:
     }
 
 
+async def install_skill_from_github(source: str) -> dict[str, Any]:
+    """GitHub 安装流：解析 → 下载 tarball → 提取 → 转换 → 导出 → 入库。
+
+    未指定子目录时：
+    - 仓库根目录含 SKILL.md → 安装单个 Skill；
+    - 根目录没有 SKILL.md → 自动批量安装仓库内所有含 SKILL.md 的目录。
+    """
+
+    owner, repo, ref, subpath = _parse_github_spec(source)
+    tarball = await _download_github_tarball(owner, repo, ref)
+    base_url = (
+        f"https://github.com/{owner}/{repo}"
+        + (f"/tree/{ref}" if ref else "")
+    )
+
+    if subpath:
+        skill_text, extra_files = _extract_skill_files(tarball, subpath)
+        installed = await _install_extracted(
+            skill_text=skill_text,
+            extra_files=extra_files,
+            display_url=f"{base_url}/{subpath}",
+        )
+        return {"installed": [installed], "failed": [], "total": 1}
+
+    # 未指定子目录：先尝试仓库根目录的 SKILL.md。
+    try:
+        skill_text, extra_files = _extract_skill_files(tarball, "")
+        installed = await _install_extracted(
+            skill_text=skill_text,
+            extra_files=extra_files,
+            display_url=base_url,
+        )
+        return {"installed": [installed], "failed": [], "total": 1}
+    except ValueError as exc:
+        if "SKILL.md" not in str(exc):
+            raise
+
+    # 根目录没有 SKILL.md → 批量安装仓库内所有 Skill。
+    directories = _find_skill_directories(tarball)
+    if not directories:
+        raise ValueError("仓库中没有找到任何 SKILL.md")
+    installed_list: list[dict[str, Any]] = []
+    failed_list: list[dict[str, Any]] = []
+    for directory in directories:
+        try:
+            skill_text, extra_files = _extract_skill_files(tarball, directory)
+            installed_list.append(
+                await _install_extracted(
+                    skill_text=skill_text,
+                    extra_files=extra_files,
+                    display_url=f"{base_url}/{directory}",
+                )
+            )
+        except Exception as exc:
+            failed_list.append(
+                {"path": directory, "error": str(exc)[:300]}
+            )
+            LOGGER.warning("批量安装失败：%s（%s）", directory, exc)
+
+    LOGGER.info(
+        "GitHub 批量安装完成：成功 %s / 失败 %s / 共 %s",
+        len(installed_list),
+        len(failed_list),
+        len(directories),
+    )
+    return {
+        "installed": installed_list,
+        "failed": failed_list,
+        "total": len(directories),
+    }
+
+
 async def install_skill(source: str) -> dict[str, Any]:
     """统一安装入口：自动识别 GitHub 仓库标识与 http(s) 直链。"""
 
@@ -627,7 +727,8 @@ async def install_skill(source: str) -> dict[str, Any]:
     if lowered.startswith(("https://github.com/", "http://github.com/")):
         return await install_skill_from_github(value)
     if lowered.startswith(("http://", "https://")):
-        return await install_skill_from_url(value)
+        installed = await install_skill_from_url(value)
+        return {"installed": [installed], "failed": [], "total": 1}
     owner_repo_part = value.split("@", 1)[0]
     owner_repo_segments = owner_repo_part.split("/")
     if len(owner_repo_segments) >= 2 and GITHUB_REPO_PATTERN.fullmatch(
@@ -707,9 +808,12 @@ async def list_installed_skills() -> list[dict[str, Any]]:
     async with open_database() as connection:
         cursor = await connection.execute(
             """
-            SELECT id, name, version, description, source_url, source_format,
-                   installed_at, updated_at
-            FROM installed_skills
+            SELECT s.id, s.name, s.version, s.description, s.source_url,
+                   s.source_format, s.enabled, s.agent_ids,
+                   s.installed_at, s.updated_at,
+                   COALESCE(u.hit_count, 0) AS hit_count
+            FROM installed_skills s
+            LEFT JOIN skill_usage u ON u.skill_id = s.id
             ORDER BY installed_at DESC
             """
         )
@@ -726,9 +830,121 @@ async def list_installed_skills() -> list[dict[str, Any]]:
                 "description": str(row["description"]),
                 "sourceUrl": str(row["source_url"]),
                 "sourceFormat": str(row["source_format"]),
+                "enabled": bool(row["enabled"]),
+                "agentIds": loads_json(str(row["agent_ids"] or "[]"), []),
+                "hitCount": int(row["hit_count"] or 0),
                 "installedAt": str(row["installed_at"]),
                 "updatedAt": str(row["updated_at"]),
                 "filesExist": (_user_skill_root() / skill_id / "skill.yaml").is_file(),
             }
         )
     return skills
+
+
+async def update_skill_config(
+    skill_id: str,
+    *,
+    enabled: bool,
+    agent_ids: list[str],
+) -> dict[str, Any]:
+    """更新 Skill 的启用配置：总开关与绑定的 Agent 列表。"""
+
+    skill_id = (skill_id or "").strip()
+    normalized_agents = list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in (agent_ids or [])
+            if str(item).strip()
+        )
+    )
+    async with open_database() as connection:
+        cursor = await connection.execute(
+            "SELECT id FROM installed_skills WHERE id = ?",
+            (skill_id,),
+        )
+        if await cursor.fetchone() is None:
+            raise KeyError(f"未安装 Skill：{skill_id}")
+        if enabled:
+            count_cursor = await connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM installed_skills
+                WHERE enabled = 1 AND id != ?
+                """,
+                (skill_id,),
+            )
+            count_row = await count_cursor.fetchone()
+            if count_row is not None and int(count_row["count"]) >= 50:
+                raise ValueError("同时启用的 Skill 不能超过 50 个")
+        await connection.execute(
+            """
+            UPDATE installed_skills
+            SET enabled = ?, agent_ids = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                1 if enabled else 0,
+                dumps_json(normalized_agents),
+                utc_now_iso(),
+                skill_id,
+            ),
+        )
+    return {"id": skill_id, "enabled": enabled, "agentIds": normalized_agents}
+
+
+async def list_enabled_skills_for_agent(
+    agent_id: str,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """返回绑定到指定 Agent 且已启用的 Skill 候选池（上限 50 条）。"""
+
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        return []
+    async with open_database() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT id, name, description, content_json
+            FROM installed_skills
+            WHERE enabled = 1 AND agent_ids LIKE ?
+            ORDER BY installed_at DESC
+            LIMIT ?
+            """,
+            (f'%"{agent_id}"%', max(1, min(limit, 200))),
+        )
+        rows = await cursor.fetchall()
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        content = loads_json(str(row["content_json"] or "{}"), {})
+        skill_yaml = content.get("yaml") if isinstance(content, dict) else None
+        tags = (
+            tuple(str(item) for item in skill_yaml.get("tags") or [])
+            if isinstance(skill_yaml, dict)
+            else ()
+        )
+        candidates.append(
+            {
+                "id": str(row["id"]),
+                "name": str(row["name"]),
+                "description": str(row["description"]),
+                "tags": tags,
+            }
+        )
+    return candidates
+
+
+async def record_skill_usage(skill_id: str) -> None:
+    """记录一次 Skill 被实际选中使用的次数。"""
+
+    async with open_database() as connection:
+        await connection.execute(
+            """
+            INSERT INTO skill_usage (skill_id, hit_count, last_used_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(skill_id) DO UPDATE SET
+                hit_count = hit_count + 1,
+                last_used_at = excluded.last_used_at
+            """,
+            (skill_id, utc_now_iso()),
+        )

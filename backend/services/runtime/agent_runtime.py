@@ -125,18 +125,12 @@ class AgentRuntime:
                 *self._skills.resolve(registry_skill_ids),
                 *resolve_builtin_skills(builtin_skill_ids),
             ]
-            # 兼容测试替身和旧版 SkillRegistry：只有实现动态匹配接口时才启用。
-            matcher = getattr(self._skills, "match", None)
-            dynamic_skills = (
-                matcher(
-                    request.user_text,
-                    exclude_ids=registered.config.skills,
-                    limit=2,
-                )
-                if callable(matcher)
-                else []
+            # 外部启用的 Skill 作为候选池：只取绑定当前 Agent 的已启用项，
+            # 由打分器从候选里选 top 2 加载全文，避免全量注入造成上下文噪音。
+            dynamic_skills = await self._select_enabled_skills(
+                agent_id=registered.config.id,
+                task_text=request.user_text,
             )
-            # 动态 Skill 只在标签命中时加入，避免普通代码任务承担无关 UI Prompt。
             skills = [*fixed_skills, *dynamic_skills]
             context = self._context.build(
                 messages=request.messages,
@@ -249,6 +243,50 @@ class AgentRuntime:
         finally:
             request_audit.reset_audit_context(audit_token)
             await self._tasks.discard_finished()
+
+    async def _select_enabled_skills(
+        self,
+        *,
+        agent_id: str,
+        task_text: str,
+    ) -> list[SkillDefinition]:
+        """从绑定当前 Agent 的启用 Skill 候选池中选出最相关的少量 Skill。"""
+
+        from backend.services.skills.installer import (
+            list_enabled_skills_for_agent,
+            record_skill_usage,
+        )
+        from backend.services.skills.matcher import SkillMatcher
+
+        try:
+            candidates = await list_enabled_skills_for_agent(agent_id, limit=50)
+        except Exception:
+            # 数据库尚未初始化（如部分测试环境）时，跳过动态 Skill。
+            return []
+        if not candidates:
+            return []
+        selected = SkillMatcher().match(
+            task_text=task_text,
+            candidates=candidates,
+            limit=2,
+        )
+        resolved: list[SkillDefinition] = []
+        for item in selected:
+            skill_id = (
+                str(item["id"])
+                if isinstance(item, dict)
+                else item.id
+            )
+            try:
+                resolved.append(self._skills.resolve((skill_id,))[0])
+            except KeyError:
+                continue
+            try:
+                await record_skill_usage(skill_id)
+            except Exception:
+                # 使用率统计失败不影响主流程。
+                pass
+        return resolved
 
     async def execute(self, request: RuntimeRequest) -> list[str]:
         """收集完整事件列表，供非流式调用方和测试使用。"""

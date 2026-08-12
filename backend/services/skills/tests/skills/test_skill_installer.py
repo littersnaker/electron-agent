@@ -195,6 +195,7 @@ def _make_tarball(files: dict[str, str | bytes], root: str = "repo-main") -> byt
     ("source", "expected"),
     [
         ("owner/repo", ("owner", "repo", "", "")),
+        ("owner/repo.git", ("owner", "repo", "", "")),
         ("owner/repo/path/to/skill", ("owner", "repo", "", "path/to/skill")),
         ("owner/repo@main", ("owner", "repo", "main", "")),
         ("owner/repo@dev/path", ("owner", "repo", "dev", "path")),
@@ -295,9 +296,12 @@ async def test_install_from_github_full_flow(
 
     monkeypatch.setattr(installer, "_download_github_tarball", fake_tarball)
 
-    installed = await installer.install_skill_from_github(
+    result = await installer.install_skill_from_github(
         "acme/skills/skills/order-triage"
     )
+    assert result["total"] == 1
+    assert result["failed"] == []
+    installed = result["installed"][0]
     assert installed["id"] == "order-review-assistant"
     assert installed["extraFileCount"] == 2
 
@@ -340,13 +344,190 @@ async def test_install_skill_unified_entry(
     monkeypatch.setattr(installer, "_download_github_tarball", fake_tarball)
     monkeypatch.setattr(installer, "_download_text", fake_text)
 
-    from_github = await installer.install_skill("acme/skills")
+    from_github = (await installer.install_skill("acme/skills"))["installed"][0]
     assert from_github["id"] == "order-review-assistant"
     await installer.uninstall_skill("order-review-assistant")
 
-    from_url = await installer.install_skill("https://example.com/SKILL.md")
+    from_url = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
     assert from_url["id"] == "order-review-assistant"
     await installer.uninstall_skill("order-review-assistant")
 
     with pytest.raises(ValueError, match="无法识别"):
         await installer.install_skill("not-a-source")
+
+
+@pytest.mark.asyncio
+async def test_install_repo_root_batch_all_skills(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仓库根目录无 SKILL.md 时，应自动批量安装所有含 SKILL.md 的目录。"""
+
+    tarball = _make_tarball(
+        {
+            "skills/skill-a/SKILL.md": SAMPLE_SKILL_MD,
+            "skills/skill-b/SKILL.md": SAMPLE_SKILL_MD.replace(
+                "Order Review Assistant", "Listing Optimizer"
+            ),
+            "skills/skill-b/references/guide.md": "# Guide\n",
+            "skills/broken/SKILL.md": "no frontmatter here",
+            "README.md": "repo readme",
+        }
+    )
+
+    async def fake_tarball(owner: str, repo: str, ref: str) -> bytes:
+        return tarball
+
+    monkeypatch.setattr(installer, "_download_github_tarball", fake_tarball)
+
+    result = await installer.install_skill_from_github(
+        "https://github.com/acme/skills"
+    )
+    assert result["total"] == 3
+    assert len(result["installed"]) == 2
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["path"] == "skills/broken"
+
+    ids = {item["id"] for item in result["installed"]}
+    assert ids == {"order-review-assistant", "listing-optimizer"}
+
+    listed = await installer.list_installed_skills()
+    assert {item["id"] for item in listed} == ids
+    skill_root = installer._user_skill_root() / "listing-optimizer"
+    assert (skill_root / "references" / "guide.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_api_install_skill_calls_service_not_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API 层 install 应调用服务层，避免函数同名导致的递归调用。"""
+
+    from backend.api import skills as api_module
+
+    called: list[str] = []
+
+    async def fake_service(source: str) -> dict[str, object]:
+        called.append(source)
+        return {"installed": [], "failed": [], "total": 0}
+
+    monkeypatch.setattr(api_module, "install_skill_service", fake_service)
+    request = api_module.InstallSkillRequest(source="acme/repo")
+    result = await api_module.install_skill(request)
+    assert called == ["acme/repo"]
+    assert result["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_skill_config_binding_and_enabled_filter(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """启用配置：绑定 Agent 后候选池只返回对应项，停用后不再返回。"""
+
+    async def fake_text(url: str) -> str:
+        return SAMPLE_SKILL_MD
+
+    monkeypatch.setattr(installer, "_download_text", fake_text)
+    installed = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
+
+    # 默认未绑定任何 Agent → 候选池为空。
+    assert await installer.list_enabled_skills_for_agent("coding") == []
+
+    await installer.update_skill_config(
+        installed["id"],
+        enabled=True,
+        agent_ids=["coding", "qa"],
+    )
+    coding_candidates = await installer.list_enabled_skills_for_agent("coding")
+    qa_candidates = await installer.list_enabled_skills_for_agent("qa")
+    commerce_candidates = await installer.list_enabled_skills_for_agent("commerce")
+    assert [item["id"] for item in coding_candidates] == [installed["id"]]
+    assert [item["id"] for item in qa_candidates] == [installed["id"]]
+    assert commerce_candidates == []
+
+    # 停用后所有 Agent 的候选池都为空。
+    await installer.update_skill_config(
+        installed["id"],
+        enabled=False,
+        agent_ids=["coding"],
+    )
+    assert await installer.list_enabled_skills_for_agent("coding") == []
+
+
+@pytest.mark.asyncio
+async def test_skill_config_enforces_50_limit(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同时启用的 Skill 不能超过 50 个。"""
+
+    async def fake_text(url: str) -> str:
+        return SAMPLE_SKILL_MD
+
+    monkeypatch.setattr(installer, "_download_text", fake_text)
+    installed_ids: list[str] = []
+    for index in range(50):
+        name = f"Skill {index}"
+        skill_md = SAMPLE_SKILL_MD.replace(
+            "Order Review Assistant",
+            name,
+        ).replace("order-review-assistant", f"skill-{index}")
+        async def fake_text_for(url: str, _content=skill_md) -> str:
+            return _content
+
+        monkeypatch.setattr(installer, "_download_text", fake_text_for)
+        result = (await installer.install_skill("https://example.com/SKILL.md"))[
+            "installed"
+        ][0]
+        installed_ids.append(result["id"])
+        await installer.update_skill_config(
+            result["id"],
+            enabled=True,
+            agent_ids=["coding"],
+        )
+
+    # 第 51 个启用时应被拒绝。
+    monkeypatch.setattr(installer, "_download_text", fake_text)
+    extra = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
+    with pytest.raises(ValueError, match="不能超过 50"):
+        await installer.update_skill_config(
+            extra["id"],
+            enabled=True,
+            agent_ids=["coding"],
+        )
+
+    # 已启用的 Skill 更新绑定不受上限影响。
+    await installer.update_skill_config(
+        installed_ids[0],
+        enabled=True,
+        agent_ids=["coding", "qa"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_skill_usage_increments(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """使用率记录应逐次累加并在列表中返回。"""
+
+    async def fake_text(url: str) -> str:
+        return SAMPLE_SKILL_MD
+
+    monkeypatch.setattr(installer, "_download_text", fake_text)
+    installed = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
+
+    await installer.record_skill_usage(installed["id"])
+    await installer.record_skill_usage(installed["id"])
+    listed = await installer.list_installed_skills()
+    assert listed[0]["id"] == installed["id"]
+    assert listed[0]["hitCount"] == 2

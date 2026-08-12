@@ -3,12 +3,11 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
-import AgentPanel from "./components/AgentPanel";
+import AgentTaskPanel from "./components/AgentTaskPanel";
 import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
-import TaskPlanningPanel from "./components/TaskPlanningPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
 import ApiKeyModal from "./components/ApiKeyModal";
-import SkillsManagerModal from "./components/skills-manager/SkillsManagerModal";
+import SkillsManagerPage from "./components/skills-manager/SkillsManagerPage";
 import { ChatComposer } from "./components/ChatComposer";
 import CheckpointResumeBar from "./components/CheckpointResumeBar";
 import ChatList from "./components/ChatList";
@@ -68,7 +67,9 @@ export default function Home() {
   const [commerceMarketplace, setCommerceMarketplace] =
     useState<CommerceMarketplaceCode>("US");
   const [showPluginCenter, setShowPluginCenter] = useState(false);
-  const [showSkillsManager, setShowSkillsManager] = useState(false);
+  const [activePage, setActivePage] = useState<"workspace" | "skills">(
+    "workspace",
+  );
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
@@ -195,7 +196,6 @@ export default function Home() {
     commerce.reset();
     agentCoordinator.resetAgents();
   };
-
   const handleCreateSession = async (
     mode: SessionMode,
     projectId: string | null = null,
@@ -213,19 +213,16 @@ export default function Home() {
       setShowPluginCenter(true);
       return;
     }
-
     const session = await workspace.createSession(mode, projectId);
     if (session) resetConversationUi();
     if (mode === "code" || mode === "commerce" || mode === "media") {
       setComposerMode("chat");
     }
   };
-
   const handleSwitchSession = (id: string) => {
     if (isBusy) return;
     if (workspace.switchSession(id)) resetConversationUi();
   };
-
   const handleDeleteSession = async (
     id: string,
     event: MouseEvent,
@@ -234,7 +231,6 @@ export default function Home() {
     const activeSessionChanged = await workspace.deleteSession(id, event);
     if (activeSessionChanged) resetConversationUi();
   };
-
   const handleAddProject = async () => {
     if (isBusy) return;
     if (!codePluginEnabled) {
@@ -247,13 +243,11 @@ export default function Home() {
       resetConversationUi();
     }
   };
-
   const handlePluginChange = (
     pluginId: BuiltinPluginId,
     enabled: boolean,
   ) => {
     plugins.setPluginEnabled(pluginId, enabled);
-
     // 如果用户关闭了当前正在查看的插件，立即回到核心 QA，避免页面停留在失效入口。
     const disabledMode =
       pluginId === "code-agent" ? "code" : "commerce";
@@ -266,7 +260,6 @@ export default function Home() {
       }
     }
   };
-
   const handleSelectModel = (modelId: string) => {
     if (effectiveComposerMode === "chat") {
       setSelectedChatModel(modelId);
@@ -274,7 +267,6 @@ export default function Home() {
       setSelectedMediaModel(modelId);
     }
   };
-
   /**
    * 纯文字生成模式不会消费上传素材，因此切换到这些模式时清空旧附件，
    * 避免界面显示了素材但模型实际没有使用。
@@ -288,22 +280,22 @@ export default function Home() {
       }
     }
   };
-
   const handleSubmit = () => void checkpointRuns.submit();
-
   return (
-    <main
-      data-theme={theme}
-      className="theme-transition relative flex h-screen flex-col overflow-hidden"
-      style={{
-        ...getThemeVariables(theme),
-        background:
-          "radial-gradient(circle at 72% 12%, var(--app-glow-blue), transparent 28%), radial-gradient(circle at 45% 95%, var(--app-glow-purple), transparent 30%), var(--app-bg)",
-        color: "var(--text-primary)",
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif",
-      }}
-    >
+    <>
+      <main
+        data-theme={theme}
+        className="theme-transition relative flex h-screen flex-col overflow-hidden"
+        style={{
+          ...getThemeVariables(theme),
+          display: activePage === "skills" ? "none" : undefined,
+          background:
+            "radial-gradient(circle at 72% 12%, var(--app-glow-blue), transparent 28%), radial-gradient(circle at 45% 95%, var(--app-glow-purple), transparent 30%), var(--app-bg)",
+          color: "var(--text-primary)",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif",
+        }}
+      >
       {apiKey.showKeyModal && (
         <ApiKeyModal
           initialKeys={apiKey.apiKeys}
@@ -322,16 +314,11 @@ export default function Home() {
           onClose={() => setShowPluginCenter(false)}
         />
       )}
-      {showSkillsManager && (
-        <SkillsManagerModal onClose={() => setShowSkillsManager(false)} />
-      )}
-
       <CustomTitleBar
         theme={theme}
         onToggleTheme={toggleTheme}
         runningAgentCount={agentCoordinator.runningAgentCount}
       />
-
       <div
         className="flex min-h-0 flex-1 border-t"
         style={{ borderColor: "var(--border)" }}
@@ -360,7 +347,6 @@ export default function Home() {
             void handleDeleteSession(id, event)
           }
         />
-
         <section className="relative flex min-w-0 flex-1 flex-col">
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-24"
@@ -369,7 +355,6 @@ export default function Home() {
                 "linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 82%, transparent), transparent)",
             }}
           />
-
           <div className="relative mx-auto flex min-h-0 w-full max-w-[1480px] flex-1 flex-col px-5 pb-4 pt-4 lg:px-8">
             <WorkspaceHeader
               activeSession={workspace.activeSession}
@@ -385,9 +370,8 @@ export default function Home() {
                     : chat.stop
               }
               onOpenApiKey={apiKey.openKeyModal}
-              onOpenSkills={() => setShowSkillsManager(true)}
+              onOpenSkills={() => setActivePage("skills")}
             />
-
             <div className="flex min-h-0 flex-1 gap-4">
               <div className="flex min-w-0 flex-1 flex-col">
                 <ChatList
@@ -397,7 +381,6 @@ export default function Home() {
                   toolActivities={activeToolActivities}
                   agentStatus={activeStatus}
                 />
-
                 <div className="shrink-0 pt-2">
                   {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (
                     <CheckpointResumeBar
@@ -423,7 +406,6 @@ export default function Home() {
                       }
                     />
                   )}
-
                   <ChatComposer
                     mode={workspace.activeSession?.mode}
                     commerceMarketplace={commerceMarketplace}
@@ -476,42 +458,42 @@ export default function Home() {
                   />
                 </div>
               </div>
-
-              <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-4 xl:flex">
-                <TaskPlanningPanel
-                  agents={agentCoordinator.agents}
-                  toolActivities={activeToolActivities}
-                  lifecycleEvents={
-                    workspace.activeSession?.mode === "commerce"
-                      ? []
-                      : chat.agentLifecycleEvents
-                  }
-                  workListSnapshot={
-                    workspace.activeSession?.mode === "code"
-                      ? chat.workListSnapshot
-                      : null
-                  }
-                  agentStatus={activeStatus}
-                  isStreaming={isBusy}
-                  workflowMode={
-                    workspace.activeSession?.mode === "commerce"
-                      ? `commerce-${commerce.workflowMode}`
-                      : workspace.activeSession?.mode === "media"
-                        ? "media"
+              <AgentTaskPanel
+                agents={agentCoordinator.agents}
+                toolActivities={activeToolActivities}
+                lifecycleEvents={
+                  workspace.activeSession?.mode === "commerce"
+                    ? []
+                    : chat.agentLifecycleEvents
+                }
+                workListSnapshot={
+                  workspace.activeSession?.mode === "code"
+                    ? chat.workListSnapshot
+                    : null
+                }
+                agentStatus={activeStatus}
+                isStreaming={isBusy}
+                workflowMode={
+                  workspace.activeSession?.mode === "commerce"
+                    ? `commerce-${commerce.workflowMode}`
+                    : workspace.activeSession?.mode === "media"
+                      ? "media"
                       : effectiveComposerMode
-                  }
-                />
-                <AgentPanel
-                  agents={agentCoordinator.agents}
-                  isStreaming={isBusy}
-                  className="min-h-0 flex-1"
-                />
-              </aside>
+                }
+              />
             </div>
           </div>
         </section>
       </div>
 
-    </main>
+      </main>
+      <SkillsManagerPage
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        runningAgentCount={agentCoordinator.runningAgentCount}
+        onBack={() => setActivePage("workspace")}
+        hidden={activePage !== "skills"}
+      />
+    </>
   );
 }
