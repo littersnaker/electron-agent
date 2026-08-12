@@ -45,6 +45,25 @@ GITHUB_REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 ALLOWED_SCHEMES = {"http", "https"}
 DEFAULT_VERSION = "0.0.0"
 
+_AGENT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "coding": (
+        "react", "vue", "taro", "css", "html", "javascript", "typescript",
+        "gsap", "frontend", "前端", "小程序", "组件", "component", "动画",
+        "animation", "web",
+    ),
+    "commerce": (
+        "amazon", "listing", "marketplace", "ecommerce", "电商", "运营",
+        "广告", "listing", "关键词",
+    ),
+    "media": (
+        "comic", "storyboard", "漫剧", "视频生成", "图片生成", "图片编辑",
+        "视频编辑", "media", "图像",
+    ),
+    "qa": (
+        "问答", "知识库", "文档", "knowledge", "qa", "faq",
+    ),
+}
+
 _TEXT_SUFFIXES = {
     ".md", ".markdown", ".yaml", ".yml", ".json", ".txt", ".py", ".ts", ".tsx",
     ".js", ".jsx", ".sh", ".bash", ".ps1", ".sql", ".html", ".css", ".toml",
@@ -91,6 +110,22 @@ def _url_slug_fallback(url: str) -> str | None:
         return None
     name = re.sub(r"\.(md|yaml|yml)$", "", tail, flags=re.IGNORECASE)
     return re.sub(r"[-_]+", " ", name).strip() or None
+
+
+def _recommend_agents(
+    *,
+    name: str,
+    description: str,
+    tags: tuple[str, ...],
+) -> list[str]:
+    """根据 Skill 内容关键词推荐绑定的 Agent（无强信号时返回空列表）。"""
+
+    haystack = " ".join([name, description, *tags]).lower()
+    recommended: list[str] = []
+    for agent_id, keywords in _AGENT_KEYWORDS.items():
+        if any(keyword in haystack for keyword in keywords):
+            recommended.append(agent_id)
+    return recommended
 
 
 def _parse_github_spec(source: str) -> tuple[str, str, str, str]:
@@ -481,10 +516,31 @@ def _skill_dir(skill_id: str) -> Path:
     return target
 
 
-async def _save_record(record: dict[str, Any]) -> None:
-    """把安装记录写入 SQLite（同 id 覆盖更新）。"""
+async def _save_record(record: dict[str, Any]) -> int:
+    """把安装记录写入 SQLite（同 id 覆盖更新）。
 
+    启用状态统一在此处校验全局 50 个上限：超限时自动降级为停用，
+    避免自动推荐安装路径绕过手动开关的限制。
+    """
+
+    requested_enabled = 1 if record.get("enabled", 0) else 0
     async with open_database() as connection:
+        if requested_enabled:
+            count_cursor = await connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM installed_skills
+                WHERE enabled = 1 AND id != ?
+                """,
+                (str(record["id"]),),
+            )
+            count_row = await count_cursor.fetchone()
+            if count_row is not None and int(count_row["count"]) >= 50:
+                LOGGER.info(
+                    "Skill %s 超过 50 个启用上限，自动降级为停用",
+                    record["id"],
+                )
+                requested_enabled = 0
         await connection.execute(
             """
             INSERT INTO installed_skills (
@@ -509,7 +565,7 @@ async def _save_record(record: dict[str, Any]) -> None:
                 record["description"],
                 record["source_url"],
                 record["source_format"],
-                record.get("enabled", 0),
+                requested_enabled,
                 dumps_json(record.get("agent_ids") or []),
                 record["content_json"],
                 record["files_json"],
@@ -517,6 +573,7 @@ async def _save_record(record: dict[str, Any]) -> None:
                 record["updated_at"],
             ),
         )
+    return requested_enabled
 
 
 def _export_files(
@@ -562,12 +619,17 @@ async def install_skill_from_url(url: str) -> dict[str, Any]:
     converted = _convert_raw_content(raw_text, url)
     skill_yaml, prompt_text = _build_skill_yaml(converted)
     skill_id = str(skill_yaml["id"])
+    recommended_agents = _recommend_agents(
+        name=str(skill_yaml["name"]),
+        description=str(skill_yaml["description"]),
+        tags=tuple(skill_yaml.get("tags") or ()),
+    )
 
     # 先导出文件，再写 SQLite；数据库写入失败时清理已导出的目录。
     try:
         _export_files(skill_id, skill_yaml, prompt_text)
         now = utc_now_iso()
-        await _save_record(
+        final_enabled = await _save_record(
             {
                 "id": skill_id,
                 "name": str(skill_yaml["name"]),
@@ -575,6 +637,8 @@ async def install_skill_from_url(url: str) -> dict[str, Any]:
                 "description": str(skill_yaml["description"]),
                 "source_url": url,
                 "source_format": str(converted["sourceFormat"]),
+                "enabled": 1 if recommended_agents else 0,
+                "agent_ids": recommended_agents,
                 "content_json": dumps_json(
                     {"yaml": skill_yaml, "prompt": prompt_text}
                 ),
@@ -595,6 +659,7 @@ async def install_skill_from_url(url: str) -> dict[str, Any]:
         "description": str(skill_yaml["description"]),
         "sourceUrl": url,
         "sourceFormat": str(converted["sourceFormat"]),
+        "enabled": bool(final_enabled),
     }
 
 
@@ -609,11 +674,16 @@ async def _install_extracted(
     converted = _convert_raw_content(skill_text, display_url)
     skill_yaml, prompt_text = _build_skill_yaml(converted)
     skill_id = str(skill_yaml["id"])
+    recommended_agents = _recommend_agents(
+        name=str(skill_yaml["name"]),
+        description=str(skill_yaml["description"]),
+        tags=tuple(skill_yaml.get("tags") or ()),
+    )
 
     try:
         _export_files(skill_id, skill_yaml, prompt_text, extra_files)
         now = utc_now_iso()
-        await _save_record(
+        final_enabled = await _save_record(
             {
                 "id": skill_id,
                 "name": str(skill_yaml["name"]),
@@ -621,6 +691,8 @@ async def _install_extracted(
                 "description": str(skill_yaml["description"]),
                 "source_url": display_url,
                 "source_format": f"github:{converted['sourceFormat']}",
+                "enabled": 1 if recommended_agents else 0,
+                "agent_ids": recommended_agents,
                 "content_json": dumps_json(
                     {"yaml": skill_yaml, "prompt": prompt_text}
                 ),
@@ -642,6 +714,7 @@ async def _install_extracted(
         "sourceUrl": display_url,
         "sourceFormat": f"github:{converted['sourceFormat']}",
         "extraFileCount": len(extra_files),
+        "enabled": bool(final_enabled),
     }
 
 

@@ -7,7 +7,11 @@
  */
 import { useState } from "react";
 import { apiFetch } from "../../lib/api-client";
-import { AppleButton, AppleModalCloseButton } from "../ui/AppleModalControls";
+import {
+  AppleButton,
+  AppleModalCloseButton,
+  AppleSwitch,
+} from "../ui/AppleModalControls";
 import type { InstalledSkill } from "./skill-card";
 
 interface SkillDetailModalProps {
@@ -267,29 +271,11 @@ export default function SkillDetailModal({
                 >
                   启用 Skill（同时最多 50 个）
                 </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={enabled}
-                  onClick={() => setEnabled((current) => !current)}
-                  className="relative h-[22px] w-[38px] rounded-full border transition-colors duration-200"
-                  style={{
-                    background: enabled ? "#30d158" : "var(--glass-active)",
-                    borderColor: enabled
-                      ? "rgba(48,209,88,0.4)"
-                      : "var(--border-strong)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <span
-                    className="absolute top-[2px] h-[16px] w-[16px] rounded-full transition-all duration-200"
-                    style={{
-                      left: enabled ? "19px" : "2px",
-                      background: "#ffffff",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
-                    }}
-                  />
-                </button>
+                <AppleSwitch
+                  checked={enabled}
+                  ariaLabel={`启用 Skill ${skill.name}`}
+                  onChange={() => setEnabled((current) => !current)}
+                />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {AGENT_OPTIONS.map((agent) => {

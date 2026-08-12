@@ -531,3 +531,111 @@ async def test_record_skill_usage_increments(
     listed = await installer.list_installed_skills()
     assert listed[0]["id"] == installed["id"]
     assert listed[0]["hitCount"] == 2
+
+
+def test_recommend_agents_by_keywords() -> None:
+    """自动推荐 Agent：根据名称/描述/标签关键词判断归属。"""
+
+    assert installer._recommend_agents(
+        name="gsap-react",
+        description="Official GSAP skill for React animation and hooks.",
+        tags=(),
+    ) == ["coding"]
+
+    assert installer._recommend_agents(
+        name="amazon-listing",
+        description="Optimize Amazon listing keywords and marketplace ads.",
+        tags=("电商",),
+    ) == ["commerce"]
+
+    assert installer._recommend_agents(
+        name="comic-storyboard",
+        description="生成漫剧分镜与视频素材。",
+        tags=(),
+    ) == ["media"]
+
+    assert installer._recommend_agents(
+        name="unknown-tool",
+        description="A generic internal helper.",
+        tags=(),
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_install_auto_binds_recommended_agent(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """安装时自动启用并绑定推荐的 Agent，无需手动配置。"""
+
+    skill_md = SAMPLE_SKILL_MD.replace(
+        "Helps review e-commerce orders for anomalies.",
+        "GSAP React animation helper for frontend components.",
+    ).replace("Order Review Assistant", "Gsap React Helper")
+
+    async def fake_text(url: str) -> str:
+        return skill_md
+
+    monkeypatch.setattr(installer, "_download_text", fake_text)
+    installed = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
+    listed = await installer.list_installed_skills()
+    item = next(item for item in listed if item["id"] == installed["id"])
+    assert item["enabled"] is True
+    assert "coding" in item["agentIds"]
+    coding_pool = await installer.list_enabled_skills_for_agent("coding")
+    assert [candidate["id"] for candidate in coding_pool] == [installed["id"]]
+
+
+@pytest.mark.asyncio
+async def test_install_auto_downgrades_when_over_50(
+    isolated_installer: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """超过 50 个启用上限时，自动推荐安装应降级为停用而非绕过。"""
+
+    for index in range(50):
+        skill_md = (
+            SAMPLE_SKILL_MD.replace(
+                "Order Review Assistant",
+                f"React Helper {index}",
+            )
+            .replace(
+                "Helps review e-commerce orders for anomalies.",
+                "React animation helper for frontend components.",
+            )
+            .replace("tags: [commerce, review]", "tags: []")
+        )
+
+        async def fake_text(url: str, _content=skill_md) -> str:
+            return _content
+
+        monkeypatch.setattr(installer, "_download_text", fake_text)
+        result = (await installer.install_skill("https://example.com/SKILL.md"))[
+            "installed"
+        ][0]
+        assert result["enabled"] is True
+
+    # 第 51 个：安装成功但自动降级为停用。
+    extra_md = (
+        SAMPLE_SKILL_MD.replace("Order Review Assistant", "React Helper Extra")
+        .replace(
+            "Helps review e-commerce orders for anomalies.",
+            "React animation helper for frontend components.",
+        )
+        .replace("tags: [commerce, review]", "tags: []")
+    )
+
+    async def fake_text_extra(url: str, _content=extra_md) -> str:
+        return _content
+
+    monkeypatch.setattr(installer, "_download_text", fake_text_extra)
+    extra = (await installer.install_skill("https://example.com/SKILL.md"))[
+        "installed"
+    ][0]
+    assert extra["enabled"] is False
+    listed = await installer.list_installed_skills()
+    extra_row = next(item for item in listed if item["id"] == extra["id"])
+    assert extra_row["enabled"] is False
+    assert sum(1 for item in listed if item["enabled"]) == 50

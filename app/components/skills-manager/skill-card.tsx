@@ -5,6 +5,7 @@
  * 包含名称、版本、描述、来源、安装时间与卸载入口；
  * 全部使用主题 CSS 变量，深色/浅色模式自动适配。
  */
+import { AppleSwitch } from "../ui/AppleModalControls";
 
 export interface InstalledSkill {
   id: string;
@@ -56,7 +57,16 @@ export default function SkillCard({
   onToggle,
   onUninstall,
 }: SkillCardProps) {
+  /** 总开关视觉状态：直接跟随 enabled 字段。 */
+  const isSwitchedOn = Boolean(skill.enabled);
+  /** 是否真正生效：已启用且至少绑定一个 Agent。 */
   const isEnabled = Boolean(skill.enabled && skill.agentIds?.length);
+  /** 徽标三态：已启用 / 未绑定 Agent / 未启用。 */
+  const badgeState = isEnabled
+    ? "enabled"
+    : isSwitchedOn
+      ? "unbound"
+      : "disabled";
 
   return (
     <article
@@ -88,14 +98,31 @@ export default function SkillCard({
           <span
             className="mt-1 inline-block rounded-[7px] border px-1.5 py-0.5 text-[10px]"
             style={{
-              borderColor: isEnabled
-                ? "rgba(48,209,88,0.28)"
-                : "var(--border)",
-              background: isEnabled ? "rgba(48,209,88,0.08)" : undefined,
-              color: isEnabled ? "#30d158" : "var(--text-tertiary)",
+              borderColor:
+                badgeState === "enabled"
+                  ? "rgba(48,209,88,0.28)"
+                  : badgeState === "unbound"
+                    ? "rgba(255,159,10,0.28)"
+                    : "var(--border)",
+              background:
+                badgeState === "enabled"
+                  ? "rgba(48,209,88,0.08)"
+                  : badgeState === "unbound"
+                    ? "rgba(255,159,10,0.08)"
+                    : undefined,
+              color:
+                badgeState === "enabled"
+                  ? "#30d158"
+                  : badgeState === "unbound"
+                    ? "#ff9f0a"
+                    : "var(--text-tertiary)",
             }}
           >
-            {isEnabled ? "已启用" : "未启用"}
+            {badgeState === "enabled"
+              ? "已启用"
+              : badgeState === "unbound"
+                ? "未绑定 Agent"
+                : "未启用"}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -108,36 +135,17 @@ export default function SkillCard({
           >
             v{skill.version}
           </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isEnabled}
-            aria-label={`切换 ${skill.name} 启用状态`}
+          <span
             onClick={(event) => {
               event.stopPropagation();
-              onToggle(skill);
-            }}
-            className="relative h-[20px] w-[34px] rounded-full border transition-colors duration-200"
-            style={{
-              background: isEnabled ? "#30d158" : "var(--glass-active)",
-              borderColor: isEnabled
-                ? "rgba(48,209,88,0.4)"
-                : "var(--border-strong)",
-              cursor: "pointer",
-              boxShadow: isEnabled
-                ? "inset 0 1px 2px rgba(0,0,0,0.18)"
-                : "inset 0 1px 2px rgba(0,0,0,0.12)",
             }}
           >
-            <span
-              className="absolute top-[2px] h-[14px] w-[14px] rounded-full transition-all duration-200"
-              style={{
-                left: isEnabled ? "17px" : "2px",
-                background: "#ffffff",
-                boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
-              }}
+            <AppleSwitch
+              checked={isSwitchedOn}
+              ariaLabel={`切换 ${skill.name} 启用状态`}
+              onChange={() => onToggle(skill)}
             />
-          </button>
+          </span>
         </div>
       </div>
 
