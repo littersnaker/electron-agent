@@ -9,11 +9,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
+from uuid import uuid4
 
 from backend.services.agent.runtime.action_guard import guard_edit, record_factory_decision
 from backend.services.agent.shared.command_runner import (
     CommandResult,
+    command_approval_enabled,
+    install_packages_allowed,
     is_high_risk_command,
+    requires_user_approval,
 )
 from backend.services.agent.shared.loop_protocol import AgentAction
 from backend.services.agent.shared.loop_support import ExecutionMode, command_observation
@@ -25,17 +29,24 @@ from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.agent.shared.workspace_tools import EditBatchResult, ReadBatchResult
 from backend.services.agent.spill import SpillStore, maybe_spill_result
+from backend.services.agent.worker.pending import (
+    consume_pending_command,
+    find_pending_command,
+    save_pending_command,
+)
 from backend.services.agent.worker.work_batch_writer import _env_int
 from backend.services.tools.code_tools import execute_code_tool
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 CheckpointCallback = Callable[[], Awaitable[None]]
-OutcomeKind = Literal["continue", "success", "failure"]
+OutcomeKind = Literal["continue", "success", "failure", "pause"]
 
 # 单个 replace 的 old/new 最大字符数：超过视为整段重写，工具层直接拒绝该
 # operation，要求模型用最小定位片段重发（对齐"改已有文件只给最小片段"的
 # 结构性约束）。write（新建文件）不受此限制，仍允许完整内容。
 MAX_REPLACE_TEXT_CHARS = _env_int("CODE_AGENT_MAX_REPLACE_CHARS", 3_000, 200, 200_000)
+# 安装/初始化类命令耗时较长，审批通过后单独放宽超时（默认 10 分钟）。
+INSTALL_TIMEOUT_SECONDS = _env_int("CODE_AGENT_INSTALL_TIMEOUT_SECONDS", 600, 60, 600)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +74,8 @@ class WorkActionEnvironment:
     checkpoint: CheckpointCallback
     slot: int
     agent_id: str
+    session_id: str = ""
+    checkpoint_id: str = ""
 
 
 class WorkActionHandler:
@@ -503,21 +516,55 @@ class WorkActionHandler:
         # 沙箱 A 层：会执行工作区代码/配置的命令（pytest/eslint/脚手架 create 等）
         # 不自动执行——项目内 conftest.py/.eslintrc.js 可能被 Agent 预先写入，触发即
         # 等效任意代码执行。这类命令改为跳过并提示，由用户手动执行或走创建项目骨架。
+        approved_command = False
         if is_high_risk_command(action.command):
-            blocked = CommandResult(
-                command=action.command,
-                exit_code=-1,
-                output="",
-                blocked_reason=(
-                    "沙箱拦截：该命令会执行工作区内的项目代码或配置文件。"
-                    "为避免配置劫持，不自动执行；如需初始化请使用创建项目的"
-                    "“项目骨架”选项，或在真实终端手动运行。"
-                ),
-            )
-            self._env.state.commands.append(blocked)
-            self._env.state.append_transcript(command_observation(blocked))
-            await self._env.checkpoint()
-            return WorkActionOutcome("continue")
+            if command_approval_enabled() and requires_user_approval(action.command):
+                if not install_packages_allowed(action.command):
+                    blocked = CommandResult(
+                        command=action.command,
+                        exit_code=-1,
+                        output="",
+                        blocked_reason=(
+                            "安装白名单拦截：目标包不在 "
+                            "CODE_AGENT_INSTALL_PACKAGE_WHITELIST 内，未执行。"
+                        ),
+                    )
+                    self._env.state.commands.append(blocked)
+                    self._env.state.append_transcript(command_observation(blocked))
+                    await self._env.checkpoint()
+                    return WorkActionOutcome("continue")
+                decision = await consume_pending_command(
+                    self._env.work.id, action.command
+                )
+                if decision is None:
+                    return await self._request_command_approval(action.command)
+                if decision == "rejected":
+                    blocked = CommandResult(
+                        command=action.command,
+                        exit_code=-1,
+                        output="",
+                        blocked_reason="用户拒绝执行该命令，请改用其他方式完成目标",
+                    )
+                    self._env.state.commands.append(blocked)
+                    self._env.state.append_transcript(command_observation(blocked))
+                    await self._env.checkpoint()
+                    return WorkActionOutcome("continue")
+                approved_command = True
+            else:
+                blocked = CommandResult(
+                    command=action.command,
+                    exit_code=-1,
+                    output="",
+                    blocked_reason=(
+                        "沙箱拦截：该命令会执行工作区内的项目代码或配置文件。"
+                        "为避免配置劫持，不自动执行；如需初始化请使用创建项目的"
+                        "“项目骨架”选项，或在真实终端手动运行。"
+                    ),
+                )
+                self._env.state.commands.append(blocked)
+                self._env.state.append_transcript(command_observation(blocked))
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue")
 
         await self._lifecycle(
             role="verification_agent",
@@ -530,11 +577,16 @@ class WorkActionHandler:
             owner=self._env.work.id,
             priority=self._env.work.priority,
         ):
+            run_arguments: dict[str, Any] = {"command": action.command}
+            if approved_command:
+                # approved 仅供审批门内部透传，模型无法通过 action 注入。
+                run_arguments["approved"] = True
+                run_arguments["timeout_seconds"] = INSTALL_TIMEOUT_SECONDS
             result = cast(
                 CommandResult,
                 await self._tool(
                     "workspace.run",
-                    {"command": action.command},
+                    run_arguments,
                     {"execute"},
                 ),
             )
@@ -552,6 +604,61 @@ class WorkActionHandler:
             detail=f"{self._env.work.id} 验证通过：{action.command}",
         )
         return WorkActionOutcome("continue")
+
+    async def _request_command_approval(self, command: str) -> WorkActionOutcome:
+        """保存待审批命令、发出审批卡片并暂停当前 Work。"""
+
+        existing = await find_pending_command(self._env.work.id)
+        if existing is not None and existing["status"] == "pending":
+            # 恢复后用户仍未答复：不重复保存/弹窗，直接继续暂停。
+            self._env.state.append_transcript(
+                f"ACTION run 仍在等待用户审批：{command}\n审批请求：{existing['requestId']}"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("pause")
+
+        request_id = f"approval_{uuid4().hex}"
+        await save_pending_command(
+            request_id=request_id,
+            session_id=self._env.session_id,
+            work_id=self._env.work.id,
+            command=command,
+            checkpoint_id=self._env.checkpoint_id,
+        )
+        await self._env.emit(
+            "interactive",
+            {
+                "id": request_id,
+                "source": "risk_approval",
+                "command": "run_command",
+                "prompt": f"Agent 准备执行命令：{command}",
+                "description": (
+                    "该命令属于安装依赖、初始化项目或脚手架类高风险操作，"
+                    "会下载并执行第三方代码。请确认是否允许。"
+                ),
+                "mode": "normal",
+                "suggestedMode": "user",
+                "kind": "confirm",
+                "allowMultiple": False,
+                "options": [
+                    {"label": "允许并继续", "value": "approve"},
+                    {"label": "拒绝", "value": "reject"},
+                ],
+                "promptRound": 1,
+                "recentOutput": command,
+                "title": "命令执行需要审批",
+                "approvalKind": "command_run",
+                "riskLevel": "high",
+                "toolName": "run_terminal_command",
+                "toolArguments": {"command": command},
+            },
+        )
+        self._env.state.append_transcript(
+            f"ACTION run 等待用户审批：{command}\n审批请求：{request_id}\n"
+            "用户批准后将继续执行；拒绝后该命令将返回拒绝结果。"
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("pause")
 
     async def _run_code(self, action: AgentAction) -> WorkActionOutcome:
         """执行模型写的 Python 程序（批量工具调用），只有 print/return 回上下文。"""
@@ -592,32 +699,26 @@ class WorkActionHandler:
     async def _execute_run_code(self, action: AgentAction) -> str:
         """在子进程跑模型程序，工具调用经桥接回父进程执行。"""
 
-        from backend.services.agent.code_mode import (
-            run_code_program,
-            serve_code_mode,
-            write_tools_sdk,
-        )
+        from backend.services.agent.code_mode import run_code_program, write_tools_sdk
 
         root = self._env.root
-        work_id = self._env.work.id
         # 子进程需要 import 的 tools_sdk 放在工作区外的临时目录，避免污染项目。
         import tempfile
 
         sdk_dir = Path(tempfile.mkdtemp(prefix="run-code-sdk-"))
         bridge = write_tools_sdk(sdk_dir)
-        # 父进程作为桥接服务器：子进程工具调用经 stdin/stdout JSON 回到这里执行。
         try:
-            task = asyncio.create_task(serve_code_mode(root, work_id))
             result = await run_code_program(
                 code=action.code,
                 work_dir=root,
                 bridge_script=bridge.parent,
             )
-            task.cancel()
         finally:
             await asyncio.to_thread(lambda: shutil.rmtree(sdk_dir, ignore_errors=True))
         if not result.get("ok"):
-            return f"[RUN_CODE FAILED] {result.get('error') or '执行失败'}"
+            # Bug C：失败时把程序完整输出带回，模型能看到异常信息自行纠正。
+            detail = result.get("output") or result.get("error") or "执行失败"
+            return f"[RUN_CODE FAILED] {str(detail)[:6000]}"
         return f"[RUN_CODE OK] exit={result.get('exitCode')}\n{result.get('output') or ''}"
 
     async def _complete(self, action: AgentAction) -> WorkActionOutcome:

@@ -88,6 +88,7 @@ def _format_loop_result(result: AgentLoopResult, mode: str) -> str:
         "succeeded": "成功",
         "skipped": "跳过",
         "failed": "失败",
+        "paused": "待审批",
         "running": "执行中",
         "pending": "待办",
     }
@@ -141,6 +142,7 @@ async def stream_prepared_autonomous(
         initial_model_name=prepared.model_name,
         checkpoint_id=checkpoint_id,
         resume_state=resume_state,
+        session_id=body.session_id,
     ):
         if event.kind == "lifecycle":
             payload = event.payload
@@ -189,6 +191,31 @@ async def stream_prepared_autonomous(
 
                 payload = await attach_step_metrics(payload, session_id)
             yield encode_sse({"type": "WORKLIST_UPDATE", "payload": payload})
+        elif event.kind == "interactive":
+            yield encode_sse(
+                {
+                    "type": "INTERACTIVE_REQUEST",
+                    "payload": dict(event.payload),
+                }
+            )
+        elif event.kind == "paused":
+            yield encode_sse(
+                {
+                    "type": "AGENT_LIFECYCLE",
+                    "payload": _lifecycle(
+                        role="checkpoint_manager",
+                        status="paused",
+                        detail="Work 已暂停，等待用户审批命令。",
+                    ),
+                }
+            )
+            yield encode_sse(
+                {
+                    "type": "AGENT_PAUSED",
+                    "payload": dict(event.payload),
+                }
+            )
+            return
         elif event.kind == "visual_verify":
             yield encode_sse(
                 {

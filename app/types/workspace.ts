@@ -107,6 +107,7 @@ export interface AgentLifecycleEventPayload {
 export type WorkItemStatus =
   | "pending"
   | "running"
+  | "paused"
   | "succeeded"
   | "failed"
   | "skipped";

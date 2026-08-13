@@ -43,6 +43,8 @@ class WorkDispatchEnvironment:
     coordinator: WorkspaceResourceCoordinator
     emit: EmitCallback
     checkpoint: CheckpointCallback
+    session_id: str = ""
+    checkpoint_id: str = ""
 
 
 class WorkDispatcher:
@@ -117,6 +119,8 @@ class WorkDispatcher:
             emit=self._env.emit,
             checkpoint=self._env.checkpoint,
             slot=slot,
+            session_id=self._env.session_id,
+            checkpoint_id=self._env.checkpoint_id,
         )
 
     async def _execute_validation(

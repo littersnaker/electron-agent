@@ -115,16 +115,18 @@ async def _filesystem(context: ToolExecutionContext, arguments: dict[str, Any]) 
 
 
 async def _run(context: ToolExecutionContext, arguments: dict[str, Any]) -> object:
-    """执行白名单验证命令。"""
+    """执行白名单验证命令；approved 仅供已通过用户审批的内部调用传入。"""
 
     command = str(arguments.get("command") or "").strip()
     if not command:
         raise ValueError("workspace.run 缺少 command")
     timeout_seconds = int(arguments.get("timeout_seconds") or 180)
+    approved = bool(arguments.get("approved"))
     return await SANDBOX.shell.run(
         context.workspace_root,
         command,
         timeout_seconds=max(10, min(timeout_seconds, 600)),
+        approved=approved,
     )
 
 

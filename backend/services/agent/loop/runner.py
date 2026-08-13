@@ -11,6 +11,7 @@ from backend.services.agent.harness import ProjectHarness, build_project_harness
 from backend.services.agent.loop.checkpoint_runtime import (
     command_from_json,
     ledger_from_json,
+    mark_checkpoint_paused,
     save_loop_checkpoint,
     usage_from_json,
 )
@@ -78,6 +79,8 @@ class AgentLoopEvent:
         "usage",
         "worklist",
         "visual_verify",
+        "interactive",
+        "paused",
         "result",
     ]
     payload: dict[str, Any] = field(default_factory=dict)
@@ -97,6 +100,7 @@ async def stream_autonomous_loop(
     initial_model_name: str = "",
     checkpoint_id: str = "",
     resume_state: dict[str, Any] | None = None,
+    session_id: str = "",
 ):
     """滚动执行依赖图；任一 Work 完成后立即补充新任务，不等待整波结束。"""
 
@@ -230,6 +234,8 @@ async def stream_autonomous_loop(
             coordinator=coordinator,
             emit=emit,
             checkpoint=persist_checkpoint,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
         )
     )
 
@@ -263,6 +269,7 @@ async def stream_autonomous_loop(
     running: dict[asyncio.Task[WorkExecutionResult], tuple[str, int]] = {}
     failure_observations: dict[str, str] = {}
     failure_kinds: dict[str, str] = {}
+    paused_work: tuple[str, WorkExecutionResult] | None = None
 
     if preflight_notes:
         event_queue.put_nowait(
@@ -284,7 +291,11 @@ async def stream_autonomous_loop(
             free_slots = [
                 slot for slot in range(1, parallel_limit + 1) if slot not in used_slots
             ]
-            ready = [item for item in ledger.ready_items() if item.status == "pending"]
+            ready = [
+                item
+                for item in ledger.ready_items()
+                if item.status in {"pending", "paused"}
+            ]
             active_items = [
                 item
                 for work_id, _slot in running.values()
@@ -329,9 +340,26 @@ async def stream_autonomous_loop(
                     continue
 
                 ordered_done = sorted(done, key=lambda task: running[task][1])
+                paused_now = False
                 for task in ordered_done:
                     work_id, _slot = running.pop(task)
                     result = task.result()
+                    if result.paused:
+                        # 命令审批门：取消其余并行 Work，保存 Checkpoint 后暂停整轮。
+                        paused_work = (work_id, result)
+                        for pending_task in set(running):
+                            pending_task.cancel()
+                        await asyncio.gather(*running, return_exceptions=True)
+                        running.clear()
+                        paused_item = ledger.get(work_id)
+                        if paused_item is not None:
+                            paused_item.status = "paused"
+                        active_work_ids = []
+                        await persist_checkpoint(force=True)
+                        await mark_checkpoint_paused(checkpoint_id)
+                        yield AgentLoopEvent("worklist", snapshot())
+                        paused_now = True
+                        break
                     schedule_work_review(
                         work_id=work_id,
                         succeeded=result.succeeded,
@@ -364,6 +392,8 @@ async def stream_autonomous_loop(
                         dict(merged.lifecycle),
                     )
 
+                if paused_now:
+                    break
                 active_work_ids = [
                     work_id
                     for work_id, _slot in sorted(running.values(), key=lambda item: item[1])
@@ -524,6 +554,10 @@ async def stream_autonomous_loop(
             for task in running:
                 task.cancel()
             await asyncio.gather(*running, return_exceptions=True)
+
+    if paused_work:
+        yield AgentLoopEvent("paused", {"workId": paused_work[0]})
+        return
 
     quality_report = await review_execution(
         root=root,

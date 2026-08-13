@@ -408,6 +408,8 @@ export default function TaskPlanningPanel({
                             ? "var(--accent-green)"
                             : item.status === "running"
                               ? "#64b5ff"
+                              : item.status === "paused"
+                                ? "#ff9f0a"
                               : "var(--text-quaternary)",
                       }}
                     />
@@ -434,7 +436,9 @@ export default function TaskPlanningPanel({
                     >
                       {failed && item.attempts > 1
                         ? `failed · ${item.attempts} 次`
-                        : item.status}
+                        : item.status === "paused"
+                          ? "待审批"
+                          : item.status}
                     </span>
                   </div>
                   {(() => {

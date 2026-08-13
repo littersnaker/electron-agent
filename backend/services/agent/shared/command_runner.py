@@ -63,10 +63,20 @@ ALLOWED_ENV_VARIABLES = (
 
 
 def _sandboxed_environment() -> dict[str, str]:
-    """构造命令子进程的最小环境：只继承白名单变量，丢弃所有密钥。"""
+    """构造命令子进程的最小环境：只继承白名单变量，丢弃所有密钥。
+
+    Windows 环境变量名大小写不敏感（实际可能只有 SYSTEMROOT 而没有
+    SystemRoot），按大写键匹配实际存在的变量再回填白名单键名，
+    避免关键系统变量（SystemRoot）被精确匹配丢掉导致子进程初始化失败。
+    """
 
     source = os.environ.copy()
-    result = {key: source[key] for key in ALLOWED_ENV_VARIABLES if key in source}
+    lookup = {key.upper(): key for key in source}
+    result: dict[str, str] = {}
+    for allowed in ALLOWED_ENV_VARIABLES:
+        actual = lookup.get(allowed.upper())
+        if actual is not None:
+            result[allowed] = source[actual]
     result.update({"CI": "1", "NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
     return result
 
@@ -117,6 +127,93 @@ ALLOWED_PACKAGE_SCRIPTS = {
     "backend:check",
     "electron:typecheck",
 } | _EXTRA_PACKAGE_SCRIPTS
+
+# 需要用户确认后才能执行的包管理器子命令（安装/初始化/脚手架等）。
+_INSTALL_SUBCOMMANDS = {
+    "install",
+    "add",
+    "i",
+    "remove",
+    "rm",
+    "uninstall",
+    "update",
+    "create",
+    "init",
+    "ci",
+    "dlx",
+}
+
+
+def command_approval_enabled() -> bool:
+    """是否开启“命令审批门”（CODE_AGENT_COMMAND_APPROVAL=1 启用）。"""
+
+    return os.getenv("CODE_AGENT_COMMAND_APPROVAL", "").strip() == "1"
+
+
+def requires_user_approval(command: str) -> bool:
+    """判断命令是否属于安装/初始化/脚手架类，需要用户确认后才放行。"""
+
+    try:
+        parts = _split_command(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    executable = _normalize_executable(parts[0])
+    args = [item.lower() for item in parts[1:]]
+    if executable in {"pnpm", "npm", "yarn", "bun"}:
+        return bool(args and args[0] in _INSTALL_SUBCOMMANDS)
+    if executable == "npx":
+        # npx 只放行白名单质量工具；其余（脚手架/初始化）需要用户确认。
+        return not (args and args[0] in {"tsc", "eslint", "prettier", "vitest", "jest"})
+    if executable in {"pip", "pip3", "python", "python3", "py"}:
+        if executable in {"pip", "pip3"}:
+            return bool(args and args[0] == "install")
+        return (
+            len(args) >= 3
+            and args[0] == "-m"
+            and args[1] in {"pip", "pip3"}
+            and args[2] == "install"
+        )
+    return False
+
+
+def _install_package_whitelist() -> frozenset[str]:
+    """读取安装包白名单（逗号分隔，小写）；空表示不限制。"""
+
+    raw = os.getenv("CODE_AGENT_INSTALL_PACKAGE_WHITELIST", "").strip()
+    return frozenset(name.strip().lower() for name in raw.split(",") if name.strip())
+
+
+def install_packages_allowed(command: str) -> bool:
+    """校验安装命令中的包名是否全部在白名单内；白名单为空时直接放行。"""
+
+    whitelist = _install_package_whitelist()
+    if not whitelist:
+        return True
+    try:
+        parts = _split_command(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    executable = _normalize_executable(parts[0])
+    args = [item.lower() for item in parts[1:]]
+    packages: list[str] = []
+    if executable in {"pnpm", "npm", "yarn", "bun"}:
+        if not args or args[0] not in {"install", "i", "add"}:
+            return True
+        packages = [item for item in args[1:] if not item.startswith("-")]
+    elif executable in {"pip", "pip3"}:
+        packages = [item for item in args[1:] if not item.startswith("-")]
+    elif executable in {"python", "python3", "py"}:
+        if (
+            len(args) >= 3
+            and args[0] == "-m"
+            and args[1] in {"pip", "pip3"}
+        ):
+            packages = [item for item in args[2:] if not item.startswith("-")]
+    return all(package in whitelist for package in packages)
 
 
 @dataclass(slots=True)
@@ -205,8 +302,13 @@ def is_high_risk_command(command: str) -> bool:
     return True
 
 
-def validate_command(command: str, root: Path) -> tuple[list[str], str | None]:
-    """校验全自动模式允许执行的命令。"""
+def validate_command(
+    command: str,
+    root: Path,
+    *,
+    approved: bool = False,
+) -> tuple[list[str], str | None]:
+    """校验全自动模式允许执行的命令；approved 表示该命令已通过用户审批。"""
 
     del root  # 当前仅用于保持接口语义，后续可读取项目级策略文件。
     try:
@@ -217,10 +319,22 @@ def validate_command(command: str, root: Path) -> tuple[list[str], str | None]:
     args = parts[1:]
 
     if executable in {"pnpm", "npm", "yarn", "bun"}:
+        if requires_user_approval(command):
+            if approved:
+                if install_packages_allowed(command):
+                    return parts, None
+                return parts, "安装的包不在 CODE_AGENT_INSTALL_PACKAGE_WHITELIST 白名单内"
+            return parts, "该命令属于安装/初始化/脚手架类，需要用户确认后才能执行"
         return parts, _validate_package_command(executable, args)
     if executable in ALLOWED_DIRECT_EXECUTABLES:
         return parts, None
     if executable in {"python", "python3", "py"}:
+        if requires_user_approval(command):
+            if approved:
+                if install_packages_allowed(command):
+                    return parts, None
+                return parts, "安装的包不在 CODE_AGENT_INSTALL_PACKAGE_WHITELIST 白名单内"
+            return parts, "该 Python 安装命令需要用户确认后才能执行"
         lowered = [item.lower() for item in args]
         allowed_module = (
             len(lowered) >= 2
@@ -231,9 +345,21 @@ def validate_command(command: str, root: Path) -> tuple[list[str], str | None]:
             return parts, None
         return parts, "Python 全自动模式只允许 pytest、unittest 或 compileall"
     if executable == "npx":
+        if requires_user_approval(command):
+            if approved:
+                return parts, None
+            return parts, "该 npx 命令属于脚手架/初始化类，需要用户确认后才能执行"
         if args and args[0].lower() in {"tsc", "eslint", "prettier", "vitest", "jest"}:
             return parts, None
         return parts, "npx 只允许 tsc、eslint、prettier、vitest 或 jest"
+    if executable in {"pip", "pip3"}:
+        if requires_user_approval(command):
+            if approved:
+                if install_packages_allowed(command):
+                    return parts, None
+                return parts, "安装的包不在 CODE_AGENT_INSTALL_PACKAGE_WHITELIST 白名单内"
+            return parts, "pip 安装命令需要用户确认后才能执行"
+        return parts, f"未批准的 pip 命令：{executable}"
     if executable == "git":
         if args and args[0].lower() in {"status", "diff"}:
             return parts, None
@@ -258,10 +384,11 @@ async def run_safe_command(
     command: str,
     *,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    approved: bool = False,
 ) -> CommandResult:
     """在项目根目录执行白名单命令并收集有限输出。"""
 
-    parts, blocked_reason = validate_command(command, root)
+    parts, blocked_reason = validate_command(command, root, approved=approved)
     if blocked_reason:
         return CommandResult(command, -1, "", blocked_reason=blocked_reason)
 

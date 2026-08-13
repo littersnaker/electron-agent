@@ -117,7 +117,7 @@ class WorkLedger:
         ready = [
             item
             for item in self.items
-            if item.status in {"pending", "failed"}
+            if item.status in {"pending", "failed", "paused"}
             and self._dependencies_satisfied(item)
         ]
         return sorted(ready, key=lambda item: (item.priority, order[item.id]))
@@ -130,7 +130,7 @@ class WorkLedger:
             if requested.status == "running":
                 return requested
             if (
-                requested.status in {"pending", "failed"}
+                requested.status in {"pending", "failed", "paused"}
                 and self._dependencies_satisfied(requested)
             ):
                 return requested
@@ -146,8 +146,10 @@ class WorkLedger:
         if item.status in {"succeeded", "skipped"}:
             raise ValueError(f"Work {item.id} 已完成，禁止重复执行")
         if item.status != "running":
+            # 从 paused（等待用户审批）恢复时不算新尝试，避免重复计数。
+            if item.status != "paused":
+                item.attempts += 1
             item.status = "running"
-            item.attempts += 1
             item.error = ""
             self.revision += 1
         return item
@@ -287,7 +289,14 @@ class WorkLedger:
 
         counts = {
             status: sum(item.status == status for item in self.items)
-            for status in ("pending", "running", "succeeded", "failed", "skipped")
+            for status in (
+                "pending",
+                "running",
+                "paused",
+                "succeeded",
+                "failed",
+                "skipped",
+            )
         }
         total = len(self._items)
         finished = counts["succeeded"] + counts["skipped"]

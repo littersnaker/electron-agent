@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS pending_actions (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pending_commands (
+    request_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    work_id TEXT NOT NULL,
+    command TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    checkpoint_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS traces (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,

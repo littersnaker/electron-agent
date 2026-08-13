@@ -16,6 +16,7 @@ class SandboxShell:
         command: str,
         *,
         timeout_seconds: int = 180,
+        approved: bool = False,
     ) -> CommandResult:
         """调用无 shell、有限输出且带超时的安全命令执行器。"""
 
@@ -23,4 +24,5 @@ class SandboxShell:
             root,
             command,
             timeout_seconds=timeout_seconds,
+            approved=approved,
         )

@@ -232,3 +232,4 @@ class WorkExecutionResult:
     error: str
     state: WorkWorkerState
     failure_kind: FailureKind = "code"
+    paused: bool = False

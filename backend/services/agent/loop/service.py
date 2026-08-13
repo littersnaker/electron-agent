@@ -45,12 +45,14 @@ from backend.services.agent.shared.workspace_tools import (
 )
 from backend.services.agent.worker.filesystem_executor import parse_direct_filesystem_request
 from backend.services.agent.worker.pending import (
+    find_pending_command_by_request_id,
     parse_interactive_reply,
     pop_pending_action,
+    resolve_pending_command,
     save_pending_action,
 )
 from backend.services.agent.worker.run_checkpoint import resolve_run_checkpoint
-from backend.services.checkpoints.store import update_checkpoint
+from backend.services.checkpoints.store import get_checkpoint, update_checkpoint
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.types import LlmUsage
 from backend.services.tools.code_tools import execute_code_tool
@@ -253,9 +255,24 @@ async def stream_code_agent(
         yield encode_sse({"type": "TEXT", "content": "⚠️ 请求中没有用户问题。"})
         return
     if classify_request(user_text) == "interactive_reply":
-        async for frame in _handle_interactive_reply(body=body, user_text=user_text):
-            yield frame
-        return
+        request_id, reply_mode, answer = parse_interactive_reply(user_text)
+        command_pending = await find_pending_command_by_request_id(request_id)
+        if command_pending:
+            normalized = (answer or "").strip().lower()
+            approved = reply_mode == "auto" or normalized in {"approve", "yes", "y"}
+            await resolve_pending_command(request_id, approved=approved)
+            checkpoint_ref = str(command_pending.get("checkpointId") or "")
+            if not checkpoint_ref:
+                yield encode_sse(
+                    {"type": "TEXT", "content": "⚠️ 该命令审批缺少 Checkpoint，无法恢复。"}
+                )
+                return
+            # 命令审批回复：写入决定后按原 Checkpoint 恢复 Work 循环。
+            body.resume_checkpoint_id = checkpoint_ref
+        else:
+            async for frame in _handle_interactive_reply(body=body, user_text=user_text):
+                yield frame
+            return
     if not body.project_id.strip():
         yield encode_sse({"type": "TEXT", "content": "⚠️ 当前 Code 会话没有绑定项目，请重新选择或添加项目。"})
         return
@@ -301,6 +318,10 @@ async def stream_code_agent(
                 resume_state=resume_state,
             ):
                 yield frame
+            current = await get_checkpoint(checkpoint_id)
+            if current and current.status == "paused":
+                await finish_trace(trace, status="paused")
+                return
             await update_checkpoint(
                 checkpoint_id, status="completed", resumable=False
             )
@@ -558,6 +579,10 @@ async def stream_code_agent(
             checkpoint_id=checkpoint_id,
         ):
             yield frame
+        current = await get_checkpoint(checkpoint_id)
+        if current and current.status == "paused":
+            await finish_trace(trace, status="paused")
+            return
         await update_checkpoint(checkpoint_id, status="completed", resumable=False)
         await finish_trace(trace, status="completed")
     except Exception as exc:

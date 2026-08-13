@@ -98,6 +98,8 @@ async def execute_work(
     emit: EmitCallback,
     checkpoint: CheckpointCallback,
     slot: int,
+    session_id: str = "",
+    checkpoint_id: str = "",
 ) -> WorkExecutionResult:
     """持续执行一个 Work，直到成功完成或产生可分类的真实失败。"""
 
@@ -131,6 +133,8 @@ async def execute_work(
             checkpoint=checkpoint,
             slot=slot,
             agent_id=agent_id,
+            session_id=session_id,
+            checkpoint_id=checkpoint_id,
         )
     )
 
@@ -499,6 +503,17 @@ async def execute_work(
         )
         if outcome.kind == "continue":
             continue
+        if outcome.kind == "pause":
+            # 命令审批门：Work 停在安全 Checkpoint，等待用户批准/拒绝后恢复。
+            await checkpoint()
+            return WorkExecutionResult(
+                work.id,
+                False,
+                "",
+                "等待用户审批命令",
+                state,
+                paused=True,
+            )
         if outcome.kind == "failure":
             session.record_failure(action=action.action, error=outcome.error)
             await checkpoint()

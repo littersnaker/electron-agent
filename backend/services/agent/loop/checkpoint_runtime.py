@@ -194,3 +194,13 @@ async def save_loop_checkpoint(
             }
         },
     )
+
+
+async def mark_checkpoint_paused(checkpoint_id: str) -> None:
+    """把 Checkpoint 标记为暂停（等待用户审批），保持可恢复。"""
+
+    if not checkpoint_id:
+        return
+    from backend.services.checkpoints.store import update_checkpoint
+
+    await update_checkpoint(checkpoint_id, status="paused", resumable=True)
