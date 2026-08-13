@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +24,7 @@ from backend.services.agent.shared.resource_coordinator import (
 from backend.services.agent.shared.work_models import WorkItem
 from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.agent.shared.workspace_tools import EditBatchResult, ReadBatchResult
+from backend.services.agent.spill import SpillStore, maybe_spill_result
 from backend.services.agent.worker.work_batch_writer import _env_int
 from backend.services.tools.code_tools import execute_code_tool
 
@@ -69,6 +72,18 @@ class WorkActionHandler:
         """保存当前 Worker 环境，避免每个动作重复传递大量参数。"""
 
         self._env = environment
+        # Spill 落盘：超大工具输出落盘 + 定位符，模型按需 read 取回。
+        self._spill_store = SpillStore(environment.root)
+
+    def _spill(self, tool_name: str, text: object) -> str:
+        """把工具输出过一遍 spill 策略（只对可能较大的输出调用）。"""
+
+        return maybe_spill_result(
+            self._spill_store,
+            session_id=self._env.work.id,
+            tool_name=tool_name,
+            text=str(text or ""),
+        )
 
     async def execute(self, action: AgentAction) -> WorkActionOutcome:
         """执行一个动作并返回 Worker 下一步状态。"""
@@ -80,6 +95,7 @@ class WorkActionHandler:
             "factory": self._factory,
             "edit": self._edit,
             "run": self._run,
+            "run_code": self._run_code,
             "complete_work": self._complete,
         }
         handler = handlers.get(action.action)
@@ -167,7 +183,8 @@ class WorkActionHandler:
             )
         if not unchanged and not fresh_sections:
             observation_parts.append(f"OBSERVATION:\n{result.content}")
-        state.append_transcript("\n\n".join(observation_parts))
+        transcript_entry = self._spill("read", "\n\n".join(observation_parts))
+        state.append_transcript(transcript_entry)
         if result.blocked_paths:
             await self._lifecycle(
                 role="modify_worker",
@@ -199,7 +216,7 @@ class WorkActionHandler:
         )
         self._env.state.append_transcript(
             f"ACTION inspect paths={action.paths} query={action.query}\n"
-            f"OBSERVATION:\n{inspection}"
+            f"OBSERVATION:\n{self._spill('inspect', inspection)}"
         )
         await self._env.checkpoint()
         return WorkActionOutcome("continue")
