@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-from backend.services.agent.shared.command_runner import CommandResult, run_safe_command
+from backend.services.agent.shared.command_runner import (
+    CommandResult,
+    is_high_risk_command,
+    run_safe_command,
+)
 from backend.services.agent.shared.loop_support import ExecutionMode
 from backend.services.agent.shared.work_state import WorkWorkerState
 from backend.services.artifact_memory import ArtifactIndex, ArtifactRecord
@@ -56,6 +60,7 @@ async def review_execution(
         results=command_results,
     )
     executed: list[CommandResult] = []
+    skipped_high_risk: list[str] = []
     if execution_mode == "full_auto":
         plan = validation_engine.plan(
             root=root,
@@ -63,11 +68,24 @@ async def review_execution(
             risk=patch.risk.level.value,
         )
         existing_commands = {item.command for item in command_results}
+        # 沙箱 A 层：会执行工作区代码/配置的验证命令（pytest/eslint 等）跳过，
+        # 避免配置劫持。跳过项从 checks 移除，不计入验证失败，仅在报告中标注。
+        plan.checks = [
+            check
+            for check in plan.checks
+            if not (
+                check.command not in existing_commands
+                and is_high_risk_command(check.command)
+            )
+        ]
         for check in plan.checks:
             if check.command in existing_commands:
                 check.result = next(
                     item for item in command_results if item.command == check.command
                 )
+                continue
+            if is_high_risk_command(check.command):
+                skipped_high_risk.append(check.command)
                 continue
             check.result = await run_safe_command(root, check.command)
             executed.append(check.result)

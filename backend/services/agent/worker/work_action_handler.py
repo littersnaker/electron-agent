@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from backend.services.agent.runtime.action_guard import guard_edit, record_factory_decision
-from backend.services.agent.shared.command_runner import CommandResult
+from backend.services.agent.shared.command_runner import (
+    CommandResult,
+    is_high_risk_command,
+)
 from backend.services.agent.shared.loop_protocol import AgentAction
 from backend.services.agent.shared.loop_support import ExecutionMode, command_observation
 from backend.services.agent.shared.resource_coordinator import (
@@ -477,6 +480,25 @@ class WorkActionHandler:
             self._env.state.append_transcript(
                 f"ACTION run skipped: {action.command}\n自动编辑模式不执行命令。"
             )
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
+
+        # 沙箱 A 层：会执行工作区代码/配置的命令（pytest/eslint/脚手架 create 等）
+        # 不自动执行——项目内 conftest.py/.eslintrc.js 可能被 Agent 预先写入，触发即
+        # 等效任意代码执行。这类命令改为跳过并提示，由用户手动执行或走创建项目骨架。
+        if is_high_risk_command(action.command):
+            blocked = CommandResult(
+                command=action.command,
+                exit_code=-1,
+                output="",
+                blocked_reason=(
+                    "沙箱拦截：该命令会执行工作区内的项目代码或配置文件。"
+                    "为避免配置劫持，不自动执行；如需初始化请使用创建项目的"
+                    "“项目骨架”选项，或在真实终端手动运行。"
+                ),
+            )
+            self._env.state.commands.append(blocked)
+            self._env.state.append_transcript(command_observation(blocked))
             await self._env.checkpoint()
             return WorkActionOutcome("continue")
 

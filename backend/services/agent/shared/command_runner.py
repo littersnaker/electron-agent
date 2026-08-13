@@ -2,6 +2,8 @@
 
 该模块不是操作系统级沙箱。它只在用户明确选择“全自动”时运行，并通过无 shell、
 工作区 cwd、命令白名单、超时和输出上限降低风险。
+沙箱 A 层加固：命令子进程只继承白名单环境变量（不携带任何 API Key/宿主密钥），
+并识别“会执行工作区代码或配置”的高危命令（配置劫持风险）。
 """
 
 from __future__ import annotations
@@ -19,6 +21,54 @@ from pathlib import Path
 MAX_COMMAND_OUTPUT_CHARS = 80_000
 DEFAULT_TIMEOUT_SECONDS = 180
 SHELL_META_PATTERN = re.compile(r"[;&|><`\r\n]")
+
+# 命令子进程允许继承的环境变量白名单：只保留运行工具必需的基础变量，
+# 不包含任何 API Key / 密钥。即使工作区代码被执行（配置劫持），也拿不到宿主密钥。
+ALLOWED_ENV_VARIABLES = (
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_MESSAGES",
+    "TERM",
+    "TZ",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS",
+    "OS",
+    "CI",
+    "NO_COLOR",
+    "PYTHONUTF8",
+    "PYTHONUNBUFFERED",
+    "VIRTUAL_ENV",
+    "USER",
+    "SHELL",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramData",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "npm_config_userconfig",
+    "npm_config_cache",
+)
+
+
+def _sandboxed_environment() -> dict[str, str]:
+    """构造命令子进程的最小环境：只继承白名单变量，丢弃所有密钥。"""
+
+    source = os.environ.copy()
+    result = {key: source[key] for key in ALLOWED_ENV_VARIABLES if key in source}
+    result.update({"CI": "1", "NO_COLOR": "1", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"})
+    return result
 
 
 def _load_extra_whitelist() -> tuple[set[str], set[str]]:
@@ -121,6 +171,40 @@ def _validate_package_command(executable: str, args: list[str]) -> str | None:
     return None
 
 
+def is_high_risk_command(command: str) -> bool:
+    """判断命令是否会执行工作区代码或项目配置文件。
+
+    白名单工具（pytest/eslint/vitest/jest/tsc/npx/包管理器 run 脚本）会读取并
+    执行项目内的 conftest.py、.eslintrc.js、package.json 脚本等。Agent 一旦
+    先用 edit 写入恶意配置文件，再触发这类命令，就构成等效任意代码执行，
+    完全绕过白名单。这类命令需要人工确认（worker 路径）或跳过标注（review 路径）。
+    """
+
+    try:
+        parts = _split_command(command)
+    except ValueError:
+        return True
+    executable = _normalize_executable(parts[0])
+    args = [item.lower() for item in parts[1:]]
+
+    if executable in {"pnpm", "npm", "yarn", "bun"}:
+        # 包管理器 run 会执行 package.json 里的项目脚本。
+        return True
+    if executable == "npx":
+        # npx 会下载并执行包；eslint/prettier/vitest/jest/tsc 还会读项目配置。
+        return True
+    if executable in {"pytest", "eslint", "vitest", "jest", "tsc", "python", "python3", "py"}:
+        # Python/JS 工具直接执行工作区内的代码或配置。
+        return True
+    if executable == "cargo":
+        # cargo 构建会执行 build.rs。
+        return True
+    if executable == "git" and args and args[0] in {"status", "diff"}:
+        # 只读 git 检查，不执行项目代码。
+        return False
+    return True
+
+
 def validate_command(command: str, root: Path) -> tuple[list[str], str | None]:
     """校验全自动模式允许执行的命令。"""
 
@@ -181,8 +265,7 @@ async def run_safe_command(
     if blocked_reason:
         return CommandResult(command, -1, "", blocked_reason=blocked_reason)
 
-    environment = os.environ.copy()
-    environment.update({"CI": "1", "NO_COLOR": "1", "PYTHONUTF8": "1"})
+    environment = _sandboxed_environment()
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     executable = shutil.which(parts[0])
     if not executable:
