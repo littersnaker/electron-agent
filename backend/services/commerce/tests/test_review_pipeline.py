@@ -61,6 +61,12 @@ def _initial_state(observations: list[dict]) -> dict:
     }
 
 
+async def _no_amazon_results(_query, _marketplace, _creds, _limit=None, **_kwargs):
+    """让平台采集分支确定性返回空，避免测试依赖真实网络。"""
+
+    return [], {"mode": "crawler", "parsedResultCount": 0}
+
+
 def _fake_reviews(limit: int = 30):
     """构造 2 条带情感倾向的评论。"""
 
@@ -93,11 +99,18 @@ def _fake_reviews(limit: int = 30):
     return _call
 
 
+def _patch_sources(monkeypatch) -> None:
+    """拦截所有外部采集源，保证图执行不触网、结果可预期。"""
+
+    monkeypatch.setattr(module, "search_amazon", _no_amazon_results)
+    monkeypatch.setattr(module, "fetch_amazon_reviews", _fake_reviews())
+
+
 @pytest.mark.asyncio
 async def test_review_pipeline_injects_analyses_into_report(monkeypatch) -> None:
     """Amazon 商品存在时，报告应包含 reviewAnalyses 区块与评论数据源。"""
 
-    monkeypatch.setattr(module, "fetch_amazon_reviews", _fake_reviews())
+    _patch_sources(monkeypatch)
 
     body = CommerceRequest(query="earbuds")
     graph = build_research_graph(body, {})
@@ -125,7 +138,7 @@ async def test_review_pipeline_injects_analyses_into_report(monkeypatch) -> None
 async def test_review_pipeline_skips_when_no_amazon_products(monkeypatch) -> None:
     """没有 Amazon 商品时，评论分析应跳过并给出 unconfigured 数据源。"""
 
-    monkeypatch.setattr(module, "fetch_amazon_reviews", _fake_reviews())
+    _patch_sources(monkeypatch)
 
     body = CommerceRequest(query="earbuds")
     graph = build_research_graph(body, {})
@@ -143,6 +156,7 @@ async def test_review_pipeline_falls_back_to_demo_on_failure(monkeypatch) -> Non
     async def fake_fail(_asin, _marketplace, _creds, _limit=None, **_kwargs):
         raise RuntimeError("反爬拦截")
 
+    monkeypatch.setattr(module, "search_amazon", _no_amazon_results)
     monkeypatch.setattr(module, "fetch_amazon_reviews", fake_fail)
 
     body = CommerceRequest(query="earbuds")

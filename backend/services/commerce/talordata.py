@@ -168,6 +168,18 @@ def _stable_id(seed: str) -> str:
     return f"SERP-{digest}"
 
 
+def _is_google_shopping_echo(url: str) -> bool:
+    """判断 URL 是否是 Google 购物 SERP 回链（无稳定商品详情页）。
+
+    Google Shopping 的商品信息内嵌在搜索页里，TalorData 返回的 ``link``
+    常是 ``webhp?ibp=oshop`` 形式的搜索界面回链（``prds`` 参数甚至全为空），
+    点开只会回到购物搜索页。这类链接应清空，避免前端渲染出无效跳转。
+    """
+
+    lowered = url.lower()
+    return "google." in lowered and ("webhp" in lowered or "ibp=oshop" in lowered)
+
+
 def normalize_observation(
     container: str, item: dict[str, Any], marketplace: Marketplace
 ) -> dict[str, Any] | None:
@@ -178,7 +190,8 @@ def normalize_observation(
     display_title = title or snippet
     if not display_title:
         return None
-    url = _first_text(item, ("link", "url", "product_link", "redirect_link"))
+    raw_url = _first_text(item, ("link", "url", "product_link", "redirect_link"))
+    url = None if raw_url and _is_google_shopping_echo(raw_url) else raw_url
     domain = None
     if url:
         try:
@@ -191,7 +204,8 @@ def normalize_observation(
         ("extracted_price", "price_value", "price_numeric", "min_price", "price", "current_price"),
     )
     merchant = _first_text(item, ("merchant", "seller", "source", "store", "domain")) or domain
-    seed = "|".join((container, display_title, url or snippet or ""))
+    # 用原始链接参与稳定 ID 计算，保证同一条结果在不同轮次去重时不漂移。
+    seed = "|".join((container, display_title, raw_url or snippet or ""))
     return {
         "id": _stable_id(seed),
         "title": display_title,
