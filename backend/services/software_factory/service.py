@@ -20,6 +20,39 @@ from backend.utils.paths import resolve_inside
 
 SUPPORTED_DOMAINS = {"commerce", "ecommerce", "commerce-miniapp"}
 
+# 工程配置文件：manifest 生成时标记为 config 类型。
+_MANIFEST_CONFIG_PATHS = {
+    "package.json",
+    "index.html",
+    "vite.config.ts",
+    "vite.config.js",
+    "tsconfig.json",
+    "tsconfig.node.json",
+}
+
+
+def _infer_manifest_kind(relative_path: str, output_root: str) -> str:
+    """按相对路径推断清单条目的 kind（对齐 ArtifactKind 语义）。"""
+
+    name = relative_path.rsplit("/", 1)[-1]
+    if relative_path.startswith(f"{output_root}/"):
+        if name.endswith(".json"):
+            return "contract"
+        if name.endswith(".sql"):
+            return "contract"
+        if name.endswith(".md"):
+            return "document"
+        if name.endswith(".ts"):
+            return "frontend"
+        return "document"
+    if name in _MANIFEST_CONFIG_PATHS:
+        return "config"
+    if name.endswith((".tsx", ".ts", ".jsx", ".js", ".css")):
+        return "frontend"
+    if name.endswith(".md"):
+        return "document"
+    return "config"
+
 
 class SoftwareFactoryService:
     """以单一事实源生成领域、Mock、API 契约和前端数据层。"""
@@ -176,6 +209,85 @@ class SoftwareFactoryService:
             errors=tuple(errors),
             warnings=tuple(warnings),
             checks=tuple(checks),
+        ).to_json()
+
+    def regenerate_manifest(
+        self,
+        *,
+        root: Path,
+        output_root: str,
+    ) -> dict[str, Any]:
+        """确定性重建根目录的 software-factory.manifest.json。
+
+        解决“让 LLM 手拼清单 JSON 并计算 SHA-256”的不可行问题：模型没有哈希
+        工具（run find 被沙箱拦截），只能空转。此方法由后端扫描磁盘、计算哈希、
+        合并 features/commerce 既有条目后写入清单，LLM 只需触发一次工具。
+        """
+
+        from backend.services.software_factory.artifacts import _json_text
+        from backend.services.workspace.indexer import iter_project_files
+
+        normalized_root = self._normalize_output_root(output_root)
+        root_resolved = root.resolve()
+        # 工厂约定：manifest 与 generate/validate 一致，位于 output_root/ 下。
+        manifest_target = resolve_inside(
+            root,
+            f"{normalized_root}/software-factory.manifest.json",
+        )
+
+        # 读取既有清单（若存在），保留其 entries 用于合并。
+        existing_entries: dict[str, dict[str, Any]] = {}
+        existing_domain = ""
+        existing_stack = ""
+        if manifest_target.is_file():
+            try:
+                existing = json.loads(manifest_target.read_text("utf-8"))
+                if isinstance(existing, dict):
+                    existing_domain = str(existing.get("domainId") or "")
+                    existing_stack = str(existing.get("frontendStack") or "")
+                    for item in existing.get("files") or []:
+                        if isinstance(item, dict) and item.get("path"):
+                            existing_entries[str(item["path"])] = dict(item)
+            except (OSError, json.JSONDecodeError):
+                existing_entries = {}
+
+        # 扫描项目全部可索引文件（复用剪枝遍历，跳过 node_modules/.git 等）。
+        entries: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for relative in iter_project_files(root_resolved):
+            rel = str(relative).replace("\\", "/")
+            if rel in seen:
+                continue
+            seen.add(rel)
+            target = root_resolved / rel
+            if not target.is_file():
+                continue
+            kind = _infer_manifest_kind(rel, normalized_root)
+            # features/commerce 既有条目保留原哈希与元数据，避免漂移误报。
+            if rel in existing_entries:
+                entries.append(dict(existing_entries[rel]))
+                continue
+            content = target.read_bytes()
+            entries.append(
+                {
+                    "path": rel,
+                    "kind": kind,
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "lineCount": len(content.decode("utf-8", errors="replace").splitlines()),
+                }
+            )
+
+        manifest = {
+            "version": 1,
+            "domainId": existing_domain or "commerce-miniapp",
+            "frontendStack": existing_stack or "typescript",
+            "outputRoot": normalized_root,
+            "files": entries,
+        }
+        manifest_target.write_text(_json_text(manifest), encoding="utf-8")
+        return FactoryValidation(
+            True,
+            checks=(f"已重建清单：{len(entries)} 个文件，写入 {manifest_target.relative_to(root_resolved)}",),
         ).to_json()
 
     def _build_blueprint(

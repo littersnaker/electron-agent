@@ -407,8 +407,10 @@ class ActionRequestModel(BaseModel):
         if action == "inspect" and not self.paths and not self.query:
             raise ValueError("inspect 动作必须包含 paths 或 query")
         if action == "factory":
-            if self.mode not in {"plan", "generate", "validate"}:
-                raise ValueError("factory 动作 mode 必须是 plan、generate 或 validate")
+            if self.mode not in {"plan", "generate", "validate", "manifest"}:
+                raise ValueError(
+                    "factory 动作 mode 必须是 plan、generate、validate 或 manifest"
+                )
             if self.mode == "validate" and not self.output_root:
                 raise ValueError("factory validate 必须包含 outputRoot")
         if action == "edit":
@@ -630,6 +632,8 @@ def _normalize_action_name(value: str) -> str:
         "software_factory.plan": "factory",
         "software_factory.generate": "factory",
         "software_factory.validate": "factory",
+        "software_factory.manifest": "factory",
+        "regenerate_manifest": "factory",
         "complete": "complete_work",
         "done": "complete_work",
         "complete_task": "complete_work",

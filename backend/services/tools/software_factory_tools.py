@@ -63,6 +63,22 @@ async def _validate(
     )
 
 
+async def _manifest(
+    context: ToolExecutionContext,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """确定性重建根目录 manifest（LLM 只触发，不手拼 JSON/算哈希）。"""
+
+    output_root = str(arguments.get("output_root") or "").strip()
+    if not output_root:
+        raise ValueError("software_factory.manifest 缺少 output_root")
+    return await asyncio.to_thread(
+        SOFTWARE_FACTORY.regenerate_manifest,
+        root=context.workspace_root,
+        output_root=output_root,
+    )
+
+
 def register_software_factory_tools() -> None:
     """幂等注册计划、生成和校验三个高层工程工具。"""
 
@@ -94,6 +110,14 @@ def register_software_factory_tools() -> None:
             _validate,
             60.0,
             1,
+        ),
+        ToolDefinition(
+            "software_factory.manifest",
+            "确定性重建 software-factory.manifest.json（扫描目录计算 SHA-256，LLM 无需手拼 JSON）",
+            "write",
+            _manifest,
+            180.0,
+            0,
         ),
     )
     for definition in definitions:
