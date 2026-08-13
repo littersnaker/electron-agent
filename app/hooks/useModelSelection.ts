@@ -29,9 +29,10 @@ function normalizeChatModel(value: string | undefined): string {
     : AUTO_MODEL_ID;
 }
 
-/** 校验媒体模型 ID，删除注册表中已经不存在的旧选项。 */
+/** 校验媒体模型 ID，删除注册表中已经不存在的旧选项；自定义媒体模型放行。 */
 function normalizeMediaModel(value: string | undefined): string {
   const normalized = value?.trim() || DEFAULT_MEDIA_MODEL_ID;
+  if (normalized.startsWith("custom:")) return normalized;
   return getMediaModelDefinition(normalized)
     ? normalized
     : DEFAULT_MEDIA_MODEL_ID;

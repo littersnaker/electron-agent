@@ -1,4 +1,4 @@
-"""用户自定义聊天模型接口的数据结构。"""
+"""用户自定义模型接口的数据结构（聊天 + 媒体）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,19 @@ from pydantic import Field, field_validator
 
 from backend.schemas.common import FlexibleModel
 
-ProviderId = Literal["qwen", "openai", "gemini", "deepseek", "glm", "kimi"]
+ProviderId = Literal[
+    "qwen",
+    "openai",
+    "gemini",
+    "deepseek",
+    "glm",
+    "kimi",
+    "doubao",
+]
+
+MediaMode = Literal["text-to-image", "text-to-video", "image-edit"]
+MediaProtocol = Literal["", "qwen-image-sync", "volcengine-image", "volcengine-video-async"]
+MediaOutputKind = Literal["", "image", "video"]
 
 
 class CustomModelInput(FlexibleModel):
@@ -21,6 +33,10 @@ class CustomModelInput(FlexibleModel):
     include_in_auto: bool = Field(default=True, alias="includeInAuto")
     auto_priority: int = Field(default=10, alias="autoPriority", ge=1, le=9999)
     supports_vision: bool = Field(default=False, alias="supportsVision")
+    # 媒体能力：空数组表示纯聊天模型；填了 modes 的模型会出现在媒体选择器里。
+    media_modes: list[MediaMode] = Field(default_factory=list, alias="mediaModes")
+    media_protocol: MediaProtocol = Field(default="", alias="mediaProtocol")
+    media_output_kind: MediaOutputKind = Field(default="", alias="mediaOutputKind")
 
     @field_validator("name", "model")
     @classmethod
@@ -43,6 +59,15 @@ class CustomModelInput(FlexibleModel):
         if not normalized.startswith(("https://", "http://")):
             raise ValueError("Base URL 必须以 http:// 或 https:// 开头")
         return normalized
+
+    @field_validator("media_modes")
+    @classmethod
+    def validate_media_modes(cls, value: list[MediaMode]) -> list[MediaMode]:
+        """媒体协议/输出类型只在声明了媒体模式时才有意义，否则清空。"""
+
+        if not value:
+            return []
+        return list(dict.fromkeys(value))
 
 
 class CustomModelRecord(CustomModelInput):

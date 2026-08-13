@@ -96,7 +96,10 @@ export default function Home() {
         ...getCustomModelOptions(customModels.models),
       ];
     }
-    return getAvailableMediaModelOptions(effectiveComposerMode);
+    return getAvailableMediaModelOptions(
+      effectiveComposerMode,
+      customModels.models,
+    );
   }, [customModels.models, effectiveComposerMode]);
   useEffect(() => {
     if (!customModels.loaded || !selectedChatModel.startsWith("custom:")) return;
@@ -437,23 +440,17 @@ export default function Home() {
                     codeAgentMode={codeAgentMode}
                     onCodeAgentModeChange={setCodeAgentMode}
                     onCreateCustomModel={
-                      effectiveComposerMode === "chat"
-                        ? async (input) => {
-                            const created = await customModels.createModel(input);
-                            setSelectedChatModel(created.id);
-                          }
-                        : undefined
+                      async (input) => {
+                        const created = await customModels.createModel(input);
+                        if (effectiveComposerMode === "chat") {
+                          setSelectedChatModel(created.id);
+                        } else {
+                          setSelectedMediaModel(created.id);
+                        }
+                      }
                     }
-                    onUpdateCustomModel={
-                      effectiveComposerMode === "chat"
-                        ? customModels.updateModel
-                        : undefined
-                    }
-                    onDeleteCustomModel={
-                      effectiveComposerMode === "chat"
-                        ? customModels.deleteModel
-                        : undefined
-                    }
+                    onUpdateCustomModel={customModels.updateModel}
+                    onDeleteCustomModel={customModels.deleteModel}
                     onSubmit={handleSubmit}
                   />
                 </div>

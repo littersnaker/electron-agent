@@ -133,3 +133,44 @@ def test_media_route_forwards_settings_base_url(
         "api_key": "test-key",
         "base_url": "https://workspace.example.test/compatible-mode/v1",
     }
+
+
+def test_custom_media_model_crud_and_resolution(tmp_path: Path, monkeypatch) -> None:
+    """自定义媒体模型应持久化媒体字段，并可供媒体层按 ID 解析。"""
+
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("FRONTEND_DIR", raising=False)
+    get_settings.cache_clear()
+
+    from backend.services.llm.custom_models import get_custom_media_model
+
+    payload = {
+        "name": "我的豆包出图模型",
+        "provider": "doubao",
+        "model": "my-image-model-v1",
+        "baseUrl": "https://api.volces.com/",
+        "includeInAuto": False,
+        "autoPriority": 10,
+        "supportsVision": False,
+        "mediaModes": ["text-to-image"],
+        "mediaProtocol": "volcengine-image",
+        "mediaOutputKind": "image",
+    }
+    with TestClient(app) as client:
+        created_response = client.post("/api/models/custom", json=payload)
+        assert created_response.status_code == 201
+        created = created_response.json()["model"]
+        model_id = created["id"]
+        assert created["mediaModes"] == ["text-to-image"]
+        assert created["mediaProtocol"] == "volcengine-image"
+
+    # 媒体层应能解析为自定义媒体模型。
+    custom = get_custom_media_model(model_id)
+    assert custom is not None
+    assert custom["provider"] == "doubao"
+    assert custom["modes"] == ["text-to-image"]
+    assert custom["base_url"] == "https://api.volces.com"
+
+    # 纯聊天模型不应被媒体层解析。
+    chat_only = get_custom_media_model("custom:nonexistent")
+    assert chat_only is None

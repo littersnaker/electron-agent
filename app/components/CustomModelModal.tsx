@@ -6,6 +6,9 @@ import { useMemo, useState } from "react";
 import type {
   CustomModelInput,
   CustomModelRecord,
+  MediaMode,
+  MediaOutputKind,
+  MediaProtocol,
 } from "../lib/llm/custom-models";
 import type { LlmProviderId } from "../lib/llm/types";
 
@@ -21,7 +24,26 @@ const PROVIDERS: ReadonlyArray<{ id: LlmProviderId; label: string }> = [
   { id: "deepseek", label: "DeepSeek" },
   { id: "glm", label: "智谱 GLM" },
   { id: "kimi", label: "Kimi / Moonshot" },
+  { id: "doubao", label: "火山引擎 / 豆包" },
   { id: "gemini", label: "Google Gemini" },
+];
+
+const MEDIA_MODE_OPTIONS: ReadonlyArray<{
+  id: MediaMode;
+  label: string;
+}> = [
+  { id: "text-to-image", label: "文生图" },
+  { id: "text-to-video", label: "文生视频" },
+  { id: "image-edit", label: "图片编辑" },
+];
+
+const MEDIA_PROTOCOL_OPTIONS: ReadonlyArray<{
+  id: MediaProtocol;
+  label: string;
+}> = [
+  { id: "qwen-image-sync", label: "百炼图像/视频（DashScope）" },
+  { id: "volcengine-image", label: "火山引擎图像（Volcengine）" },
+  { id: "volcengine-video-async", label: "火山引擎视频异步（Volcengine）" },
 ];
 
 /** 根据用户输入显示最终请求地址，避免把 Base URL 与完整接口混淆。 */
@@ -36,6 +58,15 @@ function endpointPreview(provider: LlmProviderId, baseUrl: string): string {
   return base.endsWith("/chat/completions")
     ? base
     : `${base}/chat/completions`;
+}
+
+/** 协议决定输出类型，避免用户分别选择产生冲突。 */
+function protocolOutputKind(protocol: MediaProtocol): MediaOutputKind {
+  if (protocol === "volcengine-video-async") return "video";
+  if (protocol === "qwen-image-sync" || protocol === "volcengine-image") {
+    return "image";
+  }
+  return "";
 }
 
 export default function CustomModelModal({ initial, onClose, onSave }: Props) {
@@ -54,12 +85,26 @@ export default function CustomModelModal({ initial, onClose, onSave }: Props) {
   const [supportsVision, setSupportsVision] = useState(
     initial?.supportsVision ?? false,
   );
+  const [mediaModes, setMediaModes] = useState<MediaMode[]>(
+    initial?.mediaModes || [],
+  );
+  const [mediaProtocol, setMediaProtocol] = useState<MediaProtocol>(
+    initial?.mediaProtocol || "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const preview = useMemo(
     () => endpointPreview(provider, baseUrl),
     [baseUrl, provider],
   );
+
+  const toggleMediaMode = (mode: MediaMode) => {
+    setMediaModes((current) =>
+      current.includes(mode)
+        ? current.filter((item) => item !== mode)
+        : [...current, mode],
+    );
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -74,6 +119,9 @@ export default function CustomModelModal({ initial, onClose, onSave }: Props) {
         includeInAuto,
         autoPriority,
         supportsVision,
+        mediaModes,
+        mediaProtocol,
+        mediaOutputKind: protocolOutputKind(mediaProtocol),
       });
       onClose();
     } catch (cause) {
@@ -183,10 +231,59 @@ export default function CustomModelModal({ initial, onClose, onSave }: Props) {
             实际请求：{preview}
           </span>
           <span className="mt-1 block text-[10px] leading-4 text-[var(--text-tertiary)]">
-            此处只覆盖当前自定义聊天模型，优先级高于设置页和 .env.local；
-            图片、视频仍使用设置页的百炼 Base URL。
+            此处只覆盖当前自定义模型，优先级高于设置页和 .env.local；
+            声明了媒体模式的模型会出现在媒体选择器中。
           </span>
         </label>
+
+        <div
+          className="mt-4 grid gap-3 rounded-xl border p-3"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <span className="text-[11px] text-[var(--text-secondary)]">
+            媒体能力（勾选后可作为生图/生视频模型选择）
+          </span>
+          <div className="flex flex-wrap gap-3">
+            {MEDIA_MODE_OPTIONS.map((option) => {
+              const checked = mediaModes.includes(option.id);
+              return (
+                <label
+                  key={option.id}
+                  className="flex items-center gap-1.5 text-[11px]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleMediaMode(option.id)}
+                  />
+                  {option.label}
+                </label>
+              );
+            })}
+          </div>
+          {mediaModes.length > 0 && (
+            <label className="block text-[11px]">
+              <span className="mb-1.5 block text-[var(--text-secondary)]">
+                媒体协议（决定走百炼还是火山引擎）
+              </span>
+              <select
+                value={mediaProtocol}
+                onChange={(event) =>
+                  setMediaProtocol(event.target.value as MediaProtocol)
+                }
+                className="h-10 w-full rounded-xl border bg-[var(--glass-solid)] px-3 outline-none"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <option value="">请选择协议</option>
+                {MEDIA_PROTOCOL_OPTIONS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
 
         <div
           className="mt-4 grid gap-3 rounded-xl border p-3 sm:grid-cols-2"

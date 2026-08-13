@@ -119,14 +119,20 @@ async def _stream_direct_media(
     *,
     body: ChatRequest,
     credentials: LlmCredentials,
+    preferred_model_id: str,
     user_text: str,
 ) -> AsyncIterator[str]:
     """单次文生图/文生视频（漫剧之外的普通媒体请求）。"""
 
     is_video = "视频" in user_text or "动画" in user_text
-    model_id = VIDEO_MODEL_ID if is_video else IMAGE_MODEL_ID
+    mode = "text-to-video" if is_video else "text-to-image"
+    model_id, fallback_used = _resolve_media_model_id(preferred_model_id, mode)
     provider = str(model_id).split(":", 1)[0] or "qwen"
-    yield _lifecycle_frame(f"正在调用 {provider} 生成媒体内容…")
+    if fallback_used:
+        yield _lifecycle_frame(
+            f"所选模型不支持{mode.replace('text-', '')}，已回退内置模型 {model_id}"
+        )
+    yield _lifecycle_frame(f"正在调用 {model_id} 生成媒体内容…")
     api_key = credentials.get(provider)
     if not api_key:
         yield encode_sse(
@@ -145,7 +151,7 @@ async def _stream_direct_media(
     result = await generate_media(
         MediaGenerateBody(
             model_id=model_id,
-            mode="text-to-video" if is_video else "text-to-image",
+            mode=mode,
             prompt=prompt,
             negative_prompt="3D 渲染，CGI，塑料质感，写实照片" if not is_video else None,
             size=None if is_video else "1280*720",
@@ -162,6 +168,26 @@ async def _stream_direct_media(
             "attachments": attachments,
         }
     )
+
+
+def _resolve_media_model_id(
+    preferred_model_id: str,
+    mode: str,
+) -> tuple[str, bool]:
+    """解析本次媒体生成的模型：用户选择优先，不支持当前模式时回退内置默认。"""
+
+    selected = (preferred_model_id or "").strip()
+    if not selected or selected == "auto":
+        return (VIDEO_MODEL_ID if mode == "text-to-video" else IMAGE_MODEL_ID), False
+    from backend.services.media.catalog import get_media_model
+
+    try:
+        model = get_media_model(selected)
+        if mode in (model.get("modes") or []):
+            return selected, False
+    except ValueError:
+        pass
+    return (VIDEO_MODEL_ID if mode == "text-to-video" else IMAGE_MODEL_ID), True
 
 
 async def _stream_storyboard(
@@ -373,6 +399,7 @@ async def stream_media_agent(
         async for frame in _stream_direct_media(
             body=body,
             credentials=credentials,
+            preferred_model_id=preferred_model_id,
             user_text=user_text,
         ):
             yield frame

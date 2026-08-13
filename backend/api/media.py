@@ -71,6 +71,33 @@ def _qwen_key(request: Request) -> str:
     return resolve_provider_key(request, "qwen")
 
 
+def _media_key(request: Request, provider: str) -> str:
+    """按供应商读取媒体请求的 API Key（qwen 保留百炼内置兜底）。"""
+
+    if provider == "qwen":
+        return _qwen_key(request)
+    return resolve_provider_key(request, provider)
+
+
+def _custom_media_base_url(model_id: str) -> str | None:
+    """返回自定义媒体模型保存的 Base URL；内置模型返回 ``None``。"""
+
+    if not model_id.startswith("custom:"):
+        return None
+    from backend.services.llm.custom_models import get_custom_media_model
+
+    custom = get_custom_media_model(model_id)
+    return custom.get("base_url") if custom else None
+
+
+def _media_api_base(request: Request, provider: str) -> str | None:
+    """解析媒体请求的 Base URL；自定义模型已在调用前覆盖，这里只处理内置链路。"""
+
+    if provider == "qwen":
+        return resolve_credentials(request).get_endpoint("qwen")
+    return resolve_credentials(request).get_endpoint(provider)
+
+
 def _is_forbidden_ip(address: str) -> bool:
     """判断一个 IP 是否属于不应被下载代理访问的本机或内部网络。
 
@@ -185,17 +212,22 @@ async def post_media_generate(
     body: MediaGenerateBody,
     request: Request,
 ) -> dict[str, object]:
-    """调用百炼生成图片或视频，并返回前端统一的附件数据结构。"""
+    """调用百炼/火山生成图片或视频，并返回前端统一的附件数据结构。"""
 
-    api_key = _qwen_key(request)
+    # 按模型 ID 解析 provider：自定义媒体模型用用户自己的 Base URL 与对应供应商 Key，
+    # 内置模型沿用现有 qwen/火山 链路。
+    model_id = (body.model_id or "").strip()
+    provider = str(model_id).split(":", 1)[0] or "qwen"
+    custom_base_url = _custom_media_base_url(model_id)
+    api_key = _media_key(request, provider)
     if not api_key:
-        raise HTTPException(status_code=400, detail="未配置百炼 API Key")
-    credentials = resolve_credentials(request)
+        raise HTTPException(status_code=400, detail=f"未配置 {provider} API Key")
+    api_base = custom_base_url or _media_api_base(request, provider)
     try:
         return await generate_media(
             body,
             api_key,
-            credentials.get_endpoint("qwen"),
+            api_base,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

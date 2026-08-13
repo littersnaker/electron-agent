@@ -11,7 +11,12 @@ from uuid import uuid4
 
 from backend.schemas.custom_models import CustomModelInput
 from backend.services.llm.catalog import ModelDefinition, ProviderId
-from backend.services.workspace.database import open_database, utc_now_iso
+from backend.services.workspace.database import (
+    dumps_json,
+    loads_json,
+    open_database,
+    utc_now_iso,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +31,9 @@ class CustomModelRow:
     include_in_auto: bool
     auto_priority: int
     supports_vision: bool
+    media_modes: tuple[str, ...]
+    media_protocol: str
+    media_output_kind: str
     created_at: str
     updated_at: str
 
@@ -68,6 +76,11 @@ def _row_from_sqlite(row: object) -> CustomModelRow:
         include_in_auto=bool(values["include_in_auto"]),  # type: ignore[index]
         auto_priority=int(values["auto_priority"]),  # type: ignore[index]
         supports_vision=bool(values["supports_vision"]),  # type: ignore[index]
+        media_modes=tuple(
+            str(item) for item in loads_json(str(values["media_modes"]), [])
+        ),  # type: ignore[index]
+        media_protocol=str(values["media_protocol"] or ""),  # type: ignore[index]
+        media_output_kind=str(values["media_output_kind"] or ""),  # type: ignore[index]
         created_at=str(values["created_at"]),  # type: ignore[index]
         updated_at=str(values["updated_at"]),  # type: ignore[index]
     )
@@ -85,6 +98,9 @@ def _payload(row: CustomModelRow) -> dict[str, object]:
         "includeInAuto": row.include_in_auto,
         "autoPriority": row.auto_priority,
         "supportsVision": row.supports_vision,
+        "mediaModes": list(row.media_modes),
+        "mediaProtocol": row.media_protocol,
+        "mediaOutputKind": row.media_output_kind,
         "createdAt": row.created_at,
         "updatedAt": row.updated_at,
     }
@@ -96,7 +112,8 @@ async def initialize_custom_models() -> None:
     async with open_database() as connection:
         cursor = await connection.execute(
             "SELECT id, name, provider, model, base_url, include_in_auto, "
-            "auto_priority, supports_vision, created_at, updated_at "
+            "auto_priority, supports_vision, media_modes, media_protocol, "
+            "media_output_kind, created_at, updated_at "
             "FROM custom_models ORDER BY auto_priority, created_at"
         )
         rows = await cursor.fetchall()
@@ -116,6 +133,26 @@ def get_custom_model_definition(model_id: str) -> ModelDefinition | None:
 
     row = _CACHE.get(model_id)
     return _to_definition(row) if row else None
+
+
+def get_custom_media_model(model_id: str) -> dict[str, object] | None:
+    """返回自定义模型的媒体生成描述；非媒体模型返回 ``None``。
+
+    供媒体层在静态注册表未命中时回退使用。
+    """
+
+    row = _CACHE.get(model_id)
+    if row is None or not row.media_modes:
+        return None
+    return {
+        "id": row.id,
+        "provider": row.provider,
+        "model": row.model,
+        "base_url": row.base_url,
+        "modes": list(row.media_modes),
+        "protocol": row.media_protocol,
+        "output_kind": row.media_output_kind,
+    }
 
 
 async def list_custom_models() -> list[dict[str, object]]:
@@ -138,14 +175,18 @@ async def create_custom_model(body: CustomModelInput) -> dict[str, object]:
         include_in_auto=body.include_in_auto,
         auto_priority=body.auto_priority,
         supports_vision=body.supports_vision,
+        media_modes=tuple(body.media_modes),
+        media_protocol=body.media_protocol,
+        media_output_kind=body.media_output_kind,
         created_at=now,
         updated_at=now,
     )
     async with open_database() as connection:
         await connection.execute(
             "INSERT INTO custom_models (id, name, provider, model, base_url, "
-            "include_in_auto, auto_priority, supports_vision, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "include_in_auto, auto_priority, supports_vision, media_modes, "
+            "media_protocol, media_output_kind, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 row.id,
                 row.name,
@@ -155,6 +196,9 @@ async def create_custom_model(body: CustomModelInput) -> dict[str, object]:
                 int(row.include_in_auto),
                 row.auto_priority,
                 int(row.supports_vision),
+                dumps_json(list(row.media_modes)),
+                row.media_protocol,
+                row.media_output_kind,
                 row.created_at,
                 row.updated_at,
             ),
@@ -181,6 +225,9 @@ async def update_custom_model(
         include_in_auto=body.include_in_auto,
         auto_priority=body.auto_priority,
         supports_vision=body.supports_vision,
+        media_modes=tuple(body.media_modes),
+        media_protocol=body.media_protocol,
+        media_output_kind=body.media_output_kind,
         created_at=current.created_at,
         updated_at=utc_now_iso(),
     )
@@ -188,7 +235,8 @@ async def update_custom_model(
         await connection.execute(
             "UPDATE custom_models SET name = ?, provider = ?, model = ?, "
             "base_url = ?, include_in_auto = ?, auto_priority = ?, "
-            "supports_vision = ?, updated_at = ? WHERE id = ?",
+            "supports_vision = ?, media_modes = ?, media_protocol = ?, "
+            "media_output_kind = ?, updated_at = ? WHERE id = ?",
             (
                 row.name,
                 row.provider,
@@ -197,6 +245,9 @@ async def update_custom_model(
                 int(row.include_in_auto),
                 row.auto_priority,
                 int(row.supports_vision),
+                dumps_json(list(row.media_modes)),
+                row.media_protocol,
+                row.media_output_kind,
                 row.updated_at,
                 row.id,
             ),
