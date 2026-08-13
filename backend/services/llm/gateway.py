@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Any
 
@@ -509,7 +509,7 @@ class LlmGateway:
                 raise ProviderRequestError(
                     f"模型响应超过 {int(stall_budget)} 秒未返回数据，已终止本次调用",
                     scope="provider",
-                )
+                ) from None
             yield chunk
 
     async def probe(
@@ -583,6 +583,10 @@ class LlmGateway:
         if not api_key:
             raise ValueError(f"未配置 {provider.name} API Key")
 
+        # 让 Agent 在上下文中自知当前实际使用的模型（含 Auto 降级后的真身）。
+        # 每个候选模型调用时注入的都是它自己的名字，与实际调用完全一致。
+        messages = self._inject_model_context(model, messages)
+
         if provider.protocol == "gemini":
             async for chunk in self._protocols.stream_gemini(
                 model=model,
@@ -604,6 +608,42 @@ class LlmGateway:
             tools=tools,
         ):
             yield chunk
+
+    @staticmethod
+    def _inject_model_context(
+        model: ModelDefinition,
+        messages: list[LlmMessage],
+    ) -> list[LlmMessage]:
+        """把当前实际模型信息追加到首条 system 消息（浅拷贝，无副作用）。"""
+
+        note = (
+            "\n\n【当前模型】"
+            f"{model.name}（{model.provider}/{model.model}）。"
+            "若用户询问使用的模型或版本，请如实告知。"
+        )
+        result: list[LlmMessage] = []
+        injected = False
+        for message in messages:
+            if message.role == "system" and not injected:
+                result.append(
+                    replace(
+                        message,
+                        content=f"{message.content}{note}",
+                    )
+                )
+                injected = True
+            else:
+                result.append(message)
+        if not injected:
+            # 没有 system 消息时放在开头，保证模型始终知道当前身份。
+            result.insert(
+                0,
+                LlmMessage(
+                    "system",
+                    f"你当前使用的模型：{model.name}（{model.provider}/{model.model}）。",
+                ),
+            )
+        return result
 
     async def _stream_openai_provider(
         self,
