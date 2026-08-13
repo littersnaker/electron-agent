@@ -61,6 +61,7 @@ export function ChatComposer({
   onUpdateCustomModel,
   onDeleteCustomModel,
   onSubmit,
+  onStop,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -423,22 +424,46 @@ export function ChatComposer({
             />
             <button
               type="button"
-              onClick={onSubmit}
-              disabled={submitDisabled}
-              className="flex h-9 min-w-9 items-center justify-center rounded-[11px] px-3 text-[11px] font-semibold text-white transition-all active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-30"
+              onClick={isStreaming ? onStop : onSubmit}
+              disabled={!isStreaming && submitDisabled}
+              title={isStreaming ? "停止生成" : resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}
+              className={`flex h-9 w-9 items-center justify-center rounded-full text-white transition-all ${
+                isStreaming
+                  ? "animate-stop-breathe hover:scale-[1.06]"
+                  : "active:scale-[0.94] disabled:cursor-not-allowed disabled:opacity-30"
+              }`}
               style={{
-                background:
-                  mode === "commerce" || composerMode === "chat"
+                background: isStreaming
+                  ? "linear-gradient(180deg, #ff6961, #ff453a)"
+                  : mode === "commerce" || composerMode === "chat"
                     ? "linear-gradient(180deg, var(--message-user-start), var(--message-user-end))"
                     : "linear-gradient(180deg, #a86df5, #7d4ce5)",
-                boxShadow:
-                  mode === "commerce" || composerMode === "chat"
+                boxShadow: isStreaming
+                  ? undefined
+                  : mode === "commerce" || composerMode === "chat"
                     ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
-              title={resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}
+              aria-label={isStreaming ? "停止生成" : "发送"}
             >
-              {resolveSubmitLabel(mode, composerMode, commerceWorkflowMode)}
+              {isStreaming ? (
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor">
+                  <rect x="3" y="3" width="10" height="10" rx="2" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 20 20"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10 3.5v11" />
+                  <path d="m5.5 8 4.5-4.5L14.5 8" />
+                </svg>
+              )}
             </button>
           </div>
         </div>

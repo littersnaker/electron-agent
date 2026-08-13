@@ -56,6 +56,8 @@ export interface ChatComposerProps {
   onUpdateCustomModel?: (modelId: string, input: CustomModelInput) => Promise<void>;
   onDeleteCustomModel?: (modelId: string) => Promise<void>;
   onSubmit: () => void;
+  /** 流式生成进行中时，停止按钮的回调。 */
+  onStop?: () => void;
 }
 
 export const TYPOGRAPHY_OPTIONS: ReadonlyArray<{

@@ -452,6 +452,13 @@ export default function Home() {
                     onUpdateCustomModel={customModels.updateModel}
                     onDeleteCustomModel={customModels.deleteModel}
                     onSubmit={handleSubmit}
+                    onStop={
+                      commerce.isResearching
+                        ? commerce.stop
+                        : media.isGenerating
+                          ? media.stop
+                          : chat.stop
+                    }
                   />
                 </div>
               </div>
