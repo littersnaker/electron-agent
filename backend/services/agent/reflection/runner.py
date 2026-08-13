@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from backend.core import request_audit
+from backend.core.background import spawn
 from backend.services.agent.reflection.digest import (
     build_runtime_digest,
     build_work_digest,
@@ -462,7 +463,7 @@ def schedule_work_review(
         "project_id": project_id,
         "session_id": audit_context.session_id,
     }
-    asyncio.create_task(
+    spawn(
         _guarded_review(
             task_id=work_id,
             payload=payload,
@@ -504,7 +505,7 @@ def schedule_runtime_review(
         "session_id": session_id,
         "marketplace": marketplace,
     }
-    asyncio.create_task(
+    spawn(
         _guarded_runtime_review(
             task_id=task_id,
             payload=payload,

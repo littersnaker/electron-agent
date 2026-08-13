@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
 from backend.core import request_audit
+from backend.core.background import spawn
 from backend.services.workspace.database import (
     open_database,
     utc_now_iso,
@@ -118,17 +118,21 @@ async def memory_eval_stats() -> dict[str, Any]:
     }
 
 
-async def schedule_memory_eval(
+def schedule_memory_eval(
     *,
     task_id: str,
     agent_id: str,
     memory_ids: list[str],
 ) -> None:
-    """fire-and-forget 调度（任务完成后调用，不影响主流程）。"""
+    """fire-and-forget 调度（任务完成后调用，不影响主流程）。
+
+    注意：本函数是同步 ``def``。调用方（agent_runtime）原本按 ``async def``
+    使用却不 await，导致 coroutine 从未被调度、记忆评估静默不执行。
+    """
 
     if not task_id or not memory_ids:
         return
-    asyncio.create_task(
+    spawn(
         record_memory_eval(
             task_id=task_id,
             agent_id=agent_id,

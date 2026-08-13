@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import api_router
+from backend.core.background import drain_background_tasks
 from backend.core.config import get_settings
 from backend.core.logging import configure_console_encoding, configure_logging
 from backend.core.request_audit import RequestAuditMiddleware
@@ -44,6 +45,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        # 先排空仍在运行的后台复盘/索引任务，再关闭共享连接池，避免
+        # shutdown 期间的任务撞上已关闭的 httpx 连接（Event loop is closed）。
+        await drain_background_tasks()
         await GATEWAY.close()
         LOGGER.info("FastAPI 后端已安全关闭")
 

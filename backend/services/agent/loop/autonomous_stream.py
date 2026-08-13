@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from backend.core.background import spawn
 from backend.schemas.chat import ChatRequest
 from backend.services.agent.loop.runner import AgentLoopResult, stream_autonomous_loop
 from backend.services.agent.loop.trace import TraceHandle, add_trace_event
@@ -204,7 +204,7 @@ async def stream_prepared_autonomous(
         }
     )
     # 重建索引不阻塞最终回复；ensure_context 已对 indexing 状态去重，避免并发重建。
-    asyncio.create_task(index_project(body.project_id))
+    spawn(index_project(body.project_id))
     await add_trace_event(
         trace,
         category="agent",
