@@ -10,6 +10,7 @@ import type { CommerceProductSignal, CommerceResearchReport } from "../../../lib
 import { MetricBar, MetricSnapshot, formatCompact, scoreLabel } from "./metric-widgets";
 import { PlatformComparison, SourceCoverage } from "./source-coverage";
 import { ObservationRow, ProductRow } from "./product-signal-rows";
+import { ReviewAnalysisBlock } from "./review-analysis";
 /**
  * Cross-border Market Intelligence Agent 的结构化结果卡片。
  *
@@ -294,6 +295,10 @@ export function CommerceReportCard({
             ))}
           </div>
         </div>
+      )}
+
+      {report.reviewAnalyses && report.reviewAnalyses.length > 0 && (
+        <ReviewAnalysisBlock analyses={report.reviewAnalyses} />
       )}
 
       <div className="border-t border-[var(--border)] px-4 py-3">

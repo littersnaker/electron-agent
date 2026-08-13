@@ -131,3 +131,112 @@ def build_insights(metrics: dict[str, Any], is_demo: bool) -> dict[str, Any]:
             "在正式备货前接入平台授权数据或第三方销售估算工具进行交叉验证。",
         ],
     }
+
+
+def calculate_review_stats(reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    """根据采集到的评论文本计算评分分布与基础比率。"""
+
+    ratings = [
+        float(item["rating"])
+        for item in reviews
+        if isinstance(item.get("rating"), (int, float))
+    ]
+    distribution = {str(star): 0 for star in range(1, 6)}
+    for rating in ratings:
+        star = max(1, min(5, round(rating)))
+        distribution[str(star)] += 1
+    sample_size = len(reviews)
+    verified = sum(1 for item in reviews if item.get("verifiedPurchase"))
+    positive = sum(1 for rating in ratings if rating >= 4)
+    return {
+        "sampleSize": sample_size,
+        "averageRating": _median(ratings),
+        "ratingDistribution": distribution,
+        "verifiedPurchaseRatio": round(verified / sample_size, 3) if sample_size else None,
+        "positiveRatio": round(positive / len(ratings), 3) if ratings else None,
+    }
+
+
+_POSITIVE_TOPIC_TERMS = (
+    "好用",
+    "质量",
+    "性价比",
+    "耐用",
+    "颜值",
+    "做工",
+    "方便",
+    "推荐",
+    "满意",
+    "喜欢",
+    "手感",
+    "清晰",
+    "快速",
+    "稳定",
+    "完美",
+    "不错",
+    "好用",
+    "值",
+    "强",
+    "满意",
+)
+_NEGATIVE_TOPIC_TERMS = (
+    "差",
+    "垃圾",
+    "退货",
+    "问题",
+    "失望",
+    "坏",
+    "故障",
+    "慢",
+    "卡",
+    "掉",
+    "漏",
+    "声音",
+    "味道",
+    "异味",
+    "一般",
+    "勉强",
+    "后悔",
+    "失望",
+    "客服",
+    "物流",
+)
+
+
+def _topic_hits(reviews: list[dict[str, Any]], terms: tuple[str, ...]) -> list[str]:
+    """统计评论正文中出现次数最多的主题词。"""
+
+    counter: Counter[str] = Counter()
+    for item in reviews:
+        text = f"{item.get('title', '')} {item.get('text', '')}".lower()
+        for term in terms:
+            if term.lower() in text:
+                counter[term] += 1
+    return [term for term, _count in counter.most_common(5)]
+
+
+def deterministic_review_sentiment(
+    reviews: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """无 LLM 的评论情感兜底：按主题词出现频次归纳正负面重点。"""
+
+    positive_topics = _topic_hits(reviews, _POSITIVE_TOPIC_TERMS)
+    negative_topics = _topic_hits(reviews, _NEGATIVE_TOPIC_TERMS)
+    sample_size = len(reviews)
+    if sample_size == 0:
+        return {
+            "summary": "未采集到可分析的评论内容。",
+            "positiveTopics": [],
+            "negativeTopics": [],
+        }
+    summary = (
+        f"共分析 {sample_size} 条评论；正面重点"
+        f"（{'、'.join(positive_topics) if positive_topics else '暂无显著正面词'}"
+        f"），负面重点"
+        f"（{'、'.join(negative_topics) if negative_topics else '暂无显著负面词'}）。"
+    )
+    return {
+        "summary": summary,
+        "positiveTopics": positive_topics,
+        "negativeTopics": negative_topics,
+    }

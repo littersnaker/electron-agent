@@ -232,6 +232,43 @@ export interface CommerceResearchInsights {
   actions: string[];
 }
 
+/** 单个商品的 Amazon 评论分析结果（评分分布 + 情感主题 + 评论样本）。 */
+export interface CommerceReviewAnalysis {
+  asin: string;
+  productTitle: string;
+  stats: {
+    sampleSize: number;
+    averageRating: number | null;
+    ratingDistribution: Record<string, number>;
+    verifiedPurchaseRatio: number | null;
+    positiveRatio: number | null;
+  };
+  /** 确定性词频兜底或 LLM 增强后的情感结论。 */
+  sentiment: {
+    summary: string;
+    positiveTopics: string[];
+    negativeTopics: string[];
+    keyFindings?: string[];
+    suggestions?: string[];
+  };
+  sentimentSource: "template" | "llm";
+  positiveTopics: string[];
+  negativeTopics: string[];
+  samples: Array<{
+    rating: number | null;
+    title: string | null;
+    text: string | null;
+    date: string | null;
+    verifiedPurchase: boolean | null;
+  }>;
+  dataSource: {
+    provider: string;
+    quality: CommerceDataQuality;
+    isDemo: boolean;
+  };
+  warnings: string[];
+}
+
 export interface CommerceResearchReport {
   /** v3：公开市场情报成为核心，平台 API 变为可选增强。 */
   version: 2 | 3;
@@ -249,6 +286,8 @@ export interface CommerceResearchReport {
   observations?: CommerceMarketObservation[];
   metrics: CommerceMarketMetrics;
   insights: CommerceResearchInsights;
+  /** 评论分析结果；历史报告或未采集到 Amazon 商品时不存在。 */
+  reviewAnalyses?: CommerceReviewAnalysis[];
   /** 兼容旧 UI 的主数据源摘要。 */
   dataSource: {
     provider: CommerceDataProviderKind | "multi-source" | "none";

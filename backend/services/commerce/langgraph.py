@@ -8,7 +8,9 @@ COMMERCE_LISTING / USAGE），把流程改为节点化编排：
 
 from __future__ import annotations
 
+import asyncio
 import operator
+import os
 import random
 from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
@@ -20,6 +22,8 @@ from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.analytics import (
     build_insights,
     calculate_metrics,
+    calculate_review_stats,
+    deterministic_review_sentiment,
     observations_to_products,
     resolve_category,
 )
@@ -29,12 +33,14 @@ from backend.services.commerce.llm import (
     CommerceCategoryAnalysis,
     CommerceInsights,
     CommerceListingDraft,
+    CommerceReviewInsights,
     LlmConfig,
     try_complete_json,
 )
 from backend.services.commerce.marketplaces import get_marketplace
 from backend.services.commerce.sources.ali1688 import search_1688
 from backend.services.commerce.sources.amazon import search_amazon
+from backend.services.commerce.sources.amazon_reviews import fetch_amazon_reviews
 from backend.services.commerce.sources.tiktokshop import (
     fetch_tiktok_access_token,
     search_tiktok_shop,
@@ -69,6 +75,38 @@ def _demo_observations(query: str, currency: str, count: int = 12) -> list[dict[
             }
         )
     return observations
+
+
+def _demo_reviews(asin: str, title: str, count: int = 8) -> list[dict[str, Any]]:
+    """生成明确标注的演示评论，保证无真实评论时报告仍可展示分析结构。"""
+
+    samples = [
+        ("实用", 4.0, "做工扎实，日常使用完全够用，物流也快。"),
+        ("不错", 4.5, "和描述一致，性价比可以，暂时没发现问题。"),
+        ("一般", 3.0, "功能符合预期，但包装略显简陋，细节还有提升空间。"),
+        ("值得", 5.0, "用了两周很满意，续航和手感都超出预期。"),
+        ("失望", 2.0, "收到货有轻微瑕疵，客服处理偏慢，体验一般。"),
+        ("推荐", 4.5, "整体推荐，安装简单，说明书清晰。"),
+        ("耐用", 4.0, "用了几个月依旧稳定，没有出现明显磨损。"),
+        ("质感", 4.5, "颜值高、做工细腻，送礼也合适。"),
+    ]
+    reviews: list[dict[str, Any]] = []
+    for index in range(count):
+        title_text, rating, text = samples[index % len(samples)]
+        reviews.append(
+            {
+                "id": f"demo-review-{asin}-{index + 1}",
+                "asin": asin,
+                "rating": rating,
+                "title": title_text,
+                "text": f"{text}（离线演示样本，不代表真实评论。）",
+                "author": "Demo Buyer",
+                "date": "",
+                "verifiedPurchase": index % 3 == 0,
+                "isDemo": True,
+            }
+        )
+    return reviews
 
 
 _CATEGORY_PROMPT = """目标市场：__MARKET__
@@ -117,6 +155,23 @@ _LISTING_PROMPT = """用户 Brief：__QUERY__
 禁止编造尺寸、材质、认证、保修、性能等未提供的事实。"""
 
 
+_REVIEW_PROMPT = """商品：__TITLE__
+市场：__MARKET__
+
+以下是从 Amazon 评论页采集到的用户评论（标题 | 星级 | 正文截断）：
+__REVIEWS__
+
+请输出评论洞察 JSON：
+{
+  "summary": "整体口碑一句话总结",
+  "positiveTopics": ["用户反复提到的正面点，3-6 个"],
+  "negativeTopics": ["用户反复抱怨的负面点，3-6 个"],
+  "keyFindings": ["2-4 条关键发现"],
+  "suggestions": ["针对负面点的改进建议，2-4 条"]
+}
+只基于给定评论，禁止编造样本外的销量、排名等数据。"""
+
+
 def _compact_products(products: list[dict[str, Any]], limit: int = 20) -> str:
     """把商品样本压缩成 LLM 可读的紧凑文本。"""
 
@@ -130,6 +185,52 @@ def _compact_products(products: list[dict[str, Any]], limit: int = 20) -> str:
             f"- {title} | price={price} | rating={rating} | reviews={reviews}"
         )
     return "\n".join(lines)
+
+
+# 评论分析最多覆盖的商品数；只对评论量最高的 Amazon 商品执行。
+_REVIEW_MAX_PRODUCTS = 3
+
+
+def _review_sources(state: ResearchState) -> list[dict[str, Any]]:
+    """为报告生成 amazon-reviews 数据源条目（成功/降级/未执行三种状态）。"""
+
+    analyses = state.get("review_analyses") or []
+    if not analyses:
+        return [
+            {
+                "id": "amazon-reviews",
+                "label": "Amazon 评论",
+                "status": "unconfigured",
+                "quality": "unavailable",
+                "sampleSize": 0,
+                "coverage": [],
+                "summary": "本轮未采集到 Amazon 商品评论。",
+                "warnings": [],
+            }
+        ]
+    collected = [item for item in analyses if not item.get("dataSource", {}).get("isDemo")]
+    demo_count = len(analyses) - len(collected)
+    sample_size = sum(int(item.get("stats", {}).get("sampleSize") or 0) for item in analyses)
+    return [
+        {
+            "id": "amazon-reviews",
+            "label": "Amazon 评论",
+            "status": "collected" if collected else "demo",
+            "quality": "medium" if collected and not demo_count else "low",
+            "sampleSize": sample_size,
+            "coverage": ["评分分布", "情感主题", "评论样本"],
+            "summary": (
+                f"已分析 {len(analyses)} 个商品的 {sample_size} 条评论。"
+                if collected
+                else "评论采集失败，使用演示样本占位。"
+            ),
+            "warnings": [
+                warning
+                for item in analyses
+                for warning in (item.get("warnings") or [])
+            ][:5],
+        }
+    ]
 
 
 def _last_write(_current: Any, update: Any) -> Any:
@@ -153,6 +254,7 @@ class ResearchState(TypedDict):
     metrics: dict[str, Any]
     insights: dict[str, Any]
     insights_source: str
+    review_analyses: Annotated[list[dict[str, Any]], operator.add]
     report: dict[str, Any]
     is_demo: bool
     platform_status: Annotated[list[dict[str, Any]], operator.add]
@@ -393,6 +495,117 @@ def build_research_graph(
             "is_demo": is_demo,
         }
 
+    async def _analyze_one_review_product(
+        product: dict[str, Any],
+        credentials: dict[str, str],
+        llm_enhanced: bool,
+    ) -> dict[str, Any]:
+        """采集并分析单个商品的评论；任何失败降级为演示数据，不中断流程。"""
+
+        asin = str(product.get("asin") or "").strip()
+        # 商品 id 形如 "amazon-<ASIN>" 或 TalorData 的 "market-*"；只有 Amazon 源才有 ASIN。
+        amazon_asin = (
+            asin[len("amazon-") :]
+            if asin.startswith("amazon-") and len(asin) > len("amazon-")
+            else asin
+        )
+        title = str(product.get("title") or "")[:160]
+        review_limit = int(os.getenv("COMMERCE_REVIEW_LIMIT", "30").strip() or 30)
+        warnings: list[str] = []
+        is_demo = False
+        try:
+            reviews, _diagnostic = await fetch_amazon_reviews(
+                amazon_asin,
+                marketplace,
+                dict(credentials),
+                limit=review_limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Amazon 评论采集失败：{str(exc)[:160]}")
+            reviews = _demo_reviews(amazon_asin, title)
+            is_demo = True
+        if not reviews:
+            warnings.append("Amazon 评论页未解析到评论，使用演示样本占位。")
+            reviews = _demo_reviews(amazon_asin, title)
+            is_demo = True
+        stats = calculate_review_stats(reviews)
+        sentiment = deterministic_review_sentiment(reviews)
+        sentiment_source = "template"
+        samples = [
+            {
+                "rating": item.get("rating"),
+                "title": item.get("title"),
+                "text": item.get("text"),
+                "date": item.get("date"),
+                "verifiedPurchase": item.get("verifiedPurchase"),
+            }
+            for item in reviews[:3]
+        ]
+        # LLM 增强只对第一个商品执行，控制耗时与 token 消耗。
+        if llm is not None and llm_enhanced and not is_demo:
+            llm_insights = await try_complete_json(
+                llm,
+                system_prompt=(
+                    "你是跨境电商评论分析师。基于给定评论提炼口碑重点与改进建议，"
+                    "只返回一个 JSON 对象，禁止 Markdown 围栏。"
+                ),
+                user_prompt=_REVIEW_PROMPT.replace(
+                    "__TITLE__", title
+                ).replace("__MARKET__", marketplace_meta["label"]).replace(
+                    "__REVIEWS__",
+                    "\n".join(
+                        f"- {item.get('title', '')} | {item.get('rating', '')}星 | "
+                        f"{str(item.get('text', ''))[:120]}"
+                        for item in reviews[:20]
+                    ),
+                ),
+                schema_cls=CommerceReviewInsights,
+            )
+            if llm_insights is not None:
+                sentiment = llm_insights.model_dump()
+                sentiment_source = "llm"
+        return {
+            "asin": amazon_asin,
+            "productTitle": title,
+            "stats": stats,
+            "sentiment": sentiment,
+            "sentimentSource": sentiment_source,
+            "positiveTopics": sentiment.get("positiveTopics") or [],
+            "negativeTopics": sentiment.get("negativeTopics") or [],
+            "samples": samples,
+            "dataSource": {
+                "provider": "amazon-reviews",
+                "quality": "low" if is_demo else "medium",
+                "isDemo": is_demo,
+            },
+            "warnings": warnings,
+        }
+
+    async def review_source(state: ResearchState) -> dict[str, Any]:
+        """对 Amazon 商品按评论数取 top 3，并行采集并分析评论。"""
+
+        products = state.get("products") or []
+        amazon_products = [
+            item
+            for item in products
+            if str(item.get("asin") or "").startswith("amazon-")
+            or str(item.get("source") or "").startswith("amazon")
+        ]
+        amazon_products.sort(
+            key=lambda item: float(item.get("reviewCount") or 0),
+            reverse=True,
+        )
+        selected = amazon_products[: _REVIEW_MAX_PRODUCTS]
+        if not selected:
+            return {}
+        analyses = await asyncio.gather(
+            *(
+                _analyze_one_review_product(product, state["credentials"], index == 0)
+                for index, product in enumerate(selected)
+            )
+        )
+        return {"review_analyses": list(analyses)}
+
     async def report_node(state: ResearchState) -> dict[str, Any]:
         observations = state.get("observations") or []
         is_demo = bool(state.get("is_demo") or not observations)
@@ -412,6 +625,7 @@ def build_research_graph(
             "observations": observations,
             "metrics": state.get("metrics"),
             "insights": state.get("insights"),
+            "reviewAnalyses": state.get("review_analyses") or [],
             "dataSource": {
                 "provider": provider,
                 "quality": "low" if is_demo else "medium",
@@ -482,6 +696,7 @@ def build_research_graph(
                     if source_id
                     not in {item.get("provider") for item in (state.get("platform_status") or [])}
                 ],
+                *_review_sources(state),
             ],
             "confidenceScore": 28 if is_demo else min(85, 45 + len(observations) * 2),
             "warnings": list(state.get("warnings") or []),
@@ -496,6 +711,7 @@ def build_research_graph(
     graph.add_node("demo_fill", demo_fill)
     graph.add_node("normalize", normalize_node)
     graph.add_node("analyze", analyze_node)
+    graph.add_node("review_source", review_source)
     graph.add_node("report", report_node)
     graph.add_edge(START, "intent")
     graph.add_conditional_edges(
@@ -507,7 +723,8 @@ def build_research_graph(
     graph.add_edge("platform_source", "demo_fill")
     graph.add_edge("demo_fill", "normalize")
     graph.add_edge("normalize", "analyze")
-    graph.add_edge("analyze", "report")
+    graph.add_edge("analyze", "review_source")
+    graph.add_edge("review_source", "report")
     graph.add_edge("report", END)
     return graph.compile()
 

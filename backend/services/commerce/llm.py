@@ -53,6 +53,16 @@ class CommerceInsights(BaseModel):
     actions: list[str]
 
 
+class CommerceReviewInsights(BaseModel):
+    """LLM 评论分析洞察（单个商品的评分分布之外的语义提炼）。"""
+
+    summary: str
+    positiveTopics: list[str]
+    negativeTopics: list[str]
+    keyFindings: list[str]
+    suggestions: list[str]
+
+
 class LlmConfig:
     """一次电商工作流使用的 LLM 配置（凭证 + 模型）。"""
 
