@@ -413,7 +413,9 @@ class LlmGateway:
                 error=str(exc),
             )
             raise
-        text, usage, model = result
+        text, usage, model, first_chunk_at = result
+        # 真实首 token 延迟：_complete_impl 已记录首个 chunk 到达时间，不再用总耗时近似。
+        ttft_ms = _ttft_ms(started, first_chunk_at)
         request_audit.record(
             kind="llm.complete",
             request_id=request_id,
@@ -426,9 +428,7 @@ class LlmGateway:
                 "model": model.model,
                 "provider": model.provider,
                 "name": model.name,
-                # 首 token 延迟：complete 内部已记录 first_chunk_at，
-                # 此处用整体耗时近似（审计用途），精确值在 agent_step_metrics 采集。
-                "ttftMs": request_audit.duration_ms(started),
+                "ttftMs": ttft_ms,
             },
             agent=audit_info,
         )
@@ -438,10 +438,11 @@ class LlmGateway:
             provider=model.provider,
             model=model.model,
             usage=usage,
-            ttft_ms=request_audit.duration_ms(started),
+            ttft_ms=ttft_ms,
             total_ms=request_audit.duration_ms(started),
         )
-        return result
+        # 公共签名保持三元组；first_chunk_at 只用于审计与指标落库。
+        return text, usage, model
 
     async def _complete_impl(
         self,
@@ -453,8 +454,8 @@ class LlmGateway:
         timeout_seconds: float | None = None,
         stall_timeout_seconds: float | None = None,
         tools: list[dict[str, Any]] | None = None,
-    ) -> tuple[str, LlmUsage, ModelDefinition]:
-        """原始完整响应实现，供 complete() 审计包装调用。"""
+    ) -> tuple[str, LlmUsage, ModelDefinition, float | None]:
+        """原始完整响应实现，供 complete() 审计包装调用。第四项是首 chunk 时间戳。"""
 
         candidates = self.resolve_candidates(
             preferred_model_id,
@@ -529,7 +530,7 @@ class LlmGateway:
                 # 本地估算补齐统计，保证 Token Budget 与前端用量始终可用。
                 usage = ensure_usage(usage, messages=messages, output_text=result)
                 AVAILABILITY.mark_success(model, credentials)
-                return result, usage, model
+                return result, usage, model, first_chunk_at
             except ProviderRequestError as exc:
                 provider = get_provider(model.provider)
                 failures.append(

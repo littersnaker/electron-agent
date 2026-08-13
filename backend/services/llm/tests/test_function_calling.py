@@ -109,7 +109,7 @@ async def test_complete_accumulates_unnamed_id_tool_call_fragments(monkeypatch) 
         lambda *_: None,
     )
 
-    text, usage, _model = await gateway._complete_impl(
+    text, usage, _model, _first_chunk_at = await gateway._complete_impl(
         preferred_model_id="deepseek-v4-flash",
         credentials=LlmCredentials(values={}),
         messages=[LlmMessage("user", "hi")],
