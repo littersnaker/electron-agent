@@ -283,9 +283,13 @@ class AgentRuntime:
                 continue
             try:
                 await record_skill_usage(skill_id)
-            except Exception:
-                # 使用率统计失败不影响主流程。
-                pass
+            except Exception as exc:
+                # 使用率统计失败不影响主流程，但要记录原因便于排查。
+                LOGGER.warning(
+                    "Skill 使用率统计失败（skill=%s）：%s",
+                    skill_id,
+                    str(exc)[:160],
+                )
         return resolved
 
     async def execute(self, request: RuntimeRequest) -> list[str]:

@@ -224,7 +224,8 @@ async def _try_batch_write(
                 "parentRequestId": work.id,
             },
         )
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("batch_write 调用失败（%s），转常规循环", str(exc)[:160])
         return None, "write_failed"
     usage_add(state.usage, usage)
     await emit(

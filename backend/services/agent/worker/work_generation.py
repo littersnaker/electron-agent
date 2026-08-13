@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import cast
 
@@ -38,6 +39,8 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
 from backend.services.tools.code_tools import execute_code_tool
+
+LOGGER = logging.getLogger(__name__)
 
 
 async def _try_generate_all_files(
@@ -92,7 +95,8 @@ async def _try_generate_all_files(
                 "parentRequestId": work.id,
             },
         )
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("generate_all 调用失败（%s），转常规循环", str(exc)[:160])
         return None
     usage_add(state.usage, usage)
     await emit(
@@ -310,8 +314,12 @@ async def _try_write_then_review(
                 "parentRequestId": work.id,
             },
         )
-    except Exception:
-        state.append_transcript("REVIEW CALL FAILED，接受已写入结果")
+    except Exception as exc:
+        LOGGER.warning("review_patch 调用失败，接受已写入结果：%s", exc)
+        reason = str(exc)[:160]
+        state.append_transcript(
+            f"REVIEW CALL FAILED: {reason or '未知原因'}，接受已写入结果"
+        )
         return WorkExecutionResult(
             work_id=work.id,
             succeeded=True,

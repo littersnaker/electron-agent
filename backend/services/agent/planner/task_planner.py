@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage, LlmUsage
 from backend.services.software_factory.planning import enrich_software_factory_works
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -359,7 +362,13 @@ priority 数字越小越先执行；互不依赖且 targetFiles/serialGroup 不�
             model_name=model.name,
             review_notes=review_report.adjustments,
         )
-    except Exception:
+    except Exception as exc:
+        # 兜底计划仍然返回给调度层，但失败原因必须可见，避免缺 Key/超时/
+        # 供应商错误被误认为“计划优化成功”而误导后续排查。
+        LOGGER.warning(
+            "Planner LLM 规划失败，降级为单 Work 兜底计划：%s",
+            str(exc)[:200],
+        )
         return PreparedTask(
             plan=_enriched_fallback_plan(
                 user_request,
