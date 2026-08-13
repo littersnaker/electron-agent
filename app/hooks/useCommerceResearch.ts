@@ -193,7 +193,9 @@ export function useCommerceResearch({
             : session,
         ),
       );
-      void persistSession(activeSession, optimisticHistory, title);
+      void persistSession(activeSession, optimisticHistory, title).catch((error) => {
+        console.warn("[useCommerceResearch] 会话乐观保存失败，重启后消息可能丢失", error);
+      });
       clearAfterSubmit();
 
       setIsResearching(true);
@@ -337,9 +339,9 @@ export function useCommerceResearch({
                 const detail =
                   packet.agent.currentTask ||
                   packet.agent.task ||
-                  effectiveWorkflowMode === "listing"
+                  (effectiveWorkflowMode === "listing"
                     ? "Amazon Listing Builder 执行失败"
-                    : "Cross-border Market Intelligence Agent 执行失败";
+                    : "Cross-border Market Intelligence Agent 执行失败");
                 runFailed = true;
                 checkpointResult = { status: "failed", error: detail };
                 setAgentStatus(detail);
@@ -454,7 +456,9 @@ export function useCommerceResearch({
               : session,
           ),
         );
-        void persistSession(activeSession, finalHistory, title);
+        void persistSession(activeSession, finalHistory, title).catch((error) => {
+          console.warn("[useCommerceResearch] 会话最终保存失败，重启后消息可能丢失", error);
+        });
         setIsResearching(false);
         setAgentStatus("");
         abortRef.current = null;

@@ -137,7 +137,9 @@ export function useChatStream({
             session.id === activeSession.id ? failedSession : session,
           ),
         );
-        void persistSession(activeSession, errorHistory, title);
+        void persistSession(activeSession, errorHistory, title).catch((error) => {
+          console.warn("[useChatStream] 会话保存失败，重启后消息可能丢失", error);
+        });
         clearAfterSubmit();
         await options.onCheckpointFinish?.({ status: "failed", error: workspaceError });
         return;
@@ -187,7 +189,9 @@ export function useChatStream({
         ),
       );
       setMessages(visibleHistory);
-      void persistSession(activeSession, visibleHistory, title);
+      void persistSession(activeSession, visibleHistory, title).catch((error) => {
+        console.warn("[useChatStream] 会话保存失败，重启后消息可能丢失", error);
+      });
       clearAfterSubmit();
       setIsStreaming(true);
       setToolActivities([]);
@@ -453,7 +457,9 @@ export function useChatStream({
             session.id === activeSession.id ? finalSession : session,
           ),
         );
-        void persistSession(activeSession, finalHistory, title);
+        void persistSession(activeSession, finalHistory, title).catch((error) => {
+          console.warn("[useChatStream] 会话保存失败，重启后消息可能丢失", error);
+        });
         abortRef.current = null;
         setIsStreaming(false);
         setAgentStatus("");

@@ -1,7 +1,7 @@
 // 模块说明：负责 useWorkspaceController 状态管理与业务编排。
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type {
   ChatSession,
@@ -100,6 +100,10 @@ export function useWorkspaceController(
     [projects],
   );
 
+  // 仅应用启动的首次加载恢复核心 QA 会话；之后插件开关变化引起的
+  // refreshWorkspace 重跑只更新会话列表，不打断正在查看/执行的会话。
+  const initializedRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -107,6 +111,9 @@ export function useWorkspaceController(
       try {
         const workspace = await refreshWorkspace();
         if (cancelled) return;
+
+        if (initializedRef.current) return;
+        initializedRef.current = true;
 
         // 插件化后，应用启动始终优先恢复核心 QA，而不是最近一次 Code / Commerce 会话。
         // 这样首屏不会因为上次停留在重型 Agent 而立即进入插件工作流。
