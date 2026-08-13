@@ -78,8 +78,15 @@ async def list_workspace(
     return WorkspaceResponse(projects=projects, sessions=sessions)
 
 
-async def create_project(root_path: str) -> WorkspaceProject:
-    """创建或恢复一个本地项目记录。"""
+async def create_project(
+    root_path: str,
+    init_options: list[str] | None = None,
+) -> WorkspaceProject:
+    """创建或恢复一个本地项目记录。
+
+    ``init_options`` 是用户在创建时勾选的初始化选项（git/readme/skeleton）；
+    只对“新建”项目执行，重复打开已登记的项目不重复初始化。
+    """
 
     root = normalize_root_path(root_path)
     now = utc_now_iso()
@@ -104,6 +111,12 @@ async def create_project(root_path: str) -> WorkspaceProject:
             "VALUES (?, ?, ?, 'idle', 0, ?)",
             (project_id, root.name or str(root), str(root), now),
         )
+
+    if init_options:
+        from backend.services.workspace.project_initializer import initialize_project
+
+        await initialize_project(root, init_options)
+
     return WorkspaceProject.model_validate(
         {
             "id": project_id,

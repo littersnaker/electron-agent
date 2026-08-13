@@ -6,6 +6,7 @@ import type { MouseEvent } from "react";
 import AgentTaskPanel from "./components/AgentTaskPanel";
 import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
+import { ProjectInitModal } from "./components/ProjectInitModal";
 import ApiKeyModal from "./components/ApiKeyModal";
 import SkillsManagerPage from "./components/skills-manager/SkillsManagerPage";
 import { ChatComposer } from "./components/ChatComposer";
@@ -67,6 +68,8 @@ export default function Home() {
   const [commerceMarketplace, setCommerceMarketplace] =
     useState<CommerceMarketplaceCode>("US");
   const [showPluginCenter, setShowPluginCenter] = useState(false);
+  /** 用户已选目录、等待确认初始化选项的创建流程。 */
+  const [pendingProjectFolder, setPendingProjectFolder] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<"workspace" | "skills">(
     "workspace",
   );
@@ -240,11 +243,10 @@ export default function Home() {
       setShowPluginCenter(true);
       return;
     }
-    const project = await workspace.addProject();
-    if (project) {
-      setComposerMode("chat");
-      resetConversationUi();
-    }
+    const rootPath = await workspace.pickProjectFolder();
+    if (!rootPath) return;
+    // 选完目录先弹初始化选项，用户确认后再真正创建。
+    setPendingProjectFolder(rootPath);
   };
   const handlePluginChange = (
     pluginId: BuiltinPluginId,
@@ -306,6 +308,21 @@ export default function Home() {
           initialServiceKeys={apiKey.serviceKeys}
           onSave={apiKey.handleSaveKeys}
           onClose={apiKey.closeKeyModal}
+        />
+      )}
+      {pendingProjectFolder && (
+        <ProjectInitModal
+          folderName={pendingProjectFolder.split(/[\\/]/).pop() || pendingProjectFolder}
+          onConfirm={async (options) => {
+            const folder = pendingProjectFolder;
+            setPendingProjectFolder(null);
+            const project = await workspace.createProjectWithOptions(folder, options);
+            if (project) {
+              setComposerMode("chat");
+              resetConversationUi();
+            }
+          }}
+          onCancel={() => setPendingProjectFolder(null)}
         />
       )}
       {showPluginCenter && (

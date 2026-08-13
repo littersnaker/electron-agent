@@ -274,6 +274,46 @@ export function useWorkspaceController(
     }
   }, [createSession, refreshWorkspace, reindexProject]);
 
+  /** 第一步：只让用户选择目录，返回路径供初始化弹窗使用（不创建）。 */
+  const pickProjectFolder = useCallback(async (): Promise<string | null> => {
+    const rootPath = await window.electronAPI?.selectFolder?.();
+    return rootPath || null;
+  }, []);
+
+  /** 第二步：用选定的目录与初始化选项创建项目。 */
+  const createProjectWithOptions = useCallback(
+    async (
+      rootPath: string,
+      initOptions: string[],
+    ): Promise<WorkspaceProject | null> => {
+      try {
+        const response = await apiFetch("/api/workspace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "createProject",
+            rootPath,
+            extraPayload: { initOptions },
+          }),
+        });
+        if (!response.ok) {
+          throw new Error((await response.json()).error || "添加项目失败");
+        }
+        const { project } = (await response.json()) as {
+          project: WorkspaceProject;
+        };
+        await refreshWorkspace();
+        await createSession("code", project.id, project);
+        void reindexProject(project.id);
+        return project;
+      } catch (error) {
+        console.error(error);
+        return null;
+      }
+    },
+    [createSession, refreshWorkspace, reindexProject],
+  );
+
   return {
     projects,
     sessions,
@@ -289,6 +329,8 @@ export function useWorkspaceController(
     deleteSession,
     reindexProject,
     addProject,
+    pickProjectFolder,
+    createProjectWithOptions,
   };
 }
 

@@ -41,7 +41,12 @@ async def post_workspace_action(body: WorkspaceAction) -> dict[str, object]:
         if body.action == "createProject":
             if not body.root_path:
                 raise ValueError("项目根目录不能为空")
-            project = await create_project(body.root_path)
+            init_options = (
+                body.extra_payload.get("initOptions")
+                if isinstance(body.extra_payload, dict)
+                else None
+            )
+            project = await create_project(body.root_path, init_options)
             return {"project": project.model_dump(by_alias=True)}
 
         if body.action == "createSession":
