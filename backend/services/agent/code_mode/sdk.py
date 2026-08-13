@@ -14,7 +14,7 @@ SDK_BLOCK = """## run_code SDK（CODE_AGENT_CODE_MODE 已开启）
 
 规则：
 1. 只有 print() 或 return 的内容会回到上下文，工具的完整输出不会自动注入；
-2. read/search/inspect 可以并行（asyncio.gather，最多 4 个）；edit/run 必须串行；
+2. read_many 一次读多个文件（最多 4 个，顺序执行）；工具调用是串行一问一答，不要自己开 asyncio.gather 并发调工具；
 3. 工具调用失败会抛异常，可以用 try/except 捕获并 print 错误；
 4. 程序必须是自包含的，不要 import 任何第三方库；
 5. 优先用 read_many 一次读多个文件，减少往返。
