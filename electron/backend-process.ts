@@ -137,6 +137,17 @@ function buildBackendEnvironment(port: number): NodeJS.ProcessEnv {
     BACKEND_PORT: String(port),
     AGENT_DATA_DIR: getStableDataPath("python-data"),
     FRONTEND_DIR: frontendDirectory,
+    // run_code 批量执行通道：把随安装包分发的独立 Python 运行时注入后端，
+    // 开发模式用系统 Python（后端 sys.executable 兜底），这里只在打包时指定。
+    ...(development
+      ? {}
+      : {
+          CODE_AGENT_PYTHON: path.join(
+            process.resourcesPath,
+            "python-runtime",
+            "python.exe",
+          ),
+        }),
     ...(fs.existsSync(envFile) ? { APP_ENV_FILE: envFile } : {}),
   };
 }

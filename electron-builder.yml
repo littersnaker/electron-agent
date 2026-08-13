@@ -25,6 +25,12 @@ extraResources:
     to: backend
     filter:
       - "**/*"
+  # run_code 批量执行通道用的独立 Python 运行时（embeddable），安装后位于
+  # resources/python-runtime/python.exe，由后端经 CODE_AGENT_PYTHON 定位。
+  - from: python-dist/python-runtime
+    to: python-runtime
+    filter:
+      - "**/*"
   - from: public/icon.ico
     to: icon.ico
   - from: public/icon.png

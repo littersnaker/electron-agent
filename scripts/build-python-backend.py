@@ -12,9 +12,7 @@ import sys
 from pathlib import Path
 
 import PyInstaller.__main__
-
 from embed_builtin_credentials import embed_builtin_credentials
-
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIRECTORY = ROOT / "python-dist"
@@ -117,11 +115,35 @@ def build_executable() -> None:
     PyInstaller.__main__.run(_pyinstaller_arguments())
 
 
+def prepare_python_runtime() -> Path:
+    """准备 run_code 用的独立 Python 运行时（python-dist/python-runtime/）。
+
+    PyInstaller onedir 不含独立 python.exe，run_code 需要在子进程执行模型写的
+    程序。这里把构建机预置的 embeddable python（tools/embed-python/）复制过去；
+    构建机没有预置目录时给出明确提示，不静默产出残缺安装包。
+    """
+
+    runtime_dir = OUTPUT_DIRECTORY / "python-runtime"
+    embedded = ROOT / "tools" / "embed-python"
+    if runtime_dir.is_dir():
+        return runtime_dir
+    if not embedded.is_dir() or not (embedded / "python.exe").is_file():
+        raise SystemExit(
+            "缺少 run_code 运行时：请把 Windows embeddable python 解压到 "
+            f"{embedded}/（需含 python.exe）。这是 run_code 批量执行通道的依赖。"
+        )
+    shutil.copytree(embedded, runtime_dir, dirs_exist_ok=True)
+    print(f"run_code Python 运行时已就绪：{runtime_dir}")
+    return runtime_dir
+
+
 def main() -> None:
     """执行清理和构建，并检查最终文件是否存在。"""
 
     check_build_environment()
     clean_previous_build()
+    if sys.platform == "win32":
+        prepare_python_runtime()
     build_executable()
     bundle_directory = OUTPUT_DIRECTORY / "multi-agent-backend"
     executable_name = (
