@@ -15,7 +15,6 @@ Beginner setup and related guides (Chinese):
 
 - [README_CN.md](./README_CN.md)
 - [INSTALL_PYTHON_CN.md](./INSTALL_PYTHON_CN.md)
-- [MIGRATION_GUIDE_CN.md](./MIGRATION_GUIDE_CN.md)
 
 ## 1. Fastest start
 
@@ -157,7 +156,7 @@ The build pipeline produces, in order:
 3. `python-dist/multi-agent-backend/`: the Python backend executable and its `_internal` runtime dependencies;
 4. `release/`: the final installer.
 
-Production installers do not copy `.env.local` directly. When building the Python backend, the script only extracts the Bailian `DASHSCOPE_API_KEY` and the optional `DASHSCOPE_BASE_URL` into a generated credentials module embedded in the PyInstaller executable. Users without a personal Bailian key automatically use this fallback; once a personal key is configured it takes priority. See [BUILTIN_BAILIAN_FALLBACK_CN.md](./BUILTIN_BAILIAN_FALLBACK_CN.md).
+Production installers do not copy `.env.local` directly. When building the Python backend, the script only extracts the Bailian `DASHSCOPE_API_KEY` and the optional `DASHSCOPE_BASE_URL` into a generated credentials module embedded in the PyInstaller executable. Users without a personal Bailian key automatically use this fallback; once a personal key is configured it takes priority.
 
 ## 5. How to read the Python backend
 
@@ -280,8 +279,6 @@ The onedir backend at `python-dist/multi-agent-backend/` was not produced before
 python scripts/build-python-backend.py
 pnpm electron:make
 ```
-
-More migration notes: [MIGRATION_GUIDE_CN.md](./MIGRATION_GUIDE_CN.md); checks performed so far: [VALIDATION_REPORT_CN.md](./VALIDATION_REPORT_CN.md).
 
 Packaged backend cold-start and health-check notes: [PACKAGED_BACKEND_STARTUP_FIX_CN.md](./PACKAGED_BACKEND_STARTUP_FIX_CN.md).
 
