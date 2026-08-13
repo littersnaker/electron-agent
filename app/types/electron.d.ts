@@ -43,6 +43,7 @@ declare global {
       exportCommerceReportPdf: (
         payload: CommercePdfPayload,
       ) => Promise<{ canceled: boolean; filePath?: string }>;
+      capturePage: (url: string) => Promise<{ base64: string }>;
       setTheme: (theme: ElectronAppTheme) => Promise<ElectronAppTheme>;
       credentials: ElectronCredentialApi;
       preferences: ElectronPreferenceApi;

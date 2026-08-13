@@ -72,7 +72,14 @@ class AgentLoopResult:
 class AgentLoopEvent:
     """代理循环向 SSE 编排层发送的内部事件。"""
 
-    kind: Literal["lifecycle", "tool", "usage", "worklist", "result"]
+    kind: Literal[
+        "lifecycle",
+        "tool",
+        "usage",
+        "worklist",
+        "visual_verify",
+        "result",
+    ]
     payload: dict[str, Any] = field(default_factory=dict)
     result: AgentLoopResult | None = None
 
@@ -531,6 +538,16 @@ async def stream_autonomous_loop(
     quality = quality_report.to_json()
     await persist_checkpoint(force=True)
     yield AgentLoopEvent("worklist", snapshot(quality=quality))
+    # 视觉验证：前端文件有改动时通知前端截图 + GLM 视觉核对（纯增强）。
+    visual_verify = quality.get("visualVerify") or {}
+    if visual_verify.get("requested"):
+        yield AgentLoopEvent(
+            "visual_verify",
+            {
+                "frontendChanged": list(visual_verify.get("frontendChanged") or []),
+                "taskSummary": str(visual_verify.get("taskSummary") or ""),
+            },
+        )
     yield AgentLoopEvent(
         "lifecycle",
         {

@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     html: string;
     suggestedFileName: string;
   }) => ipcRenderer.invoke("commerce:exportPdf", payload),
+  capturePage: (url: string): Promise<{ base64: string }> =>
+    ipcRenderer.invoke("visual:capturePage", url),
   setTheme: (theme: AppTheme) => ipcRenderer.invoke("window:setTheme", theme),
   credentials: {
     read: (): Promise<CredentialStore> => ipcRenderer.invoke("credentials:read"),

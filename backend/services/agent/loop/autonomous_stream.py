@@ -182,6 +182,16 @@ async def stream_prepared_autonomous(
             )
         elif event.kind == "worklist":
             yield encode_sse({"type": "WORKLIST_UPDATE", "payload": event.payload})
+        elif event.kind == "visual_verify":
+            yield encode_sse(
+                {
+                    "type": "VISUAL_VERIFY_REQUESTED",
+                    "payload": {
+                        "frontendChanged": list(event.payload.get("frontendChanged") or []),
+                        "taskSummary": str(event.payload.get("taskSummary") or ""),
+                    },
+                }
+            )
         elif event.kind == "result":
             result = event.result
 

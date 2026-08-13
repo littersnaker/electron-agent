@@ -107,6 +107,20 @@ async def review_execution(
         regression=regression,
     )
     artifact_metrics = _index_artifacts(root, changed_files, worker_states)
+    # 视觉验证标记：检测到前端文件改动时，通知前端截图 + GLM 视觉核对。
+    frontend_changed = [
+        path
+        for path in changed_files
+        if Path(path).suffix.lower() in {".tsx", ".ts", ".css", ".html", ".jsx"}
+    ]
+    visual_verify = {}
+    if frontend_changed:
+        task_summary = _task_summary(worker_states)
+        visual_verify = {
+            "requested": True,
+            "frontendChanged": frontend_changed[:20],
+            "taskSummary": task_summary,
+        }
     payload = {
         "changes": len(changed_files),
         "risk": patch.risk.level.value,
@@ -122,6 +136,10 @@ async def review_execution(
         "regressionReport": regression.to_json(),
         "codeGate": gate.to_json(),
         "artifactMemory": artifact_metrics,
+        # 沙箱 A 层：因会执行项目代码/配置而跳过的高危验证命令（不在报告中标记失败）。
+        "validationSkippedHighRisk": skipped_high_risk,
+        # 视觉验证：前端改动时请求截图 + GLM 视觉核对（纯增强，不阻塞 review）。
+        "visualVerify": visual_verify,
     }
     for state in worker_states.values():
         state.quality = dict(payload)
@@ -151,6 +169,18 @@ def _artifact_dependencies(worker_states: dict[str, WorkWorkerState]) -> list[st
             if path and path not in references:
                 references.append(path)
     return references
+
+
+def _task_summary(worker_states: dict[str, WorkWorkerState]) -> str:
+    """从 Worker 状态中提取任务目标摘要，供视觉验证 prompt 使用。"""
+
+    summaries: list[str] = []
+    for state in worker_states.values():
+        context = state.work_context or {}
+        objective = str(context.get("objective") or "").strip()
+        if objective:
+            summaries.append(objective[:300])
+    return "；".join(summaries)[:1000] or "前端页面改动"
 
 
 def _index_artifacts(

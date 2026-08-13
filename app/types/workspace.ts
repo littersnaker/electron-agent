@@ -188,7 +188,14 @@ export type StreamPacketType =
   | "AGENT_STATUS"
   | "AGENT_PROGRESS"
   | "AGENT_FINISH"
-  | "AGENT_ERROR";
+  | "AGENT_ERROR"
+  | "VISUAL_VERIFY_REQUESTED";
+
+/** 视觉验证请求：前端需要启动预览、截图并用 GLM 核对页面渲染。 */
+export interface VisualVerifyPayload {
+  frontendChanged: string[];
+  taskSummary?: string;
+}
 
 export interface StreamPacket {
   type?: StreamPacketType;
@@ -200,6 +207,7 @@ export interface StreamPacket {
     | CommerceProgressEvent
     | CommerceResearchReport
     | AmazonListingDemoReport
+    | VisualVerifyPayload
     | { content?: string; attachments?: MessageAttachment[] };
   agent?: AgentEventPayload;
 }

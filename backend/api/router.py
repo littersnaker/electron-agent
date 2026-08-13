@@ -18,6 +18,7 @@ from backend.api.preferences import router as preferences_router
 from backend.api.qa import router as qa_router
 from backend.api.review import router as review_router
 from backend.api.skills import router as skills_router
+from backend.api.visual import router as visual_router
 from backend.api.workspace import router as workspace_router
 
 api_router = APIRouter()
@@ -40,6 +41,7 @@ def register_routes() -> None:
         observability_router,
         review_router,
         skills_router,
+        visual_router,
         mcp_router,
         legacy_router,
     ):

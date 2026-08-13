@@ -115,6 +115,46 @@ async function persistApplicationTheme(theme: unknown): Promise<string> {
   return theme;
 }
 
+/** 判断前端传来的截图 URL 是否只指向本机 localhost。 */
+function isLocalPreviewUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 用隐藏窗口加载本地 URL，等页面渲染完成后截图，返回 PNG Base64（不落盘）。
+ * 仅允许 localhost 地址，避免渲染任意外部页面。
+ */
+async function captureLocalPage(url: string): Promise<{ base64: string }> {
+  const captureWindow = new BrowserWindow({
+    show: false,
+    width: 1440,
+    height: 900,
+    webPreferences: { sandbox: true },
+  });
+  try {
+    await captureWindow.loadURL(url);
+    // 等首屏渲染完成后再等稳定帧，避免截到加载中状态。
+    await captureWindow.webContents.executeJavaScript(
+      "document.readyState === 'complete' || true",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const image = await captureWindow.webContents.capturePage();
+    const buffer = image.toPNG();
+    return { base64: buffer.toString("base64") };
+  } finally {
+    if (!captureWindow.isDestroyed()) captureWindow.destroy();
+  }
+}
+
 /** 注册网页层允许调用的全部 IPC 通道。 */
 export function registerApplicationIpc(): void {
   ipcMain.on("window:minimize", (event) => senderWindow(event)?.minimize());
@@ -160,5 +200,10 @@ export function registerApplicationIpc(): void {
   ipcMain.handle("commerce:exportPdf", async (event, payload: unknown) => {
     if (!isCommercePdfPayload(payload)) throw new Error("PDF 导出参数无效");
     return exportCommercePdf(senderWindow(event), payload);
+  });
+
+  ipcMain.handle("visual:capturePage", async (_event, url: unknown) => {
+    if (!isLocalPreviewUrl(url)) throw new Error("只允许截取 localhost 页面");
+    return captureLocalPage(url);
   });
 }

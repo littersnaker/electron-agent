@@ -14,6 +14,7 @@ import type {
   StreamPacket,
   TokenInfo,
   ToolActivity,
+  VisualVerifyPayload,
   WorkListSnapshotPayload,
 } from "../../types/workspace";
 import { inferAgentKind, MAX_CONTEXT_MESSAGES } from "../../utilities/agent-runtime";
@@ -66,6 +67,61 @@ export function useChatStream({
   const checkpointBinding = useChatCheckpointBinding();
   useEffect(() => () => abortRef.current?.abort(), []);
   const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  /**
+   * 视觉验证：启动项目预览 → Electron 截图 → GLM-4.6V 核对 → 结果追加为消息。
+   * 由 VISUAL_VERIFY_REQUESTED 事件触发，fire-and-forget 不阻塞主流程。
+   */
+  const runVisualVerification = useCallback(
+    async (payload: VisualVerifyPayload) => {
+      const rootPath = activeProject?.rootPath;
+      if (!rootPath || !activeSession || !window.electronAPI?.capturePage) return;
+      setAgentStatus("正在启动预览并截图验证页面渲染…");
+      try {
+        const previewResponse = await apiFetch("/api/visual/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rootPath }),
+        });
+        if (!previewResponse.ok) return;
+        const { url } = (await previewResponse.json()) as { url?: string };
+        if (!url) return;
+        const { base64 } = await window.electronAPI.capturePage(url);
+        const verifyResponse = await apiFetch("/api/visual/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageBase64: base64,
+            mimeType: "image/png",
+            taskSummary: payload.taskSummary || "",
+            acceptance: [],
+          }),
+        });
+        const result = (await verifyResponse.json()) as {
+          ok?: boolean;
+          content?: string;
+          error?: string;
+        };
+        const content = result.ok
+          ? `🖼️ 视觉验证：${result.content || "页面已渲染。"}`
+          : `⚠️ 视觉验证失败：${result.error || "未知错误"}`;
+        const verifyMessage: Message = { role: "assistant", content };
+        setMessages((current) => [...current, verifyMessage]);
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === activeSession.id
+              ? { ...session, messages: [...session.messages, verifyMessage] }
+              : session,
+          ),
+        );
+      } catch (error) {
+        console.warn("[useChatStream] 视觉验证失败", error);
+      } finally {
+        setAgentStatus("");
+      }
+    },
+    [activeProject?.rootPath, activeSession?.id, setMessages, setSessions],
+  );
   const resetTransient = useCallback(() => {
     setToolActivities([]);
     setAgentStatus("");
@@ -380,6 +436,15 @@ export function useChatStream({
                 setInteractiveRequest(packet.payload);
                 setInteractiveAnswer("");
                 applyInteractiveRequestAgents(packet.payload, agents);
+              }
+              if (
+                packet.type === "VISUAL_VERIFY_REQUESTED" &&
+                packet.payload &&
+                typeof packet.payload === "object" &&
+                "frontendChanged" in packet.payload
+              ) {
+                void runVisualVerification(packet.payload as VisualVerifyPayload);
+                continue;
               }
               if (
                 packet.type === "MEDIA_RESULT" &&
