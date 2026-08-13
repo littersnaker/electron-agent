@@ -20,19 +20,28 @@ async def _iter_chunks(chunks: list[LlmToolCall]):
         yield LlmChunk(tool_calls=[call])
 
 
-def test_build_openai_tools_covers_auto_edit_actions() -> None:
-    """auto_edit 模式应生成全部 Worker 动作的工具 Schema。"""
+def test_build_openai_tools_covers_auto_edit_actions(monkeypatch) -> None:
+    """auto_edit 模式默认（命令审批门开启）暴露 run；关闭时不含 run。"""
+
+    monkeypatch.delenv("CODE_AGENT_COMMAND_APPROVAL", raising=False)
 
     tools = build_openai_tools(execution_mode="auto_edit")
     names = {tool["function"]["name"] for tool in tools}
 
     assert {"search", "read", "edit", "complete_work", "finish"} <= names
-    assert "run" not in names  # auto_edit 无 run
+    # 命令审批门默认开启：auto_edit 也暴露 run（安装/初始化命令会弹审批确认）。
+    assert "run" in names
     # 每个工具都带函数参数 Schema。
     for tool in tools:
         assert tool["type"] == "function"
         assert "parameters" in tool["function"]
         assert tool["function"]["parameters"]["type"] == "object"
+
+    # 显式关闭审批门后，auto_edit 不应再有 run。
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "0")
+    tools_disabled = build_openai_tools(execution_mode="auto_edit")
+    names_disabled = {tool["function"]["name"] for tool in tools_disabled}
+    assert "run" not in names_disabled
 
 
 def test_build_openai_tools_full_auto_includes_run() -> None:

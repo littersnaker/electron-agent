@@ -43,14 +43,26 @@ def test_sandboxed_environment_keeps_allowlisted_variables(monkeypatch) -> None:
 
 
 def test_high_risk_classification() -> None:
-    """会执行工作区代码/配置的命令应判为高危。"""
+    """安装/初始化/脚手架类命令应判为高危（需人工确认）。"""
 
-    assert is_high_risk_command("pytest backend/tests")
-    assert is_high_risk_command("pnpm test")
-    assert is_high_risk_command("pnpm run build")
-    assert is_high_risk_command("npx eslint src")
-    assert is_high_risk_command("python -m pytest -q")
-    assert is_high_risk_command("vitest run")
+    assert is_high_risk_command("pnpm add gsap")
+    assert is_high_risk_command("npm install gsap")
+    assert is_high_risk_command("pnpm create vite my-app")
+    assert is_high_risk_command("npx create-react-app my-app")
+    assert is_high_risk_command("pip install requests")
+    assert is_high_risk_command("python -m pip install pytest")
+
+
+def test_verification_commands_not_high_risk() -> None:
+    """验证命令（build/typecheck/lint/test）应放行，Agent 才能验证产物。"""
+
+    assert not is_high_risk_command("npx tsc --noEmit")
+    assert not is_high_risk_command("pnpm build")
+    assert not is_high_risk_command("pnpm run build")
+    assert not is_high_risk_command("pytest backend/tests")
+    assert not is_high_risk_command("python -m pytest -q")
+    assert not is_high_risk_command("npx eslint src")
+    assert not is_high_risk_command("vitest run")
 
 
 def test_low_risk_commands_not_flagged() -> None:
@@ -58,13 +70,6 @@ def test_low_risk_commands_not_flagged() -> None:
 
     assert not is_high_risk_command("git status")
     assert not is_high_risk_command("git diff")
-
-
-def test_scaffold_commands_still_validated_as_high_risk() -> None:
-    """脚手架 create 命令目前不允许自动执行（判高危），需要走创建项目骨架。"""
-
-    assert is_high_risk_command("pnpm create vite my-app --template react-ts")
-    assert is_high_risk_command("npx create-react-app my-app")
 
 
 def test_existing_whitelist_still_blocks_unsafe(monkeypatch) -> None:

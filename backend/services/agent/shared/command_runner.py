@@ -269,37 +269,17 @@ def _validate_package_command(executable: str, args: list[str]) -> str | None:
 
 
 def is_high_risk_command(command: str) -> bool:
-    """判断命令是否会执行工作区代码或项目配置文件。
+    """判断命令是否属于安装/初始化/脚手架类，需要人工确认后执行。
 
-    白名单工具（pytest/eslint/vitest/jest/tsc/npx/包管理器 run 脚本）会读取并
-    执行项目内的 conftest.py、.eslintrc.js、package.json 脚本等。Agent 一旦
-    先用 edit 写入恶意配置文件，再触发这类命令，就构成等效任意代码执行，
-    完全绕过白名单。这类命令需要人工确认（worker 路径）或跳过标注（review 路径）。
+    白名单验证命令（build/typecheck/lint/test 等）是 Agent 验证改动的必经之路，
+    即使它们会执行项目代码也必须放行——否则 Agent 无法验证自己的产物（此前
+    一刀切把 pytest/tsc/build 全判高危，导致验证环节完全瘫痪）。真正需要拦截的
+    是改变项目依赖或工程结构的命令（install/add/create/init 等），它们需用户确认。
+    与 requires_user_approval 判定一致，供 worker 路径（拦截提示）与 review
+    路径（跳过标注）共用。
     """
 
-    try:
-        parts = _split_command(command)
-    except ValueError:
-        return True
-    executable = _normalize_executable(parts[0])
-    args = [item.lower() for item in parts[1:]]
-
-    if executable in {"pnpm", "npm", "yarn", "bun"}:
-        # 包管理器 run 会执行 package.json 里的项目脚本。
-        return True
-    if executable == "npx":
-        # npx 会下载并执行包；eslint/prettier/vitest/jest/tsc 还会读项目配置。
-        return True
-    if executable in {"pytest", "eslint", "vitest", "jest", "tsc", "python", "python3", "py"}:
-        # Python/JS 工具直接执行工作区内的代码或配置。
-        return True
-    if executable == "cargo":
-        # cargo 构建会执行 build.rs。
-        return True
-    if executable == "git" and args and args[0] in {"status", "diff"}:
-        # 只读 git 检查，不执行项目代码。
-        return False
-    return True
+    return requires_user_approval(command)
 
 
 def validate_command(
