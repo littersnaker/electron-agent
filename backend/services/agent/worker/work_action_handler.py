@@ -540,7 +540,7 @@ class WorkActionHandler:
             )
         self._env.state.commands.append(result)
         observation = command_observation(result)
-        self._env.state.append_transcript(observation)
+        self._env.state.append_transcript(self._spill("run", observation))
         await self._env.checkpoint()
         if not result.succeeded:
             return WorkActionOutcome("failure", error=observation)
@@ -552,6 +552,73 @@ class WorkActionHandler:
             detail=f"{self._env.work.id} 验证通过：{action.command}",
         )
         return WorkActionOutcome("continue")
+
+    async def _run_code(self, action: AgentAction) -> WorkActionOutcome:
+        """执行模型写的 Python 程序（批量工具调用），只有 print/return 回上下文。"""
+
+        if self._env.execution_mode != "full_auto":
+            self._env.state.append_transcript(
+                "ACTION run_code skipped: 自动编辑模式不执行代码。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("continue")
+
+        await self._lifecycle(
+            role="code_runner",
+            agent_id=f"code_runner:{self._env.work.id}",
+            detail=f"{self._env.work.id}：执行 run_code 批量程序",
+            tool_name="run_code_batch",
+        )
+
+        # run_code 也是"执行工作区代码"，与 run 同资源锁，全局串行。
+        async with self._env.coordinator.reserve(
+            {SPECIAL_TERMINAL_RESOURCE},
+            owner=self._env.work.id,
+            priority=self._env.work.priority,
+        ):
+            observation = await self._execute_run_code(action)
+        self._env.state.append_transcript(self._spill("run_code", observation))
+        await self._env.checkpoint()
+        if not observation.startswith("[RUN_CODE OK]"):
+            return WorkActionOutcome("failure", error=observation[:4000])
+        await self._lifecycle(
+            role="code_runner",
+            agent_id=f"code_runner:{self._env.work.id}",
+            status="completed",
+            detail=f"{self._env.work.id} run_code 完成",
+        )
+        return WorkActionOutcome("continue")
+
+    async def _execute_run_code(self, action: AgentAction) -> str:
+        """在子进程跑模型程序，工具调用经桥接回父进程执行。"""
+
+        from backend.services.agent.code_mode import (
+            run_code_program,
+            serve_code_mode,
+            write_tools_sdk,
+        )
+
+        root = self._env.root
+        work_id = self._env.work.id
+        # 子进程需要 import 的 tools_sdk 放在工作区外的临时目录，避免污染项目。
+        import tempfile
+
+        sdk_dir = Path(tempfile.mkdtemp(prefix="run-code-sdk-"))
+        bridge = write_tools_sdk(sdk_dir)
+        # 父进程作为桥接服务器：子进程工具调用经 stdin/stdout JSON 回到这里执行。
+        try:
+            task = asyncio.create_task(serve_code_mode(root, work_id))
+            result = await run_code_program(
+                code=action.code,
+                work_dir=root,
+                bridge_script=bridge.parent,
+            )
+            task.cancel()
+        finally:
+            await asyncio.to_thread(lambda: shutil.rmtree(sdk_dir, ignore_errors=True))
+        if not result.get("ok"):
+            return f"[RUN_CODE FAILED] {result.get('error') or '执行失败'}"
+        return f"[RUN_CODE OK] exit={result.get('exitCode')}\n{result.get('output') or ''}"
 
     async def _complete(self, action: AgentAction) -> WorkActionOutcome:
         """把模型明确提交的当前 Work 标记为成功。"""

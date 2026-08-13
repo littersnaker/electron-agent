@@ -34,6 +34,7 @@ ActionKind = Literal[
     "factory",
     "edit",
     "run",
+    "run_code",
     "complete_work",
     "finish",
 ]
@@ -59,6 +60,7 @@ _ACTION_KEYS = frozenset(
         "factory",
         "edit",
         "run",
+        "run_code",
         "complete_work",
         "finish",
     }
@@ -128,6 +130,7 @@ class AgentAction:
     offsets: dict[str, int] = field(default_factory=dict)
     operations: list[EditOperation] = field(default_factory=list)
     command: str = ""
+    code: str = ""
     factory_mode: str = ""
     factory_domain_id: str = field(default_factory=default_factory_domain_id)
     factory_output_root: str = ""
@@ -257,6 +260,7 @@ class ActionRequestModel(BaseModel):
         validation_alias=AliasChoices("operations", "ops"),
     )
     command: str = ""
+    code: str = ""
     mode: str = ""
     output_root: str = Field(
         "",
@@ -391,6 +395,7 @@ class ActionRequestModel(BaseModel):
             "factory",
             "edit",
             "run",
+            "run_code",
             "complete_work",
             "finish",
         }:
@@ -412,6 +417,8 @@ class ActionRequestModel(BaseModel):
             _check_batch_size(self.operations)
         if action == "run" and not self.command:
             raise ValueError("run 动作缺少 command")
+        if action == "run_code" and not self.code:
+            raise ValueError("run_code 动作缺少 code")
         if action == "complete_work" and not self.work_id:
             raise ValueError("complete_work 动作缺少 workId")
         return self
@@ -617,6 +624,9 @@ def _normalize_action_name(value: str) -> str:
         "patch": "edit",
         "workspace.run": "run",
         "run_command": "run",
+        "run_code": "run_code",
+        "run_python": "run_code",
+        "execute_code": "run_code",
         "software_factory.plan": "factory",
         "software_factory.generate": "factory",
         "software_factory.validate": "factory",
@@ -760,6 +770,13 @@ def parse_agent_action(text: str) -> AgentAction:
 
     if action == "run":
         return AgentAction(action="run", work_id=request.work_id, command=request.command[:2000])
+
+    if action == "run_code":
+        return AgentAction(
+            action="run_code",
+            work_id=request.work_id,
+            code=request.code[:200_000],
+        )
 
     if action == "complete_work":
         return AgentAction(

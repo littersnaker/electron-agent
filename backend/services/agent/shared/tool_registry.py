@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -75,6 +76,15 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
         example='{"action":"run","workId":"W001","command":"pnpm typecheck"}',
     ),
     AgentToolDefinition(
+        name="run_code",
+        scope="execute",
+        description=(
+            "写一段 Python 程序批量调用 read/edit/run/search 工具（tools 对象），"
+            "一次完成多个文件操作，只有 print/return 会回到上下文。需 CODE_AGENT_CODE_MODE=1 且全自动模式。"
+        ),
+        example='{"action":"run_code","workId":"W001","code":"content = await tools.read(\'src/app.ts\'); print(content)"}',
+    ),
+    AgentToolDefinition(
         name="complete_work",
         scope="control",
         description="确认一个 Work 的真实产物和验收结果，成功后不会在重规划中重复执行。",
@@ -102,6 +112,12 @@ AUTO_EDIT_TOOL_NAMES = (
 FULL_AUTO_TOOL_NAMES = (*AUTO_EDIT_TOOL_NAMES[:-2], "run", *AUTO_EDIT_TOOL_NAMES[-2:])
 
 
+def code_mode_enabled() -> bool:
+    """run_code 批量执行通道开关（默认关闭，CODE_AGENT_CODE_MODE=1 启用）。"""
+
+    return os.getenv("CODE_AGENT_CODE_MODE", "").strip() == "1"
+
+
 def tool_names_for_mode(
     *,
     read_only: bool = False,
@@ -111,7 +127,13 @@ def tool_names_for_mode(
 
     if read_only:
         return READ_ONLY_TOOL_NAMES
-    return FULL_AUTO_TOOL_NAMES if execution_mode == "full_auto" else AUTO_EDIT_TOOL_NAMES
+    names = (
+        FULL_AUTO_TOOL_NAMES if execution_mode == "full_auto" else AUTO_EDIT_TOOL_NAMES
+    )
+    # run_code 批量执行通道：仅显式开启且全自动模式才暴露（可回滚）。
+    if code_mode_enabled() and execution_mode == "full_auto" and "run_code" not in names:
+        names = (*names, "run_code")
+    return names
 
 
 def render_tool_catalog(
@@ -240,6 +262,22 @@ def build_openai_tools(
                 "command": {"type": "string"},
             },
             "required": ["action", "command"],
+        },
+        "run_code": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "run_code"},
+                "workId": {"type": "string"},
+                "code": {
+                    "type": "string",
+                    "description": "一段 Python 程序，通过 tools 对象批量调用 read/edit/run/search；只有 print/return 会回到上下文",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "这段程序要完成什么（简要）",
+                },
+            },
+            "required": ["action", "code"],
         },
         "complete_work": {
             "type": "object",
