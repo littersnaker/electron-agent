@@ -507,11 +507,17 @@ class WorkActionHandler:
         """在全自动模式执行白名单质量命令。"""
 
         if self._env.execution_mode != "full_auto":
-            self._env.state.append_transcript(
-                f"ACTION run skipped: {action.command}\n自动编辑模式不执行命令。"
-            )
-            await self._env.checkpoint()
-            return WorkActionOutcome("continue")
+            # 自动编辑模式默认跳过终端命令；安装/初始化类命令在审批门开启时
+            # 允许走审批流程（用户确认后执行），其余命令保持跳过。
+            if not (
+                command_approval_enabled()
+                and requires_user_approval(action.command)
+            ):
+                self._env.state.append_transcript(
+                    f"ACTION run skipped: {action.command}\n自动编辑模式不执行命令。"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("continue")
 
         # 沙箱 A 层：会执行工作区代码/配置的命令（pytest/eslint/脚手架 create 等）
         # 不自动执行——项目内 conftest.py/.eslintrc.js 可能被 Agent 预先写入，触发即

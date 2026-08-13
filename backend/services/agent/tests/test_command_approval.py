@@ -7,10 +7,31 @@ from pathlib import Path
 import pytest
 
 from backend.services.agent.shared.command_runner import (
+    command_approval_enabled,
     install_packages_allowed,
     requires_user_approval,
     validate_command,
 )
+
+
+def test_command_approval_default_enabled(monkeypatch) -> None:
+    """审批门默认开启；显式设 0 关闭。"""
+
+    monkeypatch.delenv("CODE_AGENT_COMMAND_APPROVAL", raising=False)
+    assert command_approval_enabled()
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "0")
+    assert not command_approval_enabled()
+
+
+def test_auto_edit_exposes_run_when_approval_enabled(monkeypatch) -> None:
+    """审批门开启时自动编辑模式暴露 run，供安装命令走审批；关闭后不暴露。"""
+
+    from backend.services.agent.shared.tool_registry import tool_names_for_mode
+
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "1")
+    assert "run" in tool_names_for_mode(execution_mode="auto_edit")
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "0")
+    assert "run" not in tool_names_for_mode(execution_mode="auto_edit")
 
 
 def test_requires_user_approval_install_commands() -> None:

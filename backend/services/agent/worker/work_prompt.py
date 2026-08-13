@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from backend.services.agent.harness.models import ProjectHarness
+from backend.services.agent.shared.command_runner import command_approval_enabled
 from backend.services.agent.shared.loop_protocol import AgentAction
 from backend.services.agent.shared.loop_support import ExecutionMode
 from backend.services.agent.shared.tool_registry import (
@@ -72,9 +73,15 @@ def _worker_prompt(
     """生成聚焦当前 Work 的短系统提示词，避免每轮重复完整用户需求。"""
 
     run_rule = (
-        "允许 run 执行 Harness 已识别的受限质量命令。"
+        "允许 run 执行 Harness 已识别的受限质量命令；"
+        "安装/初始化类命令会先弹出用户审批，确认后才执行。"
         if execution_mode == "full_auto"
-        else "当前为自动编辑模式，run 会被跳过。"
+        else (
+            "自动编辑模式：普通命令会被跳过，但安装/初始化类命令"
+            "（pnpm install、pnpm add 等）会弹出用户审批，确认后才执行。"
+            if command_approval_enabled()
+            else "当前为自动编辑模式，run 会被跳过。"
+        )
     )
     work_payload = {
         "id": work.id,
@@ -142,8 +149,9 @@ def _worker_prompt(
   文件或大段代码块作为 old/new 输出；改动只有几行时不要整文件重写。
 - replace 最小示例（old/new 各 1~2 行即可）：
   {{"type":"replace","path":"src/app.scss","old":"padding-bottom: var(--spacing-xl);","new":"padding-bottom: var(--spacing-2xl);"}}
-- 自动编辑模式无法运行命令：需要运行构建/测试才能验证的任务，做静态修复后应在
-  complete_work 中说明“需切换全自动模式运行验证命令”。
+- 自动编辑模式默认无法运行命令（安装/初始化类命令会弹出用户审批确认）：需要运行
+  构建/测试才能验证的任务，做静态修复后应在 complete_work 中说明“需切换全自动
+  模式运行验证命令”。
 - 敏感路径在目录树和工具层都会被过滤；收到 SECURITY SKIP 后不得重试该路径，改读 .env.example 或配置类型。
 - tabBar/小程序图标必须引用真实存在的 PNG 位图（iconPath 支持 png/jpg/jpeg，不支持 SVG）；
   图标文件缺失时系统会自动补齐占位 PNG，你只需保证路径符合项目约定（Taro 相对 src，原生相对根目录），

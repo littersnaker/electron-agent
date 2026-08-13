@@ -96,8 +96,10 @@ def test_read_only_complaint_switches_back_to_full_auto_tools() -> None:
     assert "把这个项目做成电商小程序" in routed.effective_text
 
 
-def test_auto_edit_complaint_restores_edit_without_run() -> None:
-    """自动编辑模式应恢复 edit，但不能越权暴露 run。"""
+def test_auto_edit_complaint_restores_edit_without_run(monkeypatch) -> None:
+    """关闭命令审批门时自动编辑模式应恢复 edit，但不暴露 run。"""
+
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "0")
 
     body = ChatRequest.model_validate(
         {
@@ -115,3 +117,23 @@ def test_auto_edit_complaint_restores_edit_without_run() -> None:
     assert routed.mode == "code_change"
     assert "edit" in routed.tool_names
     assert "run" not in routed.tool_names
+
+
+def test_auto_edit_exposes_run_only_with_approval(monkeypatch) -> None:
+    """审批门开启时自动编辑模式暴露 run（仅供安装命令走审批）。"""
+
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "1")
+    body = ChatRequest.model_validate(
+        {
+            "messages": [
+                {"role": "user", "content": "修复订单详情页并补齐路由"},
+                {"role": "assistant", "content": "本轮只能只读分析。"},
+                {"role": "user", "content": "不要只分析，继续修改并完成"},
+            ],
+            "agentMode": "auto_edit",
+        }
+    )
+    routed = route_code_request(body, body.messages[-1].content)
+    assert routed.mode == "code_change"
+    assert "edit" in routed.tool_names
+    assert "run" in routed.tool_names

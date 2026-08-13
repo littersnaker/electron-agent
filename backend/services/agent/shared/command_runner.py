@@ -145,9 +145,9 @@ _INSTALL_SUBCOMMANDS = {
 
 
 def command_approval_enabled() -> bool:
-    """是否开启“命令审批门”（CODE_AGENT_COMMAND_APPROVAL=1 启用）。"""
+    """命令审批门默认开启；显式设 CODE_AGENT_COMMAND_APPROVAL=0 可关闭。"""
 
-    return os.getenv("CODE_AGENT_COMMAND_APPROVAL", "").strip() == "1"
+    return os.getenv("CODE_AGENT_COMMAND_APPROVAL", "1").strip() != "0"
 
 
 def requires_user_approval(command: str) -> bool:

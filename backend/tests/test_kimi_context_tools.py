@@ -88,10 +88,13 @@ def test_tool_catalog_contains_read_and_write_tools() -> None:
 
 
 
-def test_tool_catalog_matches_execution_mode() -> None:
-    """全自动必须暴露 edit/run，自动编辑只禁用 run，只读模式不得暴露写入。"""
+def test_tool_catalog_matches_execution_mode(monkeypatch) -> None:
+    """全自动必须暴露 edit/run；自动编辑在关闭审批门时禁用 run；只读模式不得暴露写入。"""
 
     assert "edit" in tool_names_for_mode(execution_mode="auto_edit")
+    # 自动编辑模式默认暴露 run（供安装类命令走审批门）；关闭审批门后恢复禁用。
+    assert "run" in tool_names_for_mode(execution_mode="auto_edit")
+    monkeypatch.setenv("CODE_AGENT_COMMAND_APPROVAL", "0")
     assert "run" not in tool_names_for_mode(execution_mode="auto_edit")
     assert {"edit", "run"} <= set(
         tool_names_for_mode(execution_mode="full_auto")
