@@ -206,6 +206,56 @@ async def delete_session(session_id: str) -> None:
         await connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 
+async def delete_project(project_id: str) -> None:
+    """删除项目及其会话、索引、复盘与审计关联数据。
+
+    SQLite 外键只对 file_index 有 ON DELETE CASCADE（database.py:50）；
+    其余关联表（sessions/agent_checkpoints/project_completed_works/traces/
+    pending_actions/pending_commands/agent_memories）必须手动清理，避免留下
+    孤儿记录。
+    """
+
+    async with open_database() as connection:
+        await connection.execute(
+            "DELETE FROM agent_checkpoints "
+            "WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)",
+            (project_id,),
+        )
+        await connection.execute(
+            "DELETE FROM sessions WHERE project_id = ?",
+            (project_id,),
+        )
+        # file_index 有 FK CASCADE，但显式删除保证数据库未开外键时也干净。
+        await connection.execute(
+            "DELETE FROM file_index WHERE project_id = ?",
+            (project_id,),
+        )
+        await connection.execute(
+            "DELETE FROM project_completed_works WHERE project_id = ?",
+            (project_id,),
+        )
+        await connection.execute(
+            "DELETE FROM traces WHERE project_id = ?",
+            (project_id,),
+        )
+        await connection.execute(
+            "DELETE FROM pending_actions WHERE project_id = ?",
+            (project_id,),
+        )
+        # pending_commands 无 project_id 列，按会话子查询清理。
+        await connection.execute(
+            "DELETE FROM pending_commands "
+            "WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?)",
+            (project_id,),
+        )
+        # 项目作用域记忆按 scope_id 关联（sqlite_store 的 scope 约定）。
+        await connection.execute(
+            "DELETE FROM agent_memories WHERE scope_id = ?",
+            (project_id,),
+        )
+        await connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+
 async def update_project_index_state(
     project_id: str, *, status: str, file_count: int | None = None
 ) -> None:

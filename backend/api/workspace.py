@@ -9,6 +9,7 @@ from backend.services.workspace.indexer import index_project
 from backend.services.workspace.repository import (
     create_project,
     create_session,
+    delete_project,
     delete_session,
     list_workspace,
     update_session,
@@ -71,6 +72,12 @@ async def post_workspace_action(body: WorkspaceAction) -> dict[str, object]:
         if body.action == "deleteSession":
             if body.id:
                 await delete_session(body.id)
+            return {"ok": True}
+
+        if body.action == "deleteProject":
+            if not body.id:
+                raise ValueError("项目 ID 不能为空")
+            await delete_project(body.id)
             return {"ok": True}
 
         raise ValueError(f"不支持的工作区操作：{body.action}")

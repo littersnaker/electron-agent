@@ -7,6 +7,7 @@ import AgentTaskPanel from "./components/AgentTaskPanel";
 import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
 import { ProjectInitModal } from "./components/ProjectInitModal";
+import ConfirmDialog from "./components/skills-manager/confirm-dialog";
 import ApiKeyModal from "./components/ApiKeyModal";
 import SkillsManagerPage from "./components/skills-manager/SkillsManagerPage";
 import { ChatComposer } from "./components/ChatComposer";
@@ -70,6 +71,8 @@ export default function Home() {
   const [showPluginCenter, setShowPluginCenter] = useState(false);
   /** 用户已选目录、等待确认初始化选项的创建流程。 */
   const [pendingProjectFolder, setPendingProjectFolder] = useState<string | null>(null);
+  /** 待删除的项目 ID（弹确认框）。 */
+  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<"workspace" | "skills">(
     "workspace",
   );
@@ -325,6 +328,21 @@ export default function Home() {
           onCancel={() => setPendingProjectFolder(null)}
         />
       )}
+      {deleteProjectId && (
+        <ConfirmDialog
+          danger
+          title="删除项目"
+          message="删除项目将同时删除其会话记录、索引与复盘数据，且不可恢复。确定删除吗？"
+          confirmLabel="删除"
+          cancelLabel="取消"
+          onConfirm={() => {
+            const projectId = deleteProjectId;
+            setDeleteProjectId(null);
+            void workspace.deleteProject(projectId);
+          }}
+          onCancel={() => setDeleteProjectId(null)}
+        />
+      )}
       {showPluginCenter && (
         <PluginCenter
           open
@@ -366,6 +384,7 @@ export default function Home() {
           deleteSession={(id: string, event: MouseEvent) =>
             void handleDeleteSession(id, event)
           }
+          deleteProject={(projectId: string) => setDeleteProjectId(projectId)}
         />
         <section className="relative flex min-w-0 flex-1 flex-col">
           <div

@@ -16,6 +16,7 @@ interface ChatSidebarProps {
   mediaPluginEnabled: boolean;
   onOpenPluginCenter: () => void;
   reindexProject: (projectId: string) => void;
+  deleteProject: (projectId: string) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string, event: MouseEvent) => void;
 }
@@ -551,6 +552,16 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                       title="新建 Code 会话"
                     >
                       <PlusIcon className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => props.deleteProject(project.id)}
+                      disabled={props.isStreaming}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-[13px] transition-colors hover:bg-red-500/10 disabled:opacity-40"
+                      style={{ color: COLORS.textSubtle }}
+                      title="删除项目（含会话与索引，不可恢复）"
+                    >
+                      ×
                     </button>
                   </div>
 

@@ -314,6 +314,34 @@ export function useWorkspaceController(
     [createSession, refreshWorkspace, reindexProject],
   );
 
+  const deleteProject = useCallback(
+    async (projectId: string): Promise<boolean> => {
+      try {
+        const response = await apiFetch("/api/workspace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "deleteProject", id: projectId }),
+        });
+        if (!response.ok) {
+          throw new Error((await response.json()).error || "删除项目失败");
+        }
+        // 若当前活跃会话属于被删项目，切回第一个会话或新建 QA。
+        setProjects((current) =>
+          current.filter((item) => item.id !== projectId),
+        );
+        setSessions((current) =>
+          current.filter((item) => item.projectId !== projectId),
+        );
+        await refreshWorkspace();
+        return true;
+      } catch (error) {
+        console.error(error);
+        return false;
+      }
+    },
+    [refreshWorkspace],
+  );
+
   return {
     projects,
     sessions,
@@ -327,6 +355,7 @@ export function useWorkspaceController(
     persistSession,
     switchSession,
     deleteSession,
+    deleteProject,
     reindexProject,
     addProject,
     pickProjectFolder,
