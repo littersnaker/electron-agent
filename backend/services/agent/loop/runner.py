@@ -257,11 +257,17 @@ async def stream_autonomous_loop(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            # 空 str 异常（如无参 TimeoutError 在 Python 3.11+ str() 为空）会
+            # 让 WORKER CRASHED 只显示冒号后的空串；附带完整 traceback 才能
+            # 定位真实崩溃点（超时/守卫/确定性路径抛错）。
+            import traceback
+
+            trace = traceback.format_exc()
             return WorkExecutionResult(
                 work_id=work_id,
                 succeeded=False,
                 summary="",
-                error=f"WORKER CRASHED: {exc}",
+                error=f"WORKER CRASHED: {exc}\n{trace[-4_000:]}",
                 state=worker_states[work_id],
                 failure_kind="runtime",
             )
