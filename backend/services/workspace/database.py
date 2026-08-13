@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from backend.core.config import get_settings
 
@@ -240,14 +241,14 @@ class AsyncCursor:
         self.rowcount = cursor.rowcount
 
     async def fetchone(self) -> sqlite3.Row | None:
-        """读取一行查询结果。"""
+        """读取一行查询结果（在 worker 线程执行，避免阻塞事件循环）。"""
 
-        return self._cursor.fetchone()
+        return await asyncio.to_thread(self._cursor.fetchone)
 
     async def fetchall(self) -> list[sqlite3.Row]:
-        """读取全部查询结果。"""
+        """读取全部查询结果（在 worker 线程执行，避免阻塞事件循环）。"""
 
-        return self._cursor.fetchall()
+        return await asyncio.to_thread(self._cursor.fetchall)
 
     @property
     def lastrowid(self) -> int | None:
@@ -257,47 +258,94 @@ class AsyncCursor:
 
 
 class AsyncConnection:
-    """为本地 SQLite 连接提供简单的异步外观。"""
+    """为本地 SQLite 连接提供简单的异步外观。
+
+    SQL 操作经 ``asyncio.to_thread`` 在 worker 线程执行，避免阻塞事件循环。
+    协程被取消时已提交的 worker 操作无法被终止，因此 ``close`` 会先等待全部
+    在途操作结束再真正关闭连接，防止连接在 C 层仍被其他线程使用时被关闭
+    （Windows 下表现为 access violation / use-after-free）。
+    """
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         """保存底层连接。"""
 
         self._connection = connection
+        self._pending: set[asyncio.Task[object]] = set()
+        self._closed = False
+
+    async def _dispatch(self, func: Callable[..., object], *args: object) -> object:
+        """把同步 SQL 调用提交到 worker 线程，并登记在途任务。
+
+        用 done_callback 而不是 finally 清理在途集合：协程被取消时任务仍会
+        继续运行到结束，close 需要能等到它。
+        """
+
+        task = asyncio.get_running_loop().create_task(asyncio.to_thread(func, *args))
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+        return await task
 
     async def execute(
         self, sql: str, parameters: Iterable[Any] = ()
     ) -> AsyncCursor:
-        """执行单条 SQL 并返回异步游标。"""
+        """执行单条 SQL 并返回异步游标（在 worker 线程执行）。"""
 
-        return AsyncCursor(self._connection.execute(sql, tuple(parameters)))
+        return cast(
+            AsyncCursor,
+            await self._dispatch(self._execute, sql, tuple(parameters)),
+        )
+
+    def _execute(self, sql: str, parameters: tuple[Any, ...]) -> AsyncCursor:
+        """在 worker 线程内完成同步执行与游标包装，保证 rowcount 读取同线程。"""
+
+        return AsyncCursor(self._connection.execute(sql, parameters))
 
     async def executemany(
         self, sql: str, parameter_rows: Iterable[Iterable[Any]]
     ) -> AsyncCursor:
-        """批量执行同一条 SQL。"""
+        """批量执行同一条 SQL（在 worker 线程执行）。"""
 
         rows = [tuple(row) for row in parameter_rows]
+        return cast(
+            AsyncCursor,
+            await self._dispatch(self._executemany, sql, rows),
+        )
+
+    def _executemany(
+        self, sql: str, rows: list[tuple[Any, ...]]
+    ) -> AsyncCursor:
         return AsyncCursor(self._connection.executemany(sql, rows))
 
     async def executescript(self, sql: str) -> AsyncCursor:
-        """执行包含多条语句的初始化脚本。"""
+        """执行包含多条语句的初始化脚本（在 worker 线程执行）。"""
 
+        return cast(
+            AsyncCursor,
+            await self._dispatch(self._executescript, sql),
+        )
+
+    def _executescript(self, sql: str) -> AsyncCursor:
         return AsyncCursor(self._connection.executescript(sql))
 
     async def commit(self) -> None:
-        """提交当前事务。"""
+        """提交当前事务（在 worker 线程执行）。"""
 
-        self._connection.commit()
+        await self._dispatch(self._connection.commit)
 
     async def rollback(self) -> None:
-        """回滚当前事务。"""
+        """回滚当前事务（在 worker 线程执行）。"""
 
-        self._connection.rollback()
+        await self._dispatch(self._connection.rollback)
 
     async def close(self) -> None:
-        """关闭数据库连接。"""
+        """关闭数据库连接；先等待全部在途 worker 操作结束。"""
 
-        self._connection.close()
+        if self._closed:
+            return
+        if self._pending:
+            await asyncio.gather(*self._pending, return_exceptions=True)
+        self._closed = True
+        await asyncio.to_thread(self._connection.close)
 
 
 def utc_now_iso() -> str:
@@ -312,7 +360,14 @@ async def open_database() -> AsyncIterator[AsyncConnection]:
 
     database_path = get_settings().database_path
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_connection = sqlite3.connect(database_path, timeout=30.0)
+    # check_same_thread=False：AsyncConnection 的 SQL 操作经 asyncio.to_thread
+    # 在 worker 线程执行，必须允许连接跨线程使用；连接仍是单协程串行持有，
+    # 不会出现并发写（并发写同一连接会触发 InterfaceError）。
+    raw_connection = sqlite3.connect(
+        database_path,
+        timeout=30.0,
+        check_same_thread=False,
+    )
     raw_connection.row_factory = sqlite3.Row
     raw_connection.execute("PRAGMA foreign_keys=ON")
     connection = AsyncConnection(raw_connection)

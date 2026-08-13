@@ -93,7 +93,7 @@ async def stream_autonomous_loop(
 ):
     """滚动执行依赖图；任一 Work 完成后立即补充新任务，不等待整波结束。"""
 
-    project_tree = render_workspace_tree(root, limit=800)
+    project_tree = await asyncio.to_thread(render_workspace_tree, root, limit=800)
     preflight_notes: list[str] = []
     if resume_state:
         ledger = ledger_from_json(dict(resume_state.get("ledger") or {}))

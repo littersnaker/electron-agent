@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+from backend.core.background import spawn
 from backend.schemas.chat import ChatRequest
 from backend.services.agent.loop.autonomous_stream import stream_prepared_autonomous
 from backend.services.agent.loop.checkpoint_runtime import plan_from_json
@@ -105,7 +106,7 @@ async def _handle_interactive_reply(
             task_id=request_id,
         ),
     )
-    asyncio.create_task(index_project(project_id))
+    spawn(index_project(project_id))
     yield encode_sse(
         {
             "type": "AGENT_LIFECYCLE",
@@ -398,17 +399,27 @@ async def stream_code_agent(
         else:
             prepared = await prepare_code_task(
                 user_request=effective_user_text,
-                project_tree=render_workspace_tree(root, limit=800),
+                project_tree=await asyncio.to_thread(
+                    render_workspace_tree,
+                    root,
+                    limit=800,
+                ),
                 initial_context=context_text,
                 preferred_model_id=preferred_model_id,
                 credentials=credentials,
-                candidate_files=score_workspace_paths(
+                candidate_files=await asyncio.to_thread(
+                    score_workspace_paths,
                     root,
                     effective_user_text,
                     limit=12,
                 ),
             )
-            anomalies = screen_plan_anomalies(root, prepared.plan.works)
+            # 全盘路径评分扫描较重，放到 worker 线程执行，避免阻塞 SSE 事件循环。
+            anomalies = await asyncio.to_thread(
+                screen_plan_anomalies,
+                root,
+                prepared.plan.works,
+            )
             if anomalies:
                 yield encode_sse(
                     {

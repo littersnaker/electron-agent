@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -109,7 +110,7 @@ async def stream_read_only_tool_answer(
 
     transcript = [
         f"USER QUESTION:\n{user_text}",
-        f"PROJECT TREE:\n{render_workspace_tree(root, limit=800)}",
+        f"PROJECT TREE:\n{await asyncio.to_thread(render_workspace_tree, root, limit=800)}",
         f"INITIAL INDEX CONTEXT:\n{initial_context}",
     ]
     usage_total = LlmUsage()

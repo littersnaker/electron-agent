@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from backend.services.agent.shared.work_models import WorkLedger
+from backend.services.agent.shared.work_models import WorkItem, WorkLedger
 from backend.services.workspace.database import (
     dumps_json,
     loads_json,
@@ -127,6 +127,42 @@ def _files_exist(root: Path, paths: list[object]) -> bool:
     return True
 
 
+async def _latest_completed_rows(
+    project_id: str,
+    keys: list[str],
+) -> dict[str, dict[str, Any]]:
+    """一次查询返回多个标题键各自最近一次成功记录（避免逐条开连接）。"""
+
+    unique = list(dict.fromkeys(keys))
+    if not unique:
+        return {}
+    placeholders = ", ".join("?" for _ in unique)
+    async with open_database() as connection:
+        cursor = await connection.execute(
+            f"""
+            SELECT title_key, changed_files_json, target_files_json, completed_at, title
+            FROM project_completed_works
+            WHERE project_id = ? AND title_key IN ({placeholders})
+            ORDER BY completed_at DESC
+            """,
+            (project_id, *unique),
+        )
+        rows = await cursor.fetchall()
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row["title_key"])
+        if key in latest:
+            # ORDER BY completed_at DESC 保证同一键第一次出现即最近记录。
+            continue
+        latest[key] = {
+            "changedFiles": loads_json(str(row["changed_files_json"]), []),
+            "targetFiles": loads_json(str(row["target_files_json"]), []),
+            "completedAt": str(row["completed_at"]),
+            "title": str(row["title"]),
+        }
+    return latest
+
+
 async def skip_redundant_works(
     *,
     root: Path,
@@ -138,7 +174,7 @@ async def skip_redundant_works(
     normalized_project = project_id.strip()
     if not normalized_project:
         return 0
-    skipped = 0
+    candidates: list[WorkItem] = []
     for item in ledger.items:
         if item.status != "pending":
             continue
@@ -148,7 +184,16 @@ async def skip_redundant_works(
         ):
             # 用户明确要求重做/覆盖时不得跳过。
             continue
-        record = await _latest_completed_row(normalized_project, title_key(item.title))
+        candidates.append(item)
+    if not candidates:
+        return 0
+    latest = await _latest_completed_rows(
+        normalized_project,
+        [title_key(item.title) for item in candidates],
+    )
+    skipped = 0
+    for item in candidates:
+        record = latest.get(title_key(item.title))
         if record is None:
             continue
         changed = record.get("changedFiles") or []

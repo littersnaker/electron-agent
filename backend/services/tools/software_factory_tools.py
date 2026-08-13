@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from backend.services.software_factory import SOFTWARE_FACTORY
@@ -17,7 +18,10 @@ async def _plan(
 ) -> dict[str, Any]:
     """分析真实项目并返回不写文件的 Software Factory 计划。"""
 
-    return SOFTWARE_FACTORY.plan(
+    # plan/generate/validate 内含 rglob、read_text、write_text 等重 I/O，
+    # 放到 worker 线程执行，避免在 Agent 主循环的 async 路径上阻塞事件循环。
+    return await asyncio.to_thread(
+        SOFTWARE_FACTORY.plan,
         root=context.workspace_root,
         request_text=_request_text(arguments),
         domain_id=_domain_id(arguments),
@@ -32,7 +36,8 @@ async def _generate(
 ) -> dict[str, Any]:
     """生成领域、OpenAPI、Mock 和前端数据源文件。"""
 
-    return SOFTWARE_FACTORY.generate(
+    return await asyncio.to_thread(
+        SOFTWARE_FACTORY.generate,
         root=context.workspace_root,
         request_text=_request_text(arguments),
         domain_id=_domain_id(arguments),
@@ -51,7 +56,8 @@ async def _validate(
     output_root = str(arguments.get("output_root") or "").strip()
     if not output_root:
         raise ValueError("software_factory.validate 缺少 output_root")
-    return SOFTWARE_FACTORY.validate(
+    return await asyncio.to_thread(
+        SOFTWARE_FACTORY.validate,
         root=context.workspace_root,
         output_root=output_root,
     )

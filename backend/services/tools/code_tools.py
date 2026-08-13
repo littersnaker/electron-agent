@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, cast
 
@@ -65,7 +66,9 @@ async def _inspect(context: ToolExecutionContext, arguments: dict[str, Any]) -> 
     if safe_paths:
         _VALIDATOR.validate_relative_paths(context.workspace_root, safe_paths)
     query = str(arguments.get("query") or "").strip()
-    observation = _CODE_INTELLIGENCE.inspect(
+    # inspect 可能触发 SymbolIndex 全库扫描，放到 worker 线程执行。
+    observation = await asyncio.to_thread(
+        _CODE_INTELLIGENCE.inspect,
         context.workspace_root,
         paths=safe_paths,
         query=query,
@@ -131,7 +134,8 @@ async def _apply_proposal(context: ToolExecutionContext, arguments: dict[str, An
     action = arguments.get("action")
     if not isinstance(action, dict):
         raise ValueError("workspace.apply_proposal 缺少 action")
-    return apply_proposal(context.workspace_root, action)
+    # apply_proposal 同步读写文件，放到 worker 线程执行。
+    return await asyncio.to_thread(apply_proposal, context.workspace_root, action)
 
 
 async def _file_version(context: ToolExecutionContext, arguments: dict[str, Any]) -> str:
