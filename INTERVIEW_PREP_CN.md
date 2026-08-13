@@ -21,12 +21,14 @@ Electron 桌面壳
                  ├─ 统一 Agent Runtime（AgentRegistry / SkillRegistry / MemoryRouter / ModelRouter / ContextManager / TaskManager）
                  ├─ Agent 适配器（coding / commerce / qa）
                  ├─ Code Agent 编排（分类器 → Planner → WorkList 调度 → Worker 循环 → 终审）
+                 ├─ 原生 Function Calling（工具 Schema 透传 + 流式 tool_calls 累加）
                  ├─ Tool Gateway（search/read/inspect/edit/run/filesystem/software_factory）
-                 ├─ SQLite（checkpoint / memory / 已完成工作注册表 / 项目索引）
-                 └─ 多模型路由（Qwen / DeepSeek / Kimi / GLM / OpenAI，自动降级）
+                 ├─ SQLite（checkpoint / memory / 已完成工作注册表 / 项目索引，操作经 to_thread 移出事件循环）
+                 ├─ 多模型路由（Qwen / DeepSeek / Kimi / GLM / OpenAI，自动降级）
+                 └─ 电商（TalorData / Amazon 搜索与评论分析 / TikTok Shop / 1688 / Listing 草稿）
 ```
 
-技术栈：Electron / Vite / React / TypeScript / Python FastAPI / SQLite / SSE / 多模型路由 / Software Factory。
+技术栈：Electron / Vite / React / TypeScript / Python FastAPI / SQLite / SSE / 原生 Function Calling / 多模型路由 / 自研 WorkList 调度器 / Software Factory。
 
 ---
 
@@ -145,12 +147,34 @@ Electron 桌面壳
 
 - 每轮防重复 read/search；分析阶段最多 6 个上下文动作；
 - 连续 3 轮只读 → READ-ONLY STALL 警告，强制转向 edit/complete；
-- 单次尝试最多 16 轮，超限判失败交给重试/重规划。
+- 单次尝试默认最多 10 轮（多文件自适应 18），超限判失败交给重试/重规划。
 
 ### 10. 协议容错与超时
 
 - read 兼容 `path` 单数、逗号/换行分隔字符串；连续协议错误容忍 5 次并附正确示例；
 - 网关流式双超时：90s 无数据 = 卡死终止；总时长上限 = 慢速不误杀。
+
+### 11. 原生 Function Calling（从 Next.js 迁移中补回的能力）
+
+- 网关与 OpenAI 兼容协议透传 `tools` / `tool_choice`，流式 `delta.tool_calls` 按 id 累加；
+- **兼容 DeepSeek 无 id 分片**：分片不带 id 时续接当前最后一个 tool_call，arguments 完整拼回，避免拆散成空动作；
+- `build_openai_tools` 把 Worker 动作目录（search/read/edit/complete_work…）转成结构化 Schema，模型直接返回 tool_calls，不再输出大段自然语言分析再给 JSON——根治"模型话多与空转"；
+- 面试口径：这是对标 ZCode/Claude Code 的"架构级工具约束"。
+
+### 12. 事件循环优化：SQLite 与全盘扫描移出事件循环
+
+- 项目原用同步 `sqlite3` 套 `async` 外观，全库 60+ 处调用都阻塞 SSE 事件循环——"改一个页面要 5 分钟"里 DB 那部分的根因；
+- `AsyncConnection` 全方法经 `asyncio.to_thread` 执行，`check_same_thread=False` 允许连接跨线程；
+- **协程取消陷阱**：`to_thread` 只终止 await、杀不掉 worker 线程里的 sqlite 操作，取消时立即 close 会触发 Windows access violation（C 层 use-after-free）——修复：`close()` 先 `asyncio.gather` 等在途任务结束再关连接；
+- 全盘扫描（`render_workspace_tree` / `score_workspace_paths`）、Software Factory 工具、`code.inspect` 的 AST 全库扫描同样移出 async 路径；
+- 后台复盘/索引任务统一 `spawn()` 登记，关闭时先排空再关连接池，杜绝 `Event loop is closed`。
+
+### 13. 错误可见性工程（你的真实痛点：W001 掩盖原因）
+
+- 历史问题：模型调用失败被静默吞掉，UI 只看到"W001(3次)"这类聚合码，看不出真实原因；
+- 修复：Planner 降级、批量写入失败、审查调用失败全部补日志 + 原因透传；未配置 Key 时 worker 快速失败而不是空转消耗重试；
+- 前端同一类问题：JS `?:` 优先级低于 `||` 导致电商错误详情恒取固定文案，后端真实原因到不了界面——加括号修正；
+- 面试口径：错误要"可见、可定位、不谎报成功"，这是一整套工程原则（拦截 edit 回滚后谎报成功的漏洞也是同一原则）。
 
 ---
 
@@ -262,20 +286,36 @@ Electron 桌面壳
 30. **如果重新设计，你会改什么？**
     → 可答：语义记忆改向量检索、UI 验收加自动校验、checkpoint 分表、任务持久化队列。
 
+### I. 电商（简历差异化，2026-08 新增）
+
+31. **电商 Agent 现在有哪些能力？**
+    → 市场研究（TalorData SERP + Amazon 搜索，SP-API 优先/公开爬虫兜底 + TikTok Shop/1688 官方 API）+ **Amazon 评论分析** + Listing 草稿（pending/confirmed/rejected 状态机，不发布）。诚实边界：Temu/Keepa 只有凭据占位，无付费数据源。
+
+32. **评论分析怎么做？**
+    → 对评论数最高的 top 3 个 Amazon 商品并行采集评论页（翻 3 页约 30 条，正则解析，无第三方库）；评分分布 + 确定性情感词频；**LLM 只增强第一个商品**（控制耗时和 token），其余确定性分析；失败降级为明确标注的演示样本，不中断研究流程——复用全流程的"降级哲学"。
+
+33. **为什么 LLM 只增强一个商品？**
+    → 评论分析的耗时和 token 成本与商品数线性增长；对 top 1 做语义提炼已能代表口碑，其余用词频兜底足够——这是"质量与成本"的工程权衡，可讲 token 预算原则。
+
+34. **为什么坚持"不伪装数据"？**
+    → 没有真实销量/BSR/评论时，报告带 `runMode: demo` 与橙色横幅声明"不可用于决策"；这是产品信任底线，也是和"套壳 demo"的区别。简历里写电商能力时主动讲这个边界反而加分。
+
 ---
 
 ## 六、简历一致性口径（必须统一）
 
-- **LangGraph**：早期版本真实使用过（TS 版），迁移后自研；简历写“自研 WorkList 调度器”，面试主动讲“为什么不用 LangGraph”；
-- **Media Agent**：当前是独立 `/api/media/generate` + 前端虚拟角色，后端未注册；若简历写“Media Agent”，口径是“媒体能力已打通，正在接入统一 Runtime”（或先做完再写）；
-- **技术栈**：Vite + React + Python FastAPI（不是 Next.js 14）；
-- **“自研”口径**：架构与核心设计是自己做的，实现大量使用 AI 辅助编码——现在这是常态，重点是讲得清每条链路。
+- **LangGraph**：早期版本真实使用过（TS 版），迁移后自研；简历写”自研 WorkList 调度器”，面试主动讲”为什么不用 LangGraph”；
+- **电商 Agent**：已实现市场研究（TalorData/Amazon/TikTok Shop/1688）+ Amazon 评论分析 + Listing 草稿；简历写”电商选品研究与评论分析”，面试讲清”数据源降级链 + 不伪装 demo”；
+- **Media Agent**：当前是独立 `/api/media/generate` + 前端虚拟角色，后端未注册；若简历写”Media Agent”，口径是”媒体能力已打通，正在接入统一 Runtime”（或先做完再写）；
+- **技术栈**：Vite + React + Python FastAPI（不是 Next.js 14）；模型调用走原生 Function Calling（非纯文本协议）；
+- **”自研”口径**：架构与核心设计是自己做的，实现大量使用 AI 辅助编码——现在这是常态，重点是讲得清每条链路。
 
 ---
 
 ## 七、临场注意
 
-1. 数字只说真实的：并行度 4、token 上限 128K、超时 300s、worklist ≤8、重试 2/3/3；
-2. 被追问到不会的细节：承认边界并给思路（“这块当前是 XXX，如果要改进我会 XXX”），比硬编强；
-3. 每个机制都准备“为什么不用现成的/为什么这样设计”的答案；
-4. 提前在本机把 `pytest backend/tests/test_completed_works.py` 等测试跑绿，面试可展示工程习惯。
+1. 数字只说真实的：并行度 4、token 上限 128K、超时 300s、worklist ≤8、单 Work 尝试上限默认 10 轮（多文件 18）、重试 2/3/3；
+2. 被追问到不会的细节：承认边界并给思路（”这块当前是 XXX，如果要改进我会 XXX”），比硬编强；
+3. 每个机制都准备”为什么不用现成的/为什么这样设计”的答案；
+4. 提前在本机把 `pytest backend` 全量测试跑绿（当前 517 passed），面试可展示工程习惯；
+5. 电商相关题目要主动亮”数据源降级链 + demo 不伪装”的信任设计，这是与套壳 demo 的差异化点。

@@ -66,15 +66,17 @@ pnpm dev
 ├─ app/                         React 页面、组件、Hooks、前端类型
 ├─ backend/                     Python FastAPI 业务服务
 │  ├─ api/                      HTTP/SSE 接口层
-│  ├─ core/                     配置和日志
+│  ├─ core/                     配置、日志、请求审计、后台任务生命周期
 │  ├─ schemas/                  Pydantic 请求/响应模型
 │  ├─ services/
-│  │  ├─ agent/                 Code Agent、审批、回滚、Trace
-│  │  ├─ commerce/              市场研究和 Listing 演示
-│  │  ├─ llm/                   多模型网关
+│  │  ├─ agent/                 统一 Agent Runtime（planner/worker/loop/shared/reflection）
+│  │  ├─ commerce/              市场研究、评论分析、Listing 草稿
+│  │  ├─ llm/                   多模型网关（OpenAI 兼容 / Gemini 协议）
 │  │  ├─ mcp/                   MCP 服务发现
 │  │  ├─ media/                 图片/视频生成
-│  │  └─ workspace/             项目、索引、SQLite
+│  │  ├─ skills/                外部 Skill 安装与启用
+│  │  ├─ tools/                 Tool Gateway（search/read/inspect/edit/run/filesystem）
+│  │  └─ workspace/             项目、索引、SQLite、已完成工作注册表
 │  ├─ tests/                    Python 冒烟测试
 │  └─ main.py                   FastAPI 入口
 ├─ electron/                    Electron 主进程、preload、IPC
@@ -179,30 +181,33 @@ pnpm electron:make:linux
 
 ## 六、当前保留的能力
 
-- 多模型配置和模型列表；
+- 多模型配置和模型列表，auto 自动路由与供应商级熔断；
 - 流式聊天/SSE；
-- 项目创建、读取和 SQLite 持久化；
+- 原生 Function Calling：工具 Schema 透传、流式 tool_calls 累加（兼容 DeepSeek 无 id 分片）；
+- 项目创建、读取和 SQLite 持久化（版本化迁移 + WAL）；
 - 项目文件索引与上下文搜索；
-- Code Agent 只读分析；
-- 文件修改提案；
-- 人工批准后写入；
-- 修改失败回滚；
-- Agent Trace/可观测性；
-- 百炼图片和视频生成；
-- 媒体安全下载代理；
-- TalorData 市场研究；
+- Code Agent 完整链路：意图分类 → Planner WorkList → 并行调度（同文件冲突串行）→ 事务式编辑 → 失败只重排失败项 → Checkpoint 断点恢复 → 终审；
+- 已完成工作注册表：同标题且产物健在的 Work 确定性跳过，防重复执行；
+- 执行守卫：重复动作拦截、只读停滞警告、迭代预算与 token 硬止损；
+- 后台任务句柄化：复盘/记忆评估/索引统一登记，关闭时排空，杜绝 Event loop is closed；
+- Agent Trace/可观测性与请求审计日志；
+- 记忆系统：episodic/semantic/task 三类记忆，执行后异步复盘沉淀知识；
+- 电商市场研究：TalorData SERP + Amazon（SP-API 优先、公开爬虫兜底）+ TikTok Shop/1688 官方 API；
+- Amazon 评论分析：对评论量最高的商品采集公开评论，评分分布 + 情感主题（LLM 增强第一个商品），降级为明确标注的演示样本；
 - 未配置数据源时的明确 demo 模式；
-- Listing 文案演示；
+- Listing 文案草稿演示（pending/confirmed/rejected 状态机，不发布）；
 - MCP Server/工具目录发现；
-- Electron 目录选择、窗口控制和 PDF 导出。
+- 外部 Skill 发现、GitHub 批量安装与启用配置；
+- Electron 目录选择、窗口控制和 PDF 导出；
+- SQLite 与全盘扫描移出事件循环：`asyncio.to_thread` 承载 DB 操作与文件树遍历，SSE 期间不再被阻塞。
 
 ## 七、需要你知道的迁移边界
 
 1. MCP 当前只负责发现和显示工具，Code Agent 尚未自动执行远程 MCP 工具。
 2. Listing 功能只生成文案，不会向真实电商平台发布商品。
-3. TikTok Shop、Temu、1688 的凭证状态会显示，但真实平台 API 尚未在 Python 版实现。
-4. 没有 TalorData 凭证时，市场研究会返回带 `runMode: demo` 标识的数据，不会伪装成真实调研结果。
-5. 模型供应商可能调整模型 ID；如果供应商返回“模型不存在”，请在 `backend/services/llm/catalog.py` 中更新映射。
+3. TikTok Shop、1688 已接入官方 API（配置凭据后采集真实商品样本）；Temu、Keepa 仅显示凭据状态占位，尚无真实 API 客户端。
+4. 没有 TalorData 或 Amazon 可用数据源时，市场研究会返回带 `runMode: demo` 标识的数据，评论分析失败时同样降级为明确标注的演示样本，不会伪装成真实调研结果。
+5. 模型供应商可能调整模型 ID；如果供应商返回“模型不存在”，请在 `config/chat-models.json` 中更新映射（供应商配置在 `config/providers.json`）。
 
 ## 八、代码规范
 
