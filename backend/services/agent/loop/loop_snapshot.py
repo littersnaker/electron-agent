@@ -51,4 +51,18 @@ def build_scheduler_snapshot(
     return snapshot
 
 
+async def attach_step_metrics(snapshot: dict[str, Any], session_id: str) -> dict[str, Any]:
+    """附加本次会话的 LLM 性能指标聚合（TTFT / tok/s / token）。"""
+
+    if not session_id:
+        return snapshot
+    try:
+        from backend.services.quality.step_metrics import aggregate_step_metrics
+
+        snapshot["stepMetrics"] = await aggregate_step_metrics(session_id)
+    except Exception:  # noqa: BLE001 - 指标聚合失败不影响快照。
+        snapshot["stepMetrics"] = {}
+    return snapshot
+
+
 __all__ = ["build_scheduler_snapshot"]

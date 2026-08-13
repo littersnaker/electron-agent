@@ -44,6 +44,7 @@ class LlmUsage:
     prompt: int = 0
     completion: int = 0
     total: int = 0
+    cached_tokens: int = 0
 
 
 @dataclass(slots=True)

@@ -57,7 +57,73 @@ def _usage_payload(usage: LlmUsage | None) -> dict[str, int] | None:
         "prompt": usage.prompt,
         "completion": usage.completion,
         "total": usage.total,
+        "cached": usage.cached_tokens,
     }
+
+
+def _ttft_ms(started: float, first_chunk_at: float | None) -> int | None:
+    """首 token 延迟（毫秒）；无输出时返回 None。"""
+
+    if first_chunk_at is None:
+        return None
+    return max(0, int((first_chunk_at - started) * 1000))
+
+
+def _tok_per_sec(
+    usage: LlmUsage | None,
+    first_chunk_at: float | None,
+    finished_at: float | None = None,
+) -> float | None:
+    """输出吞吐（tok/s）：completion ÷ 首 token 到完成的时间。"""
+
+    if usage is None or first_chunk_at is None or finished_at is None:
+        return None
+    decode_seconds = max(0.001, finished_at - first_chunk_at)
+    return round(usage.completion / decode_seconds, 1) if usage.completion else None
+
+
+async def _record_step_metric(
+    *,
+    request_id: str,
+    audit_info: Any,
+    provider: str,
+    model: str,
+    usage: LlmUsage | None,
+    ttft_ms: int | None,
+    total_ms: int,
+) -> None:
+    """把一次 LLM 调用的性能指标落库（失败只告警，不影响主流程）。"""
+
+    if usage is None:
+        return
+    agent = audit_info if isinstance(audit_info, dict) else {}
+    # effective_audit 返回 camelCase 键（agentId/sessionId/parentRequestId）。
+    work_id = str(
+        agent.get("parentRequestId")
+        or agent.get("parent_request_id")
+        or ""
+    )
+    session_id = str(agent.get("sessionId") or agent.get("session_id") or "")
+    try:
+        from backend.services.quality.step_metrics import record_step_metric
+
+        await record_step_metric(
+            request_id=request_id,
+            session_id=session_id,
+            work_id=work_id,
+            provider=provider,
+            model=model,
+            ttft_ms=ttft_ms,
+            tok_per_sec=usage.completion / max(0.001, total_ms / 1000)
+            if usage.completion and total_ms
+            else None,
+            prompt_tokens=usage.prompt,
+            completion_tokens=usage.completion,
+            cached_tokens=usage.cached_tokens,
+            total_ms=total_ms,
+        )
+    except Exception as exc:  # noqa: BLE001 - 指标采集失败不影响 LLM 调用。
+        LOGGER.debug("step metric 落库失败：%s", exc)
 
 
 class LlmGateway:
@@ -166,6 +232,7 @@ class LlmGateway:
         except Exception as exc:
             request_payload["candidatesError"] = str(exc)
         last_usage: LlmUsage | None = None
+        first_chunk_at: float | None = None
         try:
             async for chunk in self._stream_impl(
                 preferred_model_id=preferred_model_id,
@@ -173,6 +240,8 @@ class LlmGateway:
                 messages=messages,
                 temperature=temperature,
             ):
+                if first_chunk_at is None:
+                    first_chunk_at = monotonic()
                 if chunk.usage:
                     last_usage = chunk.usage
                 yield chunk
@@ -188,6 +257,7 @@ class LlmGateway:
                 error=str(exc),
             )
             raise
+        ttft_ms = _ttft_ms(started, first_chunk_at)
         request_audit.record(
             kind="llm.stream",
             request_id=request_id,
@@ -198,8 +268,23 @@ class LlmGateway:
                 "stream": True,
                 "finished": True,
                 "usage": _usage_payload(last_usage),
+                "ttftMs": ttft_ms,
+                "tokPerSec": _tok_per_sec(last_usage, first_chunk_at),
             },
             agent=audit_info,
+        )
+        await _record_step_metric(
+            request_id=request_id,
+            audit_info=audit_info,
+            provider=request_payload.get("candidates", [{}])[0].get("provider", "")
+            if request_payload.get("candidates")
+            else "",
+            model=request_payload.get("candidates", [{}])[0].get("model", "")
+            if request_payload.get("candidates")
+            else "",
+            usage=last_usage,
+            ttft_ms=ttft_ms,
+            total_ms=request_audit.duration_ms(started),
         )
 
     async def _stream_impl(
@@ -341,8 +426,20 @@ class LlmGateway:
                 "model": model.model,
                 "provider": model.provider,
                 "name": model.name,
+                # 首 token 延迟：complete 内部已记录 first_chunk_at，
+                # 此处用整体耗时近似（审计用途），精确值在 agent_step_metrics 采集。
+                "ttftMs": request_audit.duration_ms(started),
             },
             agent=audit_info,
+        )
+        await _record_step_metric(
+            request_id=request_id,
+            audit_info=audit_info,
+            provider=model.provider,
+            model=model.model,
+            usage=usage,
+            ttft_ms=request_audit.duration_ms(started),
+            total_ms=request_audit.duration_ms(started),
         )
         return result
 
@@ -377,6 +474,7 @@ class LlmGateway:
             text_parts: list[str] = []
             reasoning_parts: list[str] = []
             usage = LlmUsage()
+            first_chunk_at: float | None = None
             # 流式 Function Calling 按 id 分片累加 arguments，结束后拼接成完整 JSON。
             tool_calls_map: dict[str, dict[str, str]] = {}
             tool_calls_order: list[str] = []
@@ -390,6 +488,8 @@ class LlmGateway:
                     stall_budget=stall_budget,
                     tools=tools,
                 ):
+                    if first_chunk_at is None:
+                        first_chunk_at = monotonic()
                     if chunk.reasoning_delta:
                         reasoning_parts.append(chunk.reasoning_delta)
                     if chunk.text_delta:

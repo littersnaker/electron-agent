@@ -121,6 +121,19 @@ async def review_execution(
             "frontendChanged": frontend_changed[:20],
             "taskSummary": task_summary,
         }
+    # 质量分五维：验证/风险来自本轮 review，审核来自复盘落库，过程/效率来自 Worker 状态。
+    from backend.services.quality.score import compute_quality_score
+
+    process_state = _process_dimension(worker_states)
+    efficiency_state = _efficiency_dimension(worker_states)
+    quality_score = compute_quality_score(
+        validation=validation.to_json(),
+        patch_risk={"score": patch.risk.score},
+        review_artifact=None,  # 审核维度由异步复盘填充，本轮不阻塞等待。
+        process=process_state,
+        efficiency=efficiency_state,
+    )
+    _record_quality_score(worker_states, quality_score)
     payload = {
         "changes": len(changed_files),
         "risk": patch.risk.level.value,
@@ -140,6 +153,8 @@ async def review_execution(
         "validationSkippedHighRisk": skipped_high_risk,
         # 视觉验证：前端改动时请求截图 + GLM 视觉核对（纯增强，不阻塞 review）。
         "visualVerify": visual_verify,
+        # 质量分：五维加权（验证/风险/审核/过程/效率），无数据维度剔除归一化。
+        "qualityScore": quality_score,
     }
     for state in worker_states.values():
         state.quality = dict(payload)
@@ -169,6 +184,68 @@ def _artifact_dependencies(worker_states: dict[str, WorkWorkerState]) -> list[st
             if path and path not in references:
                 references.append(path)
     return references
+
+
+def _process_dimension(worker_states: dict[str, WorkWorkerState]) -> dict[str, Any]:
+    """过程维度数据：聚合各 Work 的返工/守卫计数。"""
+
+    retries = max((state.attempt_number for state in worker_states.values()), default=0)
+    rejections = sum(state.guard_rejections for state in worker_states.values())
+    stopped = any(bool(state.quality.get("budgetCompacted")) for state in worker_states.values())
+    return {
+        "retries": max(0, retries - 1),
+        "guard_rejections": rejections,
+        "guard_stopped": stopped,
+    }
+
+
+def _efficiency_dimension(worker_states: dict[str, WorkWorkerState]) -> dict[str, Any]:
+    """效率维度数据：token 预算利用率与压缩节省。"""
+
+    consumed = 0.0
+    limit = 0.0
+    compressed = 0
+    for state in worker_states.values():
+        budget = state.token_budget or {}
+        worker = budget.get("worker") or {}
+        consumed += float(worker.get("consumed") or 0)
+        limit += float(worker.get("limit") or 0)
+        compressed += int(worker.get("compressed") or 0)
+    return {"consumed": consumed, "limit": limit, "compressed_count": compressed}
+
+
+def _record_quality_score(
+    worker_states: dict[str, WorkWorkerState],
+    quality_score: dict[str, Any],
+) -> None:
+    """把质量分写入 quality_scores 表（失败只告警）。"""
+
+    score = quality_score.get("score")
+    if score is None or not worker_states:
+        return
+    try:
+        from backend.services.workspace.database import dumps_json, open_database, utc_now_iso
+
+        work_id = next(iter(worker_states))
+        async def _write() -> None:
+            async with open_database() as connection:
+                await connection.execute(
+                    "INSERT INTO quality_scores "
+                    "(work_id, session_id, score, dimensions_json, active_weights_json, created_at) "
+                    "VALUES (?, '', ?, ?, ?, ?)",
+                    (
+                        work_id,
+                        float(score),
+                        dumps_json(quality_score.get("dimensions") or {}),
+                        dumps_json(quality_score.get("activeWeights") or {}),
+                        utc_now_iso(),
+                    ),
+                )
+        import asyncio
+
+        asyncio.get_running_loop().create_task(_write())
+    except Exception:  # noqa: BLE001 - 质量分落库失败不影响 review。
+        pass
 
 
 def _task_summary(worker_states: dict[str, WorkWorkerState]) -> str:

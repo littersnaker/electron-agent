@@ -181,7 +181,14 @@ async def stream_prepared_autonomous(
                 int(event.payload.get("total") or 0),
             )
         elif event.kind == "worklist":
-            yield encode_sse({"type": "WORKLIST_UPDATE", "payload": event.payload})
+            payload = dict(event.payload)
+            # 附加本次会话的 LLM 性能指标聚合（TTFT / tok/s / token）。
+            session_id = (body.session_id or "").strip()
+            if session_id:
+                from backend.services.agent.loop.loop_snapshot import attach_step_metrics
+
+                payload = await attach_step_metrics(payload, session_id)
+            yield encode_sse({"type": "WORKLIST_UPDATE", "payload": payload})
         elif event.kind == "visual_verify":
             yield encode_sse(
                 {

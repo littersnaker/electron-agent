@@ -149,6 +149,22 @@ export interface ExecutionQualityPayload {
   regression: boolean;
   apiContractChanged: boolean;
   codeGatePassed: boolean;
+  /** 质量分：五维加权（验证/风险/审核/过程/效率），无数据维度剔除归一化。 */
+  qualityScore?: {
+    score: number | null;
+    dimensions: Record<string, number>;
+    activeWeights: Record<string, number>;
+  };
+}
+
+/** 本次会话的 LLM 性能指标聚合（TTFT / tok/s / token）。 */
+export interface StepMetricsPayload {
+  steps: number;
+  avgTtftMs: number | null;
+  avgTokPerSec: number | null;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalCachedTokens: number;
 }
 
 /** Code Agent 后端提供的 WorkList 唯一真实快照。 */
@@ -169,6 +185,7 @@ export interface WorkListSnapshotPayload {
   };
   metrics?: ExecutionMetricsPayload;
   quality?: ExecutionQualityPayload;
+  stepMetrics?: StepMetricsPayload;
   items: WorkListItemPayload[];
 }
 

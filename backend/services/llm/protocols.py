@@ -388,14 +388,18 @@ class LlmProtocolClient:
         return "".join(str(part.get("text") or "") for part in parts)
 
     def _read_openai_usage(self, raw: object) -> LlmUsage | None:
-        """解析 OpenAI 兼容用量字段。"""
+        """解析 OpenAI 兼容用量字段（含缓存 token）。"""
 
         if not isinstance(raw, dict):
             return None
         prompt = int(raw.get("prompt_tokens") or 0)
         completion = int(raw.get("completion_tokens") or 0)
         total = int(raw.get("total_tokens") or prompt + completion)
-        return LlmUsage(prompt, completion, total)
+        details = raw.get("prompt_tokens_details")
+        cached = 0
+        if isinstance(details, dict):
+            cached = int(details.get("cached_tokens") or 0)
+        return LlmUsage(prompt, completion, total, cached)
 
     def _read_gemini_usage(self, raw: object) -> LlmUsage | None:
         """解析 Gemini 用量字段。"""
