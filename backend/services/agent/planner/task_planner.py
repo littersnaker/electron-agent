@@ -158,6 +158,24 @@ def _parse_file_operations(value: object) -> list[FileSystemOperation]:
     return operations
 
 
+def _derive_acceptance(objective: str) -> list[str]:
+    """从 objective 派生 1-3 条短验收标准。
+
+    精简后的 worklist 不再强制模型写 12 条验收；验收要点并入 objective，
+    解析时空缺则按句子拆分派生，保证 worker 提示词里仍有验收依据。
+    """
+
+    text = (objective or "").strip()
+    if not text:
+        return []
+    # 按中文/英文句子分隔符拆成候选句，取前 3 条作为验收标准。
+    parts = [part.strip() for part in re.split(r"[。；;！？!\n]", text) if part.strip()]
+    derived = [part[:120] for part in parts[:3]]
+    if derived:
+        return derived
+    return [text[:120]]
+
+
 def _parse_work_items(
     value: object,
     *,
@@ -199,7 +217,10 @@ def _parse_work_items(
                 id=work_id,
                 title=title,
                 objective=objective,
-                acceptance_criteria=_strings(raw.get("acceptanceCriteria"), limit=12),
+                acceptance_criteria=(
+                    _strings(raw.get("acceptanceCriteria"), limit=12)
+                    or _derive_acceptance(objective)
+                ),
                 dependencies=_strings(raw.get("dependencies"), limit=12),
                 priority=_priority(raw.get("priority")),
                 target_files=target_files,
@@ -279,11 +300,11 @@ async def prepare_code_task(
   "constraints":["必须遵守的约束"],
   "acceptanceCriteria":["可验证的验收标准"],
   "nonGoals":["明确不做的内容"],
-  "validationCommands":["建议的安全验证命令"],
   "worklist":[
-    {"id":"W001","title":"短标题","objective":"独立目标","acceptanceCriteria":["标准"],"dependencies":[],"priority":100,"targetFiles":["预计写入的相对路径"],"serialGroup":"可选共享资源组","executionType":"coding","fileOperations":[{"type":"rename","sourcePath":"旧相对路径","targetPath":"新相对路径"}],"validationCommands":["pnpm lint"]}
+    {"id":"W001","title":"短标题","objective":"独立目标，必须完整包含该 Work 的验收要点（如\"实现 X，要求滚动时 Y 生效\"）","targetFiles":["预计写入的相对路径"],"dependencies":["可选，只写真实产物前置的 Work id"]}
   ]
 }
+说明：executionType、priority、serialGroup、validationCommands 不需要你输出，系统会自动推导补全。文件重命名/移动类任务可额外输出 fileOperations。每个 Work 只输出上述最小字段，不要写多余的验收列表或验证命令，以节省输出。objective 必须写完整，把验收标准的关键要求合并进 objective。
 规则：Work 应互不重复、边界清晰、依赖明确；不要按文件机械拆分。默认 3-6 个 Work，最多 8 个。
 多文件功能域合并进同一个 Work，由 Worker 在内部分批 edit；只有文件完全不重叠、可独立验收的大模块才拆成独立 Work，不要为了并行而过度拆分。
 单个 Work 的 targetFiles 控制在 15 个以内；涉及文件很多时按项目目录/路由/模块自然分组，每组不超过 15 个；存在共享基础（入口、主题、公共组件）时先做一个小的前置 Work，其余组互不依赖、可并行。不要所有页面塞进一个 Work，也不要按页面拆成几十个 Work。
