@@ -22,12 +22,8 @@ export interface LlmRequestAttachment {
   data: string;
 }
 
-function parseDataUrl(
-  value: string,
-): { mimeType: string; data: string } | null {
-  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/iu.exec(
-    value.trim(),
-  );
+function parseDataUrl(value: string): { mimeType: string; data: string } | null {
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/iu.exec(value.trim());
   if (!match) return null;
 
   return {
@@ -36,9 +32,7 @@ function parseDataUrl(
   };
 }
 
-function readBinaryData(
-  attachment: AttachmentLike,
-): { mimeType: string; data: string } | null {
+function readBinaryData(attachment: AttachmentLike): { mimeType: string; data: string } | null {
   const preferredValue = attachment.dataUrl?.trim() || attachment.base64.trim();
   if (!preferredValue) return null;
 
@@ -56,11 +50,14 @@ export function buildLlmRequestHeaders(
   apiKeys: LlmCredentials,
   selectedModel: string,
   endpointOverrides: LlmEndpointOverrides = {},
+  jinaApiKey = "",
 ): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "x-llm-model-id": selectedModel,
   };
+  // Jina 向量检索密钥随聊天请求一起发送，供后端知识库检索使用。
+  if (jinaApiKey.trim()) headers["x-jina-api-key"] = jinaApiKey.trim();
 
   for (const provider of LLM_PROVIDER_CATALOG) {
     const value = apiKeys[provider.id]?.trim();
@@ -84,7 +81,6 @@ export function buildImageAttachmentPayload(
 ): LlmRequestAttachment[] | undefined {
   return attachment ? buildImageAttachmentsPayload([attachment]) : undefined;
 }
-
 
 export function buildImageAttachmentsPayload(
   attachments: readonly AttachmentLike[],
@@ -115,10 +111,7 @@ export function buildMediaAttachmentPayload(
   attachment: AttachmentLike | null,
 ): LlmRequestAttachment[] | undefined {
   if (!attachment) return undefined;
-  if (
-    !attachment.type.startsWith("image/") &&
-    !attachment.type.startsWith("video/")
-  ) {
+  if (!attachment.type.startsWith("image/") && !attachment.type.startsWith("video/")) {
     return undefined;
   }
 

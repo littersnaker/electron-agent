@@ -1,10 +1,6 @@
 // 模块说明：维护 workspace 共享类型定义。
 import type { AgentKind, AgentStatus } from "../components/AgentPanel";
-import type {
-  ChatSession,
-  MessageAttachment,
-  WorkspaceProject,
-} from "../constants/page-constants";
+import type { ChatSession, MessageAttachment, WorkspaceProject } from "../constants/page-constants";
 import type { CommerceProgressEvent, CommerceResearchReport } from "../lib/commerce/types";
 import type { AmazonListingDemoReport } from "../lib/commerce/listing/types";
 
@@ -14,10 +10,7 @@ export interface WorkspaceResponse {
 }
 
 export type InteractiveRequestSource =
-  | "terminal"
-  | "file_create_confirmation"
-  | "risk_approval"
-  | "mcp_tool_approval";
+  "terminal" | "file_create_confirmation" | "risk_approval" | "mcp_tool_approval";
 
 export interface InteractiveRequest {
   id: string;
@@ -103,14 +96,7 @@ export interface AgentLifecycleEventPayload {
   createdAt: string;
 }
 
-
-export type WorkItemStatus =
-  | "pending"
-  | "running"
-  | "paused"
-  | "succeeded"
-  | "failed"
-  | "skipped";
+export type WorkItemStatus = "pending" | "running" | "paused" | "succeeded" | "failed" | "skipped";
 
 export interface WorkListItemPayload {
   id: string;
@@ -207,7 +193,27 @@ export type StreamPacketType =
   | "AGENT_PROGRESS"
   | "AGENT_FINISH"
   | "AGENT_ERROR"
-  | "VISUAL_VERIFY_REQUESTED";
+  | "VISUAL_VERIFY_REQUESTED"
+  | "KNOWLEDGE_SOURCES";
+
+/** 知识库检索命中的单个来源。 */
+export interface KnowledgeSourceItem {
+  /** 文档路径或 memory:scope:id 形式的来源标识 */
+  sourcePath: string;
+  /** doc / memory */
+  sourceType: string;
+  /** 重排或向量相关度分数 */
+  score?: number;
+  /** 是否使用了父文本替换 */
+  parentUsed?: boolean;
+}
+
+/** 知识库来源广播事件的数据结构。 */
+export interface KnowledgeSourcesPayload {
+  sources: KnowledgeSourceItem[];
+  count: number;
+  searched: boolean;
+}
 
 /** 视觉验证请求：前端需要启动预览、截图并用 GLM 核对页面渲染。 */
 export interface VisualVerifyPayload {
@@ -226,6 +232,7 @@ export interface StreamPacket {
     | CommerceResearchReport
     | AmazonListingDemoReport
     | VisualVerifyPayload
+    | KnowledgeSourcesPayload
     | { content?: string; attachments?: MessageAttachment[] };
   agent?: AgentEventPayload;
 }

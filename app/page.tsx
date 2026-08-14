@@ -10,6 +10,7 @@ import { ProjectInitModal } from "./components/ProjectInitModal";
 import ConfirmDialog from "./components/skills-manager/confirm-dialog";
 import ApiKeyModal from "./components/ApiKeyModal";
 import SkillsManagerPage from "./components/skills-manager/SkillsManagerPage";
+import KnowledgeBasePage from "./components/knowledge-base/KnowledgeBasePage";
 import { ChatComposer } from "./components/ChatComposer";
 import CheckpointResumeBar from "./components/CheckpointResumeBar";
 import ChatList from "./components/ChatList";
@@ -53,29 +54,21 @@ import type { BuiltinPluginId } from "./lib/plugins/types";
  */
 export default function Home() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("chat");
-  const {
-    selectedChatModel,
-    selectedMediaModel,
-    setSelectedChatModel,
-    setSelectedMediaModel,
-  } = useModelSelection();
+  const { selectedChatModel, selectedMediaModel, setSelectedChatModel, setSelectedMediaModel } =
+    useModelSelection();
   const customModels = useCustomModels();
   const { codeAgentMode, setCodeAgentMode } = useCodeAgentMode();
   const [typographyPolicy, setTypographyPolicy] =
     useState<TypographyPolicy>("avoid-generated-text");
-  const [imageEditFidelity, setImageEditFidelity] =
-    useState<ImageEditFidelity>("precise");
+  const [imageEditFidelity, setImageEditFidelity] = useState<ImageEditFidelity>("precise");
   const [enableQualityGuard, setEnableQualityGuard] = useState(true);
-  const [commerceMarketplace, setCommerceMarketplace] =
-    useState<CommerceMarketplaceCode>("US");
+  const [commerceMarketplace, setCommerceMarketplace] = useState<CommerceMarketplaceCode>("US");
   const [showPluginCenter, setShowPluginCenter] = useState(false);
   /** 用户已选目录、等待确认初始化选项的创建流程。 */
   const [pendingProjectFolder, setPendingProjectFolder] = useState<string | null>(null);
   /** 待删除的项目 ID（弹确认框）。 */
   const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
-  const [activePage, setActivePage] = useState<"workspace" | "skills">(
-    "workspace",
-  );
+  const [activePage, setActivePage] = useState<"workspace" | "skills" | "knowledge">("workspace");
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
@@ -97,36 +90,20 @@ export default function Home() {
       : composerMode;
   const availableModels = useMemo(() => {
     if (effectiveComposerMode === "chat") {
-      return [
-        ...AVAILABLE_CHAT_MODELS,
-        ...getCustomModelOptions(customModels.models),
-      ];
+      return [...AVAILABLE_CHAT_MODELS, ...getCustomModelOptions(customModels.models)];
     }
-    return getAvailableMediaModelOptions(
-      effectiveComposerMode,
-      customModels.models,
-    );
+    return getAvailableMediaModelOptions(effectiveComposerMode, customModels.models);
   }, [customModels.models, effectiveComposerMode]);
   useEffect(() => {
     if (!customModels.loaded || !selectedChatModel.startsWith("custom:")) return;
-    const stillExists = customModels.models.some(
-      (model) => model.id === selectedChatModel,
-    );
+    const stillExists = customModels.models.some((model) => model.id === selectedChatModel);
     if (!stillExists) setSelectedChatModel(AUTO_MODEL_ID);
-  }, [
-    customModels.loaded,
-    customModels.models,
-    selectedChatModel,
-    setSelectedChatModel,
-  ]);
+  }, [customModels.loaded, customModels.models, selectedChatModel, setSelectedChatModel]);
   const resolvedMediaModel =
     availableModels.find((model) => model.id === selectedMediaModel)?.id ||
     availableModels[0]?.id ||
     selectedMediaModel;
-  const selectedModel =
-    effectiveComposerMode === "chat"
-      ? selectedChatModel
-      : resolvedMediaModel;
+  const selectedModel = effectiveComposerMode === "chat" ? selectedChatModel : resolvedMediaModel;
   const chat = useChatStream({
     activeSession: workspace.activeSession,
     activeProject: workspace.activeProject,
@@ -175,15 +152,23 @@ export default function Home() {
     agents: agentCoordinator,
   });
   const checkpointRuns = useCheckpointedAgentRuns({
-    sessionId: workspace.activeSession?.id, sessionMode: workspace.activeSession?.mode,
-    input: composer.input, attachments: composer.attachedFiles,
-    selectedModel, composerMode: effectiveComposerMode, codeAgentMode,
-    commerceWorkflowMode: commerce.workflowMode, commerceMarketplace,
-    typographyPolicy, imageEditFidelity, enableQualityGuard,
-    chat, media, commerce,
+    sessionId: workspace.activeSession?.id,
+    sessionMode: workspace.activeSession?.mode,
+    input: composer.input,
+    attachments: composer.attachedFiles,
+    selectedModel,
+    composerMode: effectiveComposerMode,
+    codeAgentMode,
+    commerceWorkflowMode: commerce.workflowMode,
+    commerceMarketplace,
+    typographyPolicy,
+    imageEditFidelity,
+    enableQualityGuard,
+    chat,
+    media,
+    commerce,
   });
-  const isBusy =
-    chat.isStreaming || media.isGenerating || commerce.isResearching;
+  const isBusy = chat.isStreaming || media.isGenerating || commerce.isResearching;
   const activeStatus =
     workspace.activeSession?.mode === "commerce"
       ? commerce.agentStatus
@@ -195,9 +180,7 @@ export default function Home() {
         ? chat.tokenInfo
         : media.usageInfo;
   const activeToolActivities =
-    workspace.activeSession?.mode === "commerce"
-      ? commerce.toolActivities
-      : chat.toolActivities;
+    workspace.activeSession?.mode === "commerce" ? commerce.toolActivities : chat.toolActivities;
   const resetConversationUi = () => {
     composer.resetComposer();
     chat.resetTransient();
@@ -205,10 +188,7 @@ export default function Home() {
     commerce.reset();
     agentCoordinator.resetAgents();
   };
-  const handleCreateSession = async (
-    mode: SessionMode,
-    projectId: string | null = null,
-  ) => {
+  const handleCreateSession = async (mode: SessionMode, projectId: string | null = null) => {
     if (isBusy) return;
     if (mode === "code" && !codePluginEnabled) {
       setShowPluginCenter(true);
@@ -232,10 +212,7 @@ export default function Home() {
     if (isBusy) return;
     if (workspace.switchSession(id)) resetConversationUi();
   };
-  const handleDeleteSession = async (
-    id: string,
-    event: MouseEvent,
-  ) => {
+  const handleDeleteSession = async (id: string, event: MouseEvent) => {
     if (isBusy) return;
     const activeSessionChanged = await workspace.deleteSession(id, event);
     if (activeSessionChanged) resetConversationUi();
@@ -251,14 +228,10 @@ export default function Home() {
     // 选完目录先弹初始化选项，用户确认后再真正创建。
     setPendingProjectFolder(rootPath);
   };
-  const handlePluginChange = (
-    pluginId: BuiltinPluginId,
-    enabled: boolean,
-  ) => {
+  const handlePluginChange = (pluginId: BuiltinPluginId, enabled: boolean) => {
     plugins.setPluginEnabled(pluginId, enabled);
     // 如果用户关闭了当前正在查看的插件，立即回到核心 QA，避免页面停留在失效入口。
-    const disabledMode =
-      pluginId === "code-agent" ? "code" : "commerce";
+    const disabledMode = pluginId === "code-agent" ? "code" : "commerce";
     if (!enabled && workspace.activeSession?.mode === disabledMode) {
       const qaSession = workspace.sessions.find((session) => session.mode === "qa");
       if (qaSession) {
@@ -296,7 +269,7 @@ export default function Home() {
         className="theme-transition relative flex h-screen flex-col overflow-hidden"
         style={{
           ...getThemeVariables(theme),
-          display: activePage === "skills" ? "none" : undefined,
+          display: activePage !== "workspace" ? "none" : undefined,
           background:
             "radial-gradient(circle at 72% 12%, var(--app-glow-blue), transparent 28%), radial-gradient(circle at 45% 95%, var(--app-glow-purple), transparent 30%), var(--app-bg)",
           color: "var(--text-primary)",
@@ -304,228 +277,212 @@ export default function Home() {
             "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', sans-serif",
         }}
       >
-      {apiKey.showKeyModal && (
-        <ApiKeyModal
-          initialKeys={apiKey.apiKeys}
-          initialEndpoints={apiKey.endpointOverrides}
-          initialServiceKeys={apiKey.serviceKeys}
-          onSave={apiKey.handleSaveKeys}
-          onClose={apiKey.closeKeyModal}
-        />
-      )}
-      {pendingProjectFolder && (
-        <ProjectInitModal
-          folderName={pendingProjectFolder.split(/[\\/]/).pop() || pendingProjectFolder}
-          onConfirm={async (options) => {
-            const folder = pendingProjectFolder;
-            setPendingProjectFolder(null);
-            const project = await workspace.createProjectWithOptions(folder, options);
-            if (project) {
-              setComposerMode("chat");
-              resetConversationUi();
-            }
-          }}
-          onCancel={() => setPendingProjectFolder(null)}
-        />
-      )}
-      {deleteProjectId && (
-        <ConfirmDialog
-          danger
-          title="删除项目"
-          message="删除项目将同时删除其会话记录、索引与复盘数据，且不可恢复。确定删除吗？"
-          confirmLabel="删除"
-          cancelLabel="取消"
-          onConfirm={() => {
-            const projectId = deleteProjectId;
-            setDeleteProjectId(null);
-            void workspace.deleteProject(projectId);
-          }}
-          onCancel={() => setDeleteProjectId(null)}
-        />
-      )}
-      {showPluginCenter && (
-        <PluginCenter
-          open
-          plugins={plugins.manifests}
-          enabled={plugins.enabled}
-          onChange={handlePluginChange}
-          onClose={() => setShowPluginCenter(false)}
-        />
-      )}
-      <CustomTitleBar
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        runningAgentCount={agentCoordinator.runningAgentCount}
-      />
-      <div
-        className="flex min-h-0 flex-1 border-t"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <ChatSidebar
-          sessions={workspace.sessions}
-          projects={workspace.projects}
-          activeSessionId={workspace.activeSessionId}
-          isStreaming={isBusy}
-          createQaSession={() => void handleCreateSession("qa")}
-          createCommerceSession={() => void handleCreateSession("commerce")}
-          createMediaSession={() => void handleCreateSession("media")}
-          createCodeSession={(projectId: string) =>
-            void handleCreateSession("code", projectId)
-          }
-          addProject={() => void handleAddProject()}
-          codePluginEnabled={codePluginEnabled}
-          commercePluginEnabled={commercePluginEnabled}
-          mediaPluginEnabled={mediaPluginEnabled}
-          onOpenPluginCenter={() => setShowPluginCenter(true)}
-          reindexProject={(projectId: string) =>
-            void workspace.reindexProject(projectId)
-          }
-          switchSession={handleSwitchSession}
-          deleteSession={(id: string, event: MouseEvent) =>
-            void handleDeleteSession(id, event)
-          }
-          deleteProject={(projectId: string) => setDeleteProjectId(projectId)}
-        />
-        <section className="relative flex min-w-0 flex-1 flex-col">
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-24"
-            style={{
-              background:
-                "linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 82%, transparent), transparent)",
-            }}
+        {apiKey.showKeyModal && (
+          <ApiKeyModal
+            initialKeys={apiKey.apiKeys}
+            initialEndpoints={apiKey.endpointOverrides}
+            initialServiceKeys={apiKey.serviceKeys}
+            onSave={apiKey.handleSaveKeys}
+            onClose={apiKey.closeKeyModal}
           />
-          <div className="relative mx-auto flex min-h-0 w-full max-w-[1480px] flex-1 flex-col px-5 pb-4 pt-4 lg:px-8">
-            <WorkspaceHeader
-              activeSession={workspace.activeSession}
-              activeProject={workspace.activeProject}
-              composerMode={effectiveComposerMode}
-              tokenInfo={activeUsage}
-              isStreaming={isBusy}
-              onStop={
-                commerce.isResearching
-                  ? commerce.stop
-                  : media.isGenerating
-                    ? media.stop
-                    : chat.stop
+        )}
+        {pendingProjectFolder && (
+          <ProjectInitModal
+            folderName={pendingProjectFolder.split(/[\\/]/).pop() || pendingProjectFolder}
+            onConfirm={async (options) => {
+              const folder = pendingProjectFolder;
+              setPendingProjectFolder(null);
+              const project = await workspace.createProjectWithOptions(folder, options);
+              if (project) {
+                setComposerMode("chat");
+                resetConversationUi();
               }
-              onOpenApiKey={apiKey.openKeyModal}
-              onOpenSkills={() => setActivePage("skills")}
+            }}
+            onCancel={() => setPendingProjectFolder(null)}
+          />
+        )}
+        {deleteProjectId && (
+          <ConfirmDialog
+            danger
+            title="删除项目"
+            message="删除项目将同时删除其会话记录、索引与复盘数据，且不可恢复。确定删除吗？"
+            confirmLabel="删除"
+            cancelLabel="取消"
+            onConfirm={() => {
+              const projectId = deleteProjectId;
+              setDeleteProjectId(null);
+              void workspace.deleteProject(projectId);
+            }}
+            onCancel={() => setDeleteProjectId(null)}
+          />
+        )}
+        {showPluginCenter && (
+          <PluginCenter
+            open
+            plugins={plugins.manifests}
+            enabled={plugins.enabled}
+            onChange={handlePluginChange}
+            onClose={() => setShowPluginCenter(false)}
+          />
+        )}
+        <CustomTitleBar
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          runningAgentCount={agentCoordinator.runningAgentCount}
+        />
+        <div className="flex min-h-0 flex-1 border-t" style={{ borderColor: "var(--border)" }}>
+          <ChatSidebar
+            sessions={workspace.sessions}
+            projects={workspace.projects}
+            activeSessionId={workspace.activeSessionId}
+            isStreaming={isBusy}
+            createQaSession={() => void handleCreateSession("qa")}
+            createCommerceSession={() => void handleCreateSession("commerce")}
+            createMediaSession={() => void handleCreateSession("media")}
+            createCodeSession={(projectId: string) => void handleCreateSession("code", projectId)}
+            addProject={() => void handleAddProject()}
+            codePluginEnabled={codePluginEnabled}
+            commercePluginEnabled={commercePluginEnabled}
+            mediaPluginEnabled={mediaPluginEnabled}
+            onOpenPluginCenter={() => setShowPluginCenter(true)}
+            reindexProject={(projectId: string) => void workspace.reindexProject(projectId)}
+            switchSession={handleSwitchSession}
+            deleteSession={(id: string, event: MouseEvent) => void handleDeleteSession(id, event)}
+            deleteProject={(projectId: string) => setDeleteProjectId(projectId)}
+            onOpenKnowledge={() => setActivePage("knowledge")}
+            onOpenSkills={() => setActivePage("skills")}
+            onOpenApiKey={apiKey.openKeyModal}
+          />
+          <section className="relative flex min-w-0 flex-1 flex-col">
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 h-24"
+              style={{
+                background:
+                  "linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 82%, transparent), transparent)",
+              }}
             />
-            <div className="flex min-h-0 flex-1 gap-4">
-              <div className="flex min-w-0 flex-1 flex-col">
-                <ChatList
-                  key={workspace.activeSessionId}
-                  messages={workspace.messages}
-                  isStreaming={isBusy}
-                  toolActivities={activeToolActivities}
-                  agentStatus={activeStatus}
-                />
-                <div className="shrink-0 pt-2">
-                  {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (
-                    <CheckpointResumeBar
-                      checkpoint={checkpointRuns.checkpoint}
-                      disabled={checkpointRuns.loading}
-                      onResume={() => void checkpointRuns.resume(checkpointRuns.checkpoint!)}
-                      onDiscard={() => void checkpointRuns.discard()}
-                    />
-                  ) : null}
-                  {(workspace.activeSession?.mode === "code" ||
-                    workspace.activeSession?.mode === "media") &&
-                    chat.interactiveRequest &&
-                    !isBusy && (
-                    <InteractiveRequestPanel
-                      request={chat.interactiveRequest}
-                      answer={chat.interactiveAnswer}
-                      onAnswerChange={chat.setInteractiveAnswer}
-                      onReply={(
-                        mode: "auto" | "llm" | "user",
-                        answer?: string,
-                      ) =>
-                        void chat.handleInteractiveReply(mode, answer)
-                      }
-                    />
-                  )}
-                  <ChatComposer
-                    mode={workspace.activeSession?.mode}
-                    commerceMarketplace={commerceMarketplace}
-                    commerceWorkflowMode={commerce.workflowMode}
-                    onCommerceWorkflowModeChange={commerce.setWorkflowMode}
-                    onCommerceMarketplaceChange={setCommerceMarketplace}
-                    commerceDataSourceState={apiKey.commerceDataSourceState}
-                    onOpenServiceSettings={apiKey.openKeyModal}
-                    composerMode={effectiveComposerMode}
-                    onComposerModeChange={handleComposerModeChange}
-                    typographyPolicy={typographyPolicy}
-                    onTypographyPolicyChange={setTypographyPolicy}
-                    imageEditFidelity={imageEditFidelity}
-                    onImageEditFidelityChange={setImageEditFidelity}
-                    enableQualityGuard={enableQualityGuard}
-                    onEnableQualityGuardChange={setEnableQualityGuard}
-                    input={composer.input}
-                    onInputChange={composer.setInput}
-                    attachedFiles={composer.attachedFiles}
-                    onRemoveFile={composer.removeAttachedFile}
-                    onAddAttachments={composer.addAttachments}
-                    attachmentError={composer.attachmentError}
-                    isParsingFile={composer.isParsingFile}
+            <div className="relative mx-auto flex min-h-0 w-full max-w-[1480px] flex-1 flex-col px-5 pb-4 pt-4 lg:px-8">
+              <WorkspaceHeader
+                activeSession={workspace.activeSession}
+                activeProject={workspace.activeProject}
+                composerMode={effectiveComposerMode}
+                tokenInfo={activeUsage}
+                isStreaming={isBusy}
+                onStop={
+                  commerce.isResearching
+                    ? commerce.stop
+                    : media.isGenerating
+                      ? media.stop
+                      : chat.stop
+                }
+              />
+              <div className="flex min-h-0 flex-1 gap-4">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <ChatList
+                    key={workspace.activeSessionId}
+                    messages={workspace.messages}
                     isStreaming={isBusy}
-                    fileInputRef={composer.fileInputRef}
-                    models={availableModels}
-                    selectedModel={selectedModel}
-                    onSelectModel={handleSelectModel}
-                    codeAgentMode={codeAgentMode}
-                    onCodeAgentModeChange={setCodeAgentMode}
-                    onCreateCustomModel={
-                      async (input) => {
+                    toolActivities={activeToolActivities}
+                    agentStatus={activeStatus}
+                    knowledgeSources={chat.knowledgeSources}
+                    knowledgeSearched={chat.knowledgeSearched}
+                  />
+                  <div className="shrink-0 pt-2">
+                    {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (
+                      <CheckpointResumeBar
+                        checkpoint={checkpointRuns.checkpoint}
+                        disabled={checkpointRuns.loading}
+                        onResume={() => void checkpointRuns.resume(checkpointRuns.checkpoint!)}
+                        onDiscard={() => void checkpointRuns.discard()}
+                      />
+                    ) : null}
+                    {(workspace.activeSession?.mode === "code" ||
+                      workspace.activeSession?.mode === "media") &&
+                      chat.interactiveRequest &&
+                      !isBusy && (
+                        <InteractiveRequestPanel
+                          request={chat.interactiveRequest}
+                          answer={chat.interactiveAnswer}
+                          onAnswerChange={chat.setInteractiveAnswer}
+                          onReply={(mode: "auto" | "llm" | "user", answer?: string) =>
+                            void chat.handleInteractiveReply(mode, answer)
+                          }
+                        />
+                      )}
+                    <ChatComposer
+                      mode={workspace.activeSession?.mode}
+                      commerceMarketplace={commerceMarketplace}
+                      commerceWorkflowMode={commerce.workflowMode}
+                      onCommerceWorkflowModeChange={commerce.setWorkflowMode}
+                      onCommerceMarketplaceChange={setCommerceMarketplace}
+                      commerceDataSourceState={apiKey.commerceDataSourceState}
+                      onOpenServiceSettings={apiKey.openKeyModal}
+                      composerMode={effectiveComposerMode}
+                      onComposerModeChange={handleComposerModeChange}
+                      typographyPolicy={typographyPolicy}
+                      onTypographyPolicyChange={setTypographyPolicy}
+                      imageEditFidelity={imageEditFidelity}
+                      onImageEditFidelityChange={setImageEditFidelity}
+                      enableQualityGuard={enableQualityGuard}
+                      onEnableQualityGuardChange={setEnableQualityGuard}
+                      input={composer.input}
+                      onInputChange={composer.setInput}
+                      attachedFiles={composer.attachedFiles}
+                      onRemoveFile={composer.removeAttachedFile}
+                      onAddAttachments={composer.addAttachments}
+                      attachmentError={composer.attachmentError}
+                      isParsingFile={composer.isParsingFile}
+                      isStreaming={isBusy}
+                      fileInputRef={composer.fileInputRef}
+                      models={availableModels}
+                      selectedModel={selectedModel}
+                      onSelectModel={handleSelectModel}
+                      codeAgentMode={codeAgentMode}
+                      onCodeAgentModeChange={setCodeAgentMode}
+                      onCreateCustomModel={async (input) => {
                         const created = await customModels.createModel(input);
                         if (effectiveComposerMode === "chat") {
                           setSelectedChatModel(created.id);
                         } else {
                           setSelectedMediaModel(created.id);
                         }
+                      }}
+                      onUpdateCustomModel={customModels.updateModel}
+                      onDeleteCustomModel={customModels.deleteModel}
+                      onSubmit={handleSubmit}
+                      onStop={
+                        commerce.isResearching
+                          ? commerce.stop
+                          : media.isGenerating
+                            ? media.stop
+                            : chat.stop
                       }
-                    }
-                    onUpdateCustomModel={customModels.updateModel}
-                    onDeleteCustomModel={customModels.deleteModel}
-                    onSubmit={handleSubmit}
-                    onStop={
-                      commerce.isResearching
-                        ? commerce.stop
-                        : media.isGenerating
-                          ? media.stop
-                          : chat.stop
-                    }
-                  />
+                    />
+                  </div>
                 </div>
+                <AgentTaskPanel
+                  agents={agentCoordinator.agents}
+                  toolActivities={activeToolActivities}
+                  lifecycleEvents={
+                    workspace.activeSession?.mode === "commerce" ? [] : chat.agentLifecycleEvents
+                  }
+                  workListSnapshot={
+                    workspace.activeSession?.mode === "code" ? chat.workListSnapshot : null
+                  }
+                  agentStatus={activeStatus}
+                  isStreaming={isBusy}
+                  workflowMode={
+                    workspace.activeSession?.mode === "commerce"
+                      ? `commerce-${commerce.workflowMode}`
+                      : workspace.activeSession?.mode === "media"
+                        ? "media"
+                        : effectiveComposerMode
+                  }
+                />
               </div>
-              <AgentTaskPanel
-                agents={agentCoordinator.agents}
-                toolActivities={activeToolActivities}
-                lifecycleEvents={
-                  workspace.activeSession?.mode === "commerce"
-                    ? []
-                    : chat.agentLifecycleEvents
-                }
-                workListSnapshot={
-                  workspace.activeSession?.mode === "code"
-                    ? chat.workListSnapshot
-                    : null
-                }
-                agentStatus={activeStatus}
-                isStreaming={isBusy}
-                workflowMode={
-                  workspace.activeSession?.mode === "commerce"
-                    ? `commerce-${commerce.workflowMode}`
-                    : workspace.activeSession?.mode === "media"
-                      ? "media"
-                      : effectiveComposerMode
-                }
-              />
             </div>
-          </div>
-        </section>
-      </div>
-
+          </section>
+        </div>
       </main>
       <SkillsManagerPage
         theme={theme}
@@ -533,6 +490,12 @@ export default function Home() {
         runningAgentCount={agentCoordinator.runningAgentCount}
         onBack={() => setActivePage("workspace")}
         hidden={activePage !== "skills"}
+      />
+      <KnowledgeBasePage
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onBack={() => setActivePage("workspace")}
+        hidden={activePage !== "knowledge"}
       />
     </>
   );

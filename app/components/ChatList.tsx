@@ -6,6 +6,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 import type { Message } from "../constants/page-constants";
+import type { KnowledgeSourceItem } from "../types/workspace";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
@@ -15,6 +16,8 @@ interface ChatListProps {
   isStreaming: boolean;
   toolActivities?: ToolActivity[];
   agentStatus?: string;
+  knowledgeSources?: KnowledgeSourceItem[] | null;
+  knowledgeSearched?: boolean;
 }
 
 const COLORS = {
@@ -31,8 +34,7 @@ function AssistantBadge() {
     <div
       className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border"
       style={{
-        background:
-          "linear-gradient(145deg, var(--glass-hover), var(--glass-soft))",
+        background: "linear-gradient(145deg, var(--glass-hover), var(--glass-soft))",
         borderColor: COLORS.border,
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
       }}
@@ -58,11 +60,11 @@ function ChatList({
   isStreaming,
   toolActivities = [],
   agentStatus,
+  knowledgeSources = null,
+  knowledgeSearched = false,
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(
-    null,
-  );
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
 
   // ChatList 会由父组件使用 activeSessionId 作为 key。切换会话时组件会重新挂载，
@@ -163,9 +165,7 @@ function ChatList({
               Boolean(message.commerceReport) ||
               Boolean(message.commerceListing) ||
               (isLastMessage &&
-                (isStreaming ||
-                  toolActivities.length > 0 ||
-                  Boolean(agentStatus))));
+                (isStreaming || toolActivities.length > 0 || Boolean(agentStatus))));
 
           if (isUser) {
             const copied = copiedMessageIndex === index;
@@ -181,23 +181,16 @@ function ChatList({
                       boxShadow: "var(--message-user-shadow)",
                     }}
                   >
-                    <MessageAttachmentGallery
-                      attachments={message.attachments}
-                      compact
-                    />
+                    <MessageAttachmentGallery attachments={message.attachments} compact />
                     {message.content && (
-                      <div className="whitespace-pre-wrap break-words">
-                        {message.content}
-                      </div>
+                      <div className="whitespace-pre-wrap break-words">{message.content}</div>
                     )}
                   </div>
 
                   <div className="mt-1 flex h-7 items-center justify-end pr-0.5">
                     <button
                       type="button"
-                      onClick={() =>
-                        void copyUserMessage(message.content, index)
-                      }
+                      onClick={() => void copyUserMessage(message.content, index)}
                       className="message-copy-button relative flex h-7 w-7 items-center justify-center rounded-[9px] border border-transparent opacity-100 outline-none transition-[opacity,transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--glass-hover)] hover:shadow-[0_5px_16px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] active:translate-y-0 active:scale-[0.94] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--glass-hover)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-blue)_24%,transparent)] sm:pointer-events-none sm:translate-y-[2px] sm:opacity-0 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
                       style={{
                         background: copied
@@ -206,9 +199,7 @@ function ChatList({
                         borderColor: copied
                           ? "color-mix(in srgb, var(--accent-green) 25%, transparent)"
                           : undefined,
-                        color: copied
-                          ? "var(--accent-green)"
-                          : "var(--text-tertiary)",
+                        color: copied ? "var(--accent-green)" : "var(--text-tertiary)",
                         backdropFilter: "blur(18px) saturate(140%)",
                         WebkitBackdropFilter: "blur(18px) saturate(140%)",
                       }}
@@ -257,8 +248,7 @@ function ChatList({
                       <span
                         className="message-copy-tooltip pointer-events-none absolute bottom-[calc(100%+7px)] right-0 z-20 whitespace-nowrap rounded-[7px] border px-2 py-1 text-[10px] font-medium leading-none tracking-[-0.01em]"
                         style={{
-                          background:
-                            "color-mix(in srgb, var(--app-bg) 86%, transparent)",
+                          background: "color-mix(in srgb, var(--app-bg) 86%, transparent)",
                           borderColor: "var(--border)",
                           color: "var(--text-secondary)",
                           boxShadow:
@@ -292,6 +282,42 @@ function ChatList({
                       ? "Market Intelligence Agent"
                       : "Agent"}
                 </div>
+                {isLastMessage && knowledgeSearched && (
+                  <div
+                    className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px]"
+                    style={{ color: COLORS.textMuted }}
+                  >
+                    {knowledgeSources && knowledgeSources.length > 0 ? (
+                      <>
+                        <span
+                          className="rounded-full border px-2 py-0.5 font-medium"
+                          style={{
+                            borderColor: COLORS.border,
+                            background: "color-mix(in srgb, var(--accent-blue) 10%, transparent)",
+                            color: "var(--accent-blue)",
+                          }}
+                        >
+                          知识库命中 {knowledgeSources.length} 条
+                        </span>
+                        <span className="min-w-0 truncate">
+                          {knowledgeSources
+                            .map((item) => item.sourcePath.split("/").pop() || item.sourcePath)
+                            .join("、")}
+                        </span>
+                      </>
+                    ) : (
+                      <span
+                        className="rounded-full border px-2 py-0.5"
+                        style={{
+                          borderColor: COLORS.border,
+                          color: COLORS.textMuted,
+                        }}
+                      >
+                        未检索到相关知识库内容
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div
                   className="min-w-0 rounded-[18px] border px-4 py-3.5"
                   style={{
@@ -301,9 +327,7 @@ function ChatList({
                     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
                   }}
                 >
-                  {message.commerceReport && (
-                    <CommerceReportCard report={message.commerceReport} />
-                  )}
+                  {message.commerceReport && <CommerceReportCard report={message.commerceReport} />}
                   {message.commerceListing && (
                     <AmazonListingCard report={message.commerceListing} />
                   )}

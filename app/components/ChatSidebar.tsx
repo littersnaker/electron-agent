@@ -1,6 +1,7 @@
 // 模块说明：负责 ChatSidebar 用户界面组件。
 import type { MouseEvent } from "react";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
+import SidebarSettingsMenu from "./sidebar-settings-menu";
 interface ChatSidebarProps {
   sessions: ChatSession[];
   projects: WorkspaceProject[];
@@ -19,6 +20,9 @@ interface ChatSidebarProps {
   deleteProject: (projectId: string) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string, event: MouseEvent) => void;
+  onOpenKnowledge: () => void;
+  onOpenSkills: () => void;
+  onOpenApiKey: () => void;
 }
 const COLORS = {
   text: "var(--text-primary)",
@@ -40,12 +44,7 @@ const COLORS = {
 function PlusIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" className={className} fill="none">
-      <path
-        d="M10 4v12M4 10h12"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -117,13 +116,9 @@ function SessionItem({
   isStreaming,
   switchSession,
   deleteSession,
-}: Pick<
-  ChatSidebarProps,
-  | "activeSessionId"
-  | "isStreaming"
-  | "switchSession"
-  | "deleteSession"
-> & { session: ChatSession }) {
+}: Pick<ChatSidebarProps, "activeSessionId" | "isStreaming" | "switchSession" | "deleteSession"> & {
+  session: ChatSession;
+}) {
   const active = session.id === activeSessionId;
 
   return (
@@ -146,14 +141,10 @@ function SessionItem({
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full transition-colors"
         style={{
-          background: active
-            ? COLORS.selectionIndicator
-            : "rgba(255,255,255,0.18)",
+          background: active ? COLORS.selectionIndicator : "rgba(255,255,255,0.18)",
         }}
       />
-      <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
-        {session.title}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{session.title}</span>
       <span
         role="button"
         tabIndex={0}
@@ -209,12 +200,8 @@ function ProjectStatus({ project }: { project: WorkspaceProject }) {
  */
 export default function ChatSidebar(props: ChatSidebarProps) {
   const qaSessions = props.sessions.filter((session) => session.mode === "qa");
-  const commerceSessions = props.sessions.filter(
-    (session) => session.mode === "commerce",
-  );
-  const mediaSessions = props.sessions.filter(
-    (session) => session.mode === "media",
-  );
+  const commerceSessions = props.sessions.filter((session) => session.mode === "commerce");
+  const mediaSessions = props.sessions.filter((session) => session.mode === "media");
 
   return (
     <aside
@@ -291,81 +278,80 @@ export default function ChatSidebar(props: ChatSidebarProps) {
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-5">
         {props.commercePluginEnabled && (
           <>
-        <section className="mb-5">
-          <div
-            className="mb-2 flex items-center justify-between px-2"
-            style={{ color: COLORS.textSubtle }}
-          >
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
-              <CommerceIcon />
-              Market Intelligence
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={props.createCommerceSession}
-            disabled={props.isStreaming}
-            className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
-            style={{
-              background:
-                "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
-              borderColor: "var(--accent-blue-border)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
-            }}
-            title="新建跨境市场情报研究"
-          >
-            <span
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
-              style={{
-                background: "var(--accent-blue-soft-strong)",
-                borderColor: "var(--accent-blue-border-strong)",
-                color: "var(--accent-blue-hover)",
-              }}
-            >
-              <CommerceIcon className="h-[18px] w-[18px]" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span
-                className="block text-[12px] font-semibold tracking-[-0.01em]"
-                style={{ color: COLORS.text }}
-              >
-                跨境市场情报
-              </span>
-              <span
-                className="mt-0.5 block truncate text-[9px]"
+            <section className="mb-5">
+              <div
+                className="mb-2 flex items-center justify-between px-2"
                 style={{ color: COLORS.textSubtle }}
               >
-                公开市场研究 · 竞品可见度 · 机会信号
-              </span>
-            </span>
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-              style={{
-                background: "var(--accent-blue-soft-strong)",
-                color: "var(--accent-blue-hover)",
-              }}
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-            </span>
-          </button>
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  <CommerceIcon />
+                  Market Intelligence
+                </div>
+              </div>
 
-          {commerceSessions.length > 0 && (
-            <div className="space-y-0.5">
-              {commerceSessions.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  activeSessionId={props.activeSessionId}
-                  isStreaming={props.isStreaming}
-                  switchSession={props.switchSession}
-                  deleteSession={props.deleteSession}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+              <button
+                type="button"
+                onClick={props.createCommerceSession}
+                disabled={props.isStreaming}
+                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
+                style={{
+                  background:
+                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
+                  borderColor: "var(--accent-blue-border)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
+                }}
+                title="新建跨境市场情报研究"
+              >
+                <span
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    borderColor: "var(--accent-blue-border-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  <CommerceIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span
+                    className="block text-[12px] font-semibold tracking-[-0.01em]"
+                    style={{ color: COLORS.text }}
+                  >
+                    跨境市场情报
+                  </span>
+                  <span
+                    className="mt-0.5 block truncate text-[9px]"
+                    style={{ color: COLORS.textSubtle }}
+                  >
+                    公开市场研究 · 竞品可见度 · 机会信号
+                  </span>
+                </span>
+                <span
+                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  <PlusIcon className="h-3.5 w-3.5" />
+                </span>
+              </button>
 
+              {commerceSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  {commerceSessions.map((session) => (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      activeSessionId={props.activeSessionId}
+                      isStreaming={props.isStreaming}
+                      switchSession={props.switchSession}
+                      deleteSession={props.deleteSession}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           </>
         )}
 
@@ -472,123 +458,128 @@ export default function ChatSidebar(props: ChatSidebarProps) {
 
         {props.codePluginEnabled && (
           <>
-        <section>
-          <div
-            className="mb-2 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
-            style={{ color: COLORS.textSubtle }}
-          >
-            <FolderIcon />
-            项目
-          </div>
+            <section>
+              <div
+                className="mb-2 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
+                style={{ color: COLORS.textSubtle }}
+              >
+                <FolderIcon />
+                项目
+              </div>
 
-          {props.projects.length === 0 && (
-            <div
-              className="rounded-[13px] border px-3 py-3 text-[11px] leading-5"
-              style={{
-                background: COLORS.material,
-                borderColor: COLORS.border,
-                color: COLORS.textSubtle,
-              }}
-            >
-              添加项目后，可以使用 Code Agent、本地索引与终端工具。
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {props.projects.map((project) => {
-              const projectSessions = props.sessions.filter(
-                (session) => session.projectId === project.id,
-              );
-
-              return (
+              {props.projects.length === 0 && (
                 <div
-                  key={project.id}
-                  className="rounded-[14px] border p-2"
+                  className="rounded-[13px] border px-3 py-3 text-[11px] leading-5"
                   style={{
-                    background: "var(--glass-soft)",
+                    background: COLORS.material,
                     borderColor: COLORS.border,
+                    color: COLORS.textSubtle,
                   }}
                 >
-                  <div className="flex items-center gap-1 px-1 py-0.5">
-                    <span
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
+                  添加项目后，可以使用 Code Agent、本地索引与终端工具。
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {props.projects.map((project) => {
+                  const projectSessions = props.sessions.filter(
+                    (session) => session.projectId === project.id,
+                  );
+
+                  return (
+                    <div
+                      key={project.id}
+                      className="rounded-[14px] border p-2"
                       style={{
-                        background: COLORS.materialStrong,
-                        color: COLORS.textMuted,
+                        background: "var(--glass-soft)",
+                        borderColor: COLORS.border,
                       }}
                     >
-                      <FolderIcon />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className="truncate text-[12px] font-semibold"
-                        title={project.rootPath}
-                        style={{ color: COLORS.text }}
-                      >
-                        {project.name}
+                      <div className="flex items-center gap-1 px-1 py-0.5">
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
+                          style={{
+                            background: COLORS.materialStrong,
+                            color: COLORS.textMuted,
+                          }}
+                        >
+                          <FolderIcon />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="truncate text-[12px] font-semibold"
+                            title={project.rootPath}
+                            style={{ color: COLORS.text }}
+                          >
+                            {project.name}
+                          </div>
+                          <ProjectStatus project={project} />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => props.reindexProject(project.id)}
+                          disabled={props.isStreaming || project.indexStatus === "indexing"}
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg text-[14px] transition-colors disabled:opacity-40 ${
+                            project.indexStatus === "indexing" ? "animate-spin" : ""
+                          }`}
+                          style={{ color: COLORS.textSubtle }}
+                          title="重建代码索引"
+                        >
+                          ↻
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => props.createCodeSession(project.id)}
+                          disabled={props.isStreaming}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-40"
+                          style={{ color: COLORS.blue }}
+                          title="新建 Code 会话"
+                        >
+                          <PlusIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => props.deleteProject(project.id)}
+                          disabled={props.isStreaming}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-[13px] transition-colors hover:bg-red-500/10 disabled:opacity-40"
+                          style={{ color: COLORS.textSubtle }}
+                          title="删除项目（含会话与索引，不可恢复）"
+                        >
+                          ×
+                        </button>
                       </div>
-                      <ProjectStatus project={project} />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => props.reindexProject(project.id)}
-                      disabled={
-                        props.isStreaming || project.indexStatus === "indexing"
-                      }
-                      className={`flex h-7 w-7 items-center justify-center rounded-lg text-[14px] transition-colors disabled:opacity-40 ${
-                        project.indexStatus === "indexing" ? "animate-spin" : ""
-                      }`}
-                      style={{ color: COLORS.textSubtle }}
-                      title="重建代码索引"
-                    >
-                      ↻
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => props.createCodeSession(project.id)}
-                      disabled={props.isStreaming}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-40"
-                      style={{ color: COLORS.blue }}
-                      title="新建 Code 会话"
-                    >
-                      <PlusIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => props.deleteProject(project.id)}
-                      disabled={props.isStreaming}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg text-[13px] transition-colors hover:bg-red-500/10 disabled:opacity-40"
-                      style={{ color: COLORS.textSubtle }}
-                      title="删除项目（含会话与索引，不可恢复）"
-                    >
-                      ×
-                    </button>
-                  </div>
 
-                  {projectSessions.length > 0 && (
-                    <div
-                      className="mt-1 space-y-0.5 border-t pt-1.5"
-                      style={{ borderColor: COLORS.border }}
-                    >
-                      {projectSessions.map((session) => (
-                        <SessionItem
-                          key={session.id}
-                          session={session}
-                          activeSessionId={props.activeSessionId}
-                          isStreaming={props.isStreaming}
-                          switchSession={props.switchSession}
-                          deleteSession={props.deleteSession}
-                        />
-                      ))}
+                      {projectSessions.length > 0 && (
+                        <div
+                          className="mt-1 space-y-0.5 border-t pt-1.5"
+                          style={{ borderColor: COLORS.border }}
+                        >
+                          {projectSessions.map((session) => (
+                            <SessionItem
+                              key={session.id}
+                              session={session}
+                              activeSessionId={props.activeSessionId}
+                              isStreaming={props.isStreaming}
+                              switchSession={props.switchSession}
+                              deleteSession={props.deleteSession}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>          </>
+                  );
+                })}
+              </div>
+            </section>{" "}
+          </>
         )}
-
+      </div>
+      <div className="shrink-0 border-t px-4 pb-3 pt-2" style={{ borderColor: COLORS.border }}>
+        <SidebarSettingsMenu
+          onOpenKnowledge={props.onOpenKnowledge}
+          onOpenSkills={props.onOpenSkills}
+          onOpenApiKey={props.onOpenApiKey}
+        />
       </div>
     </aside>
   );
