@@ -43,6 +43,10 @@ Thumbs.db
 
 # Local archives
 app.zip
+
+# 构建机预置的 run_code embeddable Python 运行时（自动下载生成，不提交）
+/tools/embed-python/
+/tools/*.zip
 agents/*
 .local-data/
 .pnpm-store/

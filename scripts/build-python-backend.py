@@ -31,11 +31,7 @@ REQUIRED_BUILD_IMPORTS = (
 def check_build_environment() -> None:
     """构建前校验解释器，缺模块时直接报错，避免静默产出残缺安装包。"""
 
-    missing = [
-        name
-        for name in REQUIRED_BUILD_IMPORTS
-        if importlib.util.find_spec(name) is None
-    ]
+    missing = [name for name in REQUIRED_BUILD_IMPORTS if importlib.util.find_spec(name) is None]
     if not missing:
         return
     raise SystemExit(
@@ -115,23 +111,73 @@ def build_executable() -> None:
     PyInstaller.__main__.run(_pyinstaller_arguments())
 
 
+def _read_python_version() -> str:
+    """从 ``.python-version`` 读取应与 run_code 运行时匹配的 Python 版本。"""
+
+    version_file = ROOT / ".python-version"
+    if not version_file.is_file():
+        raise SystemExit("缺少 .python-version，无法自动下载 run_code Python 运行时。")
+    return version_file.read_text(encoding="utf-8").strip()
+
+
+def _provision_embedded_python(embedded: Path) -> None:
+    """自动下载并解压 Windows embeddable Python 到 ``tools/embed-python/``。
+
+    构建机没有预置运行时且能联网时，直接从 python.org 拉取与 ``.python-version``
+    一致的 embed 包，避免其他开发者手动准备；下载/解压失败时给出可读错误，
+    并保留手动放置的兜底路径。
+    """
+
+    if embedded.is_dir() and (embedded / "python.exe").is_file():
+        return
+    if sys.platform != "win32":
+        raise SystemExit(
+            "run_code 运行时仅支持 Windows embeddable Python；"
+            f"请在其他系统手动放置 {embedded}/（需含 python.exe）。"
+        )
+
+    version = _read_python_version()
+    zip_url = f"https://www.python.org/ftp/python/{version}/" f"python-{version}-embed-amd64.zip"
+    zip_path = ROOT / "tools" / f"python-{version}-embed-amd64.zip"
+    embedded.mkdir(parents=True, exist_ok=True)
+    print(f"正在自动下载 Windows embeddable Python {version}：{zip_url}")
+    try:
+        import urllib.request
+        import zipfile
+
+        with urllib.request.urlopen(zip_url, timeout=180) as response:
+            with zip_path.open("wb") as output:
+                shutil.copyfileobj(response, output)
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(embedded)
+    except Exception as exc:  # noqa: BLE001 - 构建工具需要把网络失败转成可读提示
+        raise SystemExit(
+            f"自动下载 run_code 运行时失败（{exc}）。\n"
+            f"请手动下载 {zip_url} 并解压到 {embedded}/（需含 python.exe）。"
+        ) from exc
+    finally:
+        zip_path.unlink(missing_ok=True)
+
+    if not (embedded / "python.exe").is_file():
+        raise SystemExit(
+            f"自动下载完成但缺少 python.exe，请手动把 embeddable python " f"解压到 {embedded}/。"
+        )
+    print(f"run_code 运行时已就绪：{embedded}")
+
+
 def prepare_python_runtime() -> Path:
     """准备 run_code 用的独立 Python 运行时（python-dist/python-runtime/）。
 
     PyInstaller onedir 不含独立 python.exe，run_code 需要在子进程执行模型写的
-    程序。这里把构建机预置的 embeddable python（tools/embed-python/）复制过去；
-    构建机没有预置目录时给出明确提示，不静默产出残缺安装包。
+    程序。这里把 embeddable python（tools/embed-python/）复制过去；目录缺失时
+    先尝试自动下载，仍失败才给出明确提示，不静默产出残缺安装包。
     """
 
     runtime_dir = OUTPUT_DIRECTORY / "python-runtime"
     embedded = ROOT / "tools" / "embed-python"
     if runtime_dir.is_dir():
         return runtime_dir
-    if not embedded.is_dir() or not (embedded / "python.exe").is_file():
-        raise SystemExit(
-            "缺少 run_code 运行时：请把 Windows embeddable python 解压到 "
-            f"{embedded}/（需含 python.exe）。这是 run_code 批量执行通道的依赖。"
-        )
+    _provision_embedded_python(embedded)
     shutil.copytree(embedded, runtime_dir, dirs_exist_ok=True)
     print(f"run_code Python 运行时已就绪：{runtime_dir}")
     return runtime_dir
