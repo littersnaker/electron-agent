@@ -68,8 +68,7 @@ class CodeAgentAdapter:
                 {
                     "type": "TOOL_STATUS",
                     "content": (
-                        "GLM-4.6V-Flash 已生成视觉规格，"
-                        f"正在交给 {model.model_id} 执行代码任务…"
+                        "GLM-4.6V-Flash 已生成视觉规格，" f"正在交给 {model.model_id} 执行代码任务…"
                     ),
                 }
             )
@@ -80,5 +79,6 @@ class CodeAgentAdapter:
             preferred_model_id=model.model_id,
             credentials=request.credentials,
             runtime_context=enriched_context.rendered,
+            jina_api_key=str(request.metadata.get("jina_api_key") or ""),
         ):
             yield frame

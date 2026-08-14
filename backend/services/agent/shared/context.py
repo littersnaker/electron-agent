@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from backend.services.embeddings.retrieval import hybrid_search_project
 from backend.services.workspace.indexer import (
     TEXT_EXTENSIONS,
     index_project,
     iter_project_files,
-    search_project_index,
 )
 from backend.services.workspace.repository import get_project
 from backend.utils.paths import is_probably_binary
@@ -61,7 +61,10 @@ def _fallback_overview_files(root: Path) -> list[dict[str, object]]:
     candidates: list[tuple[int, Path]] = []
     for relative in iter_project_files(root):
         path = root / relative
-        if path.suffix.lower() not in TEXT_EXTENSIONS and path.name.lower() not in OVERVIEW_EXACT_NAMES:
+        if (
+            path.suffix.lower() not in TEXT_EXTENSIONS
+            and path.name.lower() not in OVERVIEW_EXACT_NAMES
+        ):
             continue
         if is_sensitive_workspace_path(relative):
             continue
@@ -98,6 +101,8 @@ def _fallback_overview_files(root: Path) -> list[dict[str, object]]:
 async def ensure_context(
     project_id: str,
     query: str,
+    *,
+    jina_api_key: str = "",
 ) -> tuple[Path, list[dict[str, object]]]:
     """确保项目已有索引，并返回工作区根目录和相关文件。"""
 
@@ -107,12 +112,13 @@ async def ensure_context(
         project.index_status != "ready" or project.indexed_file_count == 0
     ):
         await index_project(project_id)
-    files = await search_project_index(project_id, query, limit=8)
-    files = [
-        item
-        for item in files
-        if not is_sensitive_workspace_path(item.get("path"))
-    ]
+    files = await hybrid_search_project(
+        project_id,
+        query,
+        api_key=jina_api_key,
+        top_k=8,
+    )
+    files = [item for item in files if not is_sensitive_workspace_path(item.get("path"))]
     if not files:
         files = _fallback_overview_files(root)
     return root, files

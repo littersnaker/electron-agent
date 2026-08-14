@@ -68,8 +68,7 @@ class QAAgentAdapter:
                 {
                     "type": "TOOL_STATUS",
                     "content": (
-                        "GLM-4.6V-Flash 已完成图片理解，"
-                        f"正在交给 {model.model_id} 生成回答…"
+                        "GLM-4.6V-Flash 已完成图片理解，" f"正在交给 {model.model_id} 生成回答…"
                     ),
                 }
             )
@@ -79,5 +78,6 @@ class QAAgentAdapter:
             preferred_model_id=model.model_id,
             credentials=request.credentials,
             runtime_context=enriched_context.rendered,
+            jina_api_key=str(request.metadata.get("jina_api_key") or ""),
         ):
             yield frame

@@ -21,5 +21,6 @@ class ChatRequest(FlexibleModel):
     agent_mode: Literal["suggest", "auto_edit", "full_auto"] = Field(
         default="auto_edit", alias="agentMode"
     )
+    knowledge_search: bool | None = Field(default=None, alias="knowledgeSearch")
     checkpoint_id: str = Field(default="", alias="checkpointId")
     resume_checkpoint_id: str = Field(default="", alias="resumeCheckpointId")

@@ -72,9 +72,7 @@ def _last_user_text(body: ChatRequest) -> str:
     return ""
 
 
-async def _handle_interactive_reply(
-    *, body: ChatRequest, user_text: str
-) -> AsyncIterator[str]:
+async def _handle_interactive_reply(*, body: ChatRequest, user_text: str) -> AsyncIterator[str]:
     """处理建议模式中的文件写入批准。"""
 
     request_id, mode, answer = parse_interactive_reply(user_text)
@@ -94,7 +92,9 @@ async def _handle_interactive_reply(
     yield encode_sse(
         {
             "type": "AGENT_LIFECYCLE",
-            "payload": lifecycle(role="merge", status="running", detail="已获得批准，正在安全写入文件…"),
+            "payload": lifecycle(
+                role="merge", status="running", detail="已获得批准，正在安全写入文件…"
+            ),
         }
     )
     changed = cast(
@@ -242,6 +242,7 @@ async def stream_code_agent(
     preferred_model_id: str,
     credentials: LlmCredentials,
     runtime_context: str = "",
+    jina_api_key: str = "",
 ) -> AsyncIterator[str]:
     """执行本地项目 Code Agent 工作流并持续输出 SSE。
 
@@ -274,7 +275,9 @@ async def stream_code_agent(
                 yield frame
             return
     if not body.project_id.strip():
-        yield encode_sse({"type": "TEXT", "content": "⚠️ 当前 Code 会话没有绑定项目，请重新选择或添加项目。"})
+        yield encode_sse(
+            {"type": "TEXT", "content": "⚠️ 当前 Code 会话没有绑定项目，请重新选择或添加项目。"}
+        )
         return
 
     checkpoint_id, resume_state = await resolve_run_checkpoint(body)
@@ -322,9 +325,7 @@ async def stream_code_agent(
             if current and current.status == "paused":
                 await finish_trace(trace, status="paused")
                 return
-            await update_checkpoint(
-                checkpoint_id, status="completed", resumable=False
-            )
+            await update_checkpoint(checkpoint_id, status="completed", resumable=False)
             await finish_trace(trace, status="completed")
             return
 
@@ -374,7 +375,11 @@ async def stream_code_agent(
                 ),
             }
         )
-        root, files = await ensure_context(body.project_id, effective_user_text)
+        root, files = await ensure_context(
+            body.project_id,
+            effective_user_text,
+            jina_api_key=jina_api_key,
+        )
         context_text = render_context(files)
         if runtime_context.strip():
             # Runtime 约束必须放在项目索引上下文之前，避免长文件片段将 Skill 和 Memory 挤出。
@@ -414,9 +419,7 @@ async def stream_code_agent(
         )
         direct_operations = parse_direct_filesystem_request(root, effective_user_text)
         if direct_operations:
-            prepared = _prepare_direct_filesystem_task(
-                effective_user_text, direct_operations
-            )
+            prepared = _prepare_direct_filesystem_task(effective_user_text, direct_operations)
         else:
             prepared = await prepare_code_task(
                 user_request=effective_user_text,
@@ -472,8 +475,7 @@ async def stream_code_agent(
                                 role="high_level_planner",
                                 status="completed",
                                 detail=(
-                                    f"计划细化失败（{str(exc)[:160]}），"
-                                    "使用基础计划继续执行。"
+                                    f"计划细化失败（{str(exc)[:160]}），" "使用基础计划继续执行。"
                                 ),
                             ),
                         }
