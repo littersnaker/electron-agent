@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.core.config import get_settings
+from backend.services.embeddings.chunking import (
+    PROJECT_CHUNK_CHARS,
+    PROJECT_CHUNK_OVERLAP,
+    build_chunks,
+)
+from backend.services.embeddings.jina_client import JinaClient, JinaError
+from backend.services.embeddings.pipeline import embed_and_store
+from backend.services.embeddings.store import ChunkRecord
 from backend.services.workspace.database import open_database
 from backend.services.workspace.repository import (
     resolve_project_root,
@@ -15,6 +25,8 @@ from backend.services.workspace.repository import (
 from backend.services.workspace.search_terms import extract_search_terms
 from backend.utils.paths import is_build_output_segment, is_probably_binary
 from backend.utils.sensitive_paths import is_sensitive_workspace_path
+
+LOGGER = logging.getLogger(__name__)
 
 IGNORED_DIRECTORIES = {
     ".git",
@@ -73,8 +85,7 @@ def iter_project_files(root: Path):
         dirs[:] = sorted(
             directory
             for directory in dirs
-            if directory not in IGNORED_DIRECTORIES
-            and not is_build_output_segment(directory)
+            if directory not in IGNORED_DIRECTORIES and not is_build_output_segment(directory)
         )
         for name in sorted(files):
             path = Path(current) / name
@@ -85,6 +96,7 @@ def iter_project_files(root: Path):
             if path.is_symlink():
                 continue
             yield relative
+
 
 MAX_INDEX_FILE_BYTES = 1_000_000
 MAX_INDEX_CONTENT_CHARS = 200_000
@@ -153,9 +165,7 @@ async def index_project(project_id: str) -> dict[str, object]:
     try:
         records = await asyncio.to_thread(_collect_files, root)
         async with open_database() as connection:
-            await connection.execute(
-                "DELETE FROM file_index WHERE project_id = ?", (project_id,)
-            )
+            await connection.execute("DELETE FROM file_index WHERE project_id = ?", (project_id,))
             await connection.executemany(
                 "INSERT INTO file_index "
                 "(project_id, relative_path, content, size, modified_at) "
@@ -171,13 +181,50 @@ async def index_project(project_id: str) -> dict[str, object]:
                     for record in records
                 ],
             )
-        await update_project_index_state(
-            project_id, status="ready", file_count=len(records)
-        )
+        # 向量化失败只记录日志，不阻塞关键词索引与主流程。
+        try:
+            await _vectorize_project_files(project_id, records)
+        except Exception as exc:  # noqa: BLE001 - 向量索引属于增强能力，必须整体降级
+            LOGGER.exception("项目向量索引失败（已降级为关键词检索）：%s", exc)
+        await update_project_index_state(project_id, status="ready", file_count=len(records))
         return {"ok": True, "indexedFileCount": len(records)}
     except Exception:
         await update_project_index_state(project_id, status="error")
         raise
+
+
+async def _vectorize_project_files(project_id: str, records: list[IndexedFile]) -> None:
+    """为项目文本文件生成向量块并写入向量库。
+
+    未开启 Jina 或缺少密钥时直接跳过；文本块按 2000 字符切分、重叠 200，
+    父子结构中 ``parent_text`` 保存完整文件内容供父子检索使用。
+    """
+
+    settings = get_settings()
+    if not settings.jina_embedding_enabled:
+        return
+    try:
+        client = JinaClient()
+    except JinaError as exc:
+        LOGGER.warning("跳过项目向量索引（%s）", exc)
+        return
+
+    grouped: list[tuple[str, str, str, ChunkRecord]] = []
+    for record in records:
+        if not record.content.strip():
+            continue
+        chunks = build_chunks(
+            scope=project_id,
+            source_type="file",
+            source_path=record.relative_path,
+            text=record.content,
+            model=client.embedding_model,
+            max_chars=PROJECT_CHUNK_CHARS,
+            overlap=PROJECT_CHUNK_OVERLAP,
+        )
+        for chunk in chunks:
+            grouped.append((project_id, "file", record.relative_path, chunk))
+    await embed_and_store(client, grouped)
 
 
 def _query_terms(query: str) -> list[str]:

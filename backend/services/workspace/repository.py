@@ -69,8 +69,7 @@ async def list_workspace(
             "SELECT * FROM projects ORDER BY last_opened_at DESC"
         )
         session_cursor = await connection.execute(
-            f"SELECT * FROM sessions WHERE mode IN ({placeholders}) "
-            "ORDER BY updated_at DESC",
+            f"SELECT * FROM sessions WHERE mode IN ({placeholders}) " "ORDER BY updated_at DESC",
             allowed_modes,
         )
         projects = [_project_from_row(row) for row in await project_cursor.fetchall()]
@@ -133,9 +132,7 @@ async def get_project(project_id: str) -> WorkspaceProject:
     """按项目 ID 读取项目；不存在时抛出易理解的错误。"""
 
     async with open_database() as connection:
-        cursor = await connection.execute(
-            "SELECT * FROM projects WHERE id = ?", (project_id,)
-        )
+        cursor = await connection.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
         row = await cursor.fetchone()
     if not row:
         raise ValueError("当前 Code 会话绑定的项目不存在，请重新选择项目。")
@@ -180,15 +177,12 @@ async def update_session(
     payload = [message.model_dump(by_alias=True, exclude_none=True) for message in messages]
     async with open_database() as connection:
         cursor = await connection.execute(
-            "UPDATE sessions SET title = ?, messages_json = ?, updated_at = ? "
-            "WHERE id = ?",
+            "UPDATE sessions SET title = ?, messages_json = ?, updated_at = ? " "WHERE id = ?",
             (title or "新对话", dumps_json(payload), now, session_id),
         )
         if cursor.rowcount == 0:
             raise ValueError("要更新的会话不存在")
-        read_cursor = await connection.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
-        )
+        read_cursor = await connection.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
         row = await read_cursor.fetchone()
     if not row:
         raise ValueError("更新会话后读取失败")
@@ -253,6 +247,11 @@ async def delete_project(project_id: str) -> None:
             "DELETE FROM agent_memories WHERE scope_id = ?",
             (project_id,),
         )
+        # Jina 向量块按 scope=project_id 关联，删除项目时一并清理。
+        await connection.execute(
+            "DELETE FROM document_chunks WHERE scope = ?",
+            (project_id,),
+        )
         await connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
 
@@ -269,8 +268,7 @@ async def update_project_index_state(
             )
         else:
             await connection.execute(
-                "UPDATE projects SET index_status = ?, indexed_file_count = ? "
-                "WHERE id = ?",
+                "UPDATE projects SET index_status = ?, indexed_file_count = ? " "WHERE id = ?",
                 (status, file_count, project_id),
             )
 
