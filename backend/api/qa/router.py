@@ -23,14 +23,19 @@ def _last_user_text(body: ChatRequest) -> str:
     return ""
 
 
+def _jina_api_key(request: Request) -> str:
+    """读取前端通过请求头传入的 Jina API Key。"""
+
+    return request.headers.get("x-jina-api-key", "").strip()
+
+
 @router.post("/api/qa")
 async def post_qa(body: ChatRequest, request: Request):
     """通过统一 Runtime 执行普通问答并返回 SSE 流。"""
 
     preferred_model = request.headers.get("x-llm-model-id", AUTO_MODEL_ID).strip()
     messages = tuple(
-        RuntimeMessage(role=message.role, content=message.content)
-        for message in body.messages
+        RuntimeMessage(role=message.role, content=message.content) for message in body.messages
     )
     runtime_request = RuntimeRequest(
         agent_id="qa",
@@ -41,6 +46,6 @@ async def post_qa(body: ChatRequest, request: Request):
         project_id=body.project_id,
         user_text=_last_user_text(body),
         messages=messages,
-        metadata={"route": "/api/qa"},
+        metadata={"route": "/api/qa", "jina_api_key": _jina_api_key(request)},
     )
     return create_sse_response(RUNTIME.execute_stream(runtime_request))

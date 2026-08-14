@@ -23,14 +23,19 @@ def _last_user_text(body: ChatRequest) -> str:
     return ""
 
 
+def _jina_api_key(request: Request) -> str:
+    """读取前端通过请求头传入的 Jina API Key。"""
+
+    return request.headers.get("x-jina-api-key", "").strip()
+
+
 @router.post("/api/chat")
 async def post_code_chat(body: ChatRequest, request: Request):
     """把前端 Code 请求交给统一 Runtime，并保持原有 SSE 协议。"""
 
     preferred_model = request.headers.get("x-llm-model-id", AUTO_MODEL_ID).strip()
     messages = tuple(
-        RuntimeMessage(role=message.role, content=message.content)
-        for message in body.messages
+        RuntimeMessage(role=message.role, content=message.content) for message in body.messages
     )
 
     # payload 保留完整 Pydantic 对象，适配器可以继续读取 Agent Mode 和 Checkpoint 字段。
@@ -43,6 +48,10 @@ async def post_code_chat(body: ChatRequest, request: Request):
         project_id=body.project_id,
         user_text=_last_user_text(body),
         messages=messages,
-        metadata={"route": "/api/chat", "agentMode": body.agent_mode},
+        metadata={
+            "route": "/api/chat",
+            "agentMode": body.agent_mode,
+            "jina_api_key": _jina_api_key(request),
+        },
     )
     return create_sse_response(RUNTIME.execute_stream(runtime_request))

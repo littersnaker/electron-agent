@@ -77,6 +77,16 @@ class Settings:
     request_timeout_seconds: float
     max_upload_megabytes: int
     environment_file: Path | None
+    jina_api_key: str
+    jina_embedding_model: str
+    jina_rerank_model: str
+    jina_embedding_enabled: bool
+    jina_recall_k: int
+    jina_top_k: int
+    jina_parent_child_enabled: bool
+    jina_max_batch: int
+    jina_timeout_seconds: float
+    knowledge_doc_extensions: tuple[str, ...]
 
     @property
     def database_path(self) -> Path:
@@ -90,6 +100,12 @@ class Settings:
 
         return self.data_dir / "media-cache"
 
+    @property
+    def knowledge_dir(self) -> Path:
+        """返回外部知识库文档的本地存储目录。"""
+
+        return self.data_dir / "knowledge"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -99,14 +115,18 @@ def get_settings() -> Settings:
     """
 
     environment_file = _load_environment_file()
-    data_dir = Path(
-        os.getenv("AGENT_DATA_DIR", str(_default_data_directory()))
-    ).expanduser().resolve()
+    data_dir = (
+        Path(os.getenv("AGENT_DATA_DIR", str(_default_data_directory()))).expanduser().resolve()
+    )
     frontend_raw = os.getenv("FRONTEND_DIR", "").strip()
     frontend_dir = Path(frontend_raw).expanduser().resolve() if frontend_raw else None
 
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "media-cache").mkdir(parents=True, exist_ok=True)
+    (data_dir / "knowledge").mkdir(parents=True, exist_ok=True)
+
+    enabled_raw = os.getenv("JINA_EMBEDDING_ENABLED", "1").strip().lower()
+    extensions_raw = os.getenv("KNOWLEDGE_DOC_EXTENSIONS", ".md,.txt,.pdf,.docx").strip()
 
     return Settings(
         host=os.getenv("BACKEND_HOST", "127.0.0.1"),
@@ -117,4 +137,19 @@ def get_settings() -> Settings:
         request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
         max_upload_megabytes=int(os.getenv("MAX_UPLOAD_MEGABYTES", "40")),
         environment_file=environment_file,
+        jina_api_key=os.getenv("JINA_API_KEY", "").strip(),
+        jina_embedding_model=os.getenv(
+            "JINA_EMBEDDING_MODEL", "jina-embeddings-v5-omni-small"
+        ).strip(),
+        jina_rerank_model=os.getenv("JINA_RERANK_MODEL", "jina-reranker-v3").strip(),
+        jina_embedding_enabled=enabled_raw in {"1", "true", "yes", "on"},
+        jina_recall_k=max(1, min(int(os.getenv("JINA_RECALL_K", "10")), 50)),
+        jina_top_k=max(1, min(int(os.getenv("JINA_TOP_K", "5")), 20)),
+        jina_parent_child_enabled=os.getenv("JINA_PARENT_CHILD_ENABLED", "1").strip().lower()
+        in {"1", "true", "yes", "on"},
+        jina_max_batch=max(1, min(int(os.getenv("JINA_MAX_BATCH", "64")), 256)),
+        jina_timeout_seconds=float(os.getenv("JINA_TIMEOUT_SECONDS", "120")),
+        knowledge_doc_extensions=tuple(
+            item.strip().lower() for item in extensions_raw.split(",") if item.strip()
+        ),
     )
