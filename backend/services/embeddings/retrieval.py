@@ -39,6 +39,134 @@ class KnowledgeSearchResult:
     top_k: int
     reranked: bool
     avg_score: float
+    hit_rate: float = 0.0
+    top_score: float = 0.0
+
+    def with_derived_metrics(self) -> KnowledgeSearchResult:
+        """根据来源分数计算命中率与最高分。
+
+        命中率 = 精排结果中“正相关”（分数 >= 0）来源的占比；Jina 重排分数
+        为相对标量，大于等于 0 视为存在正相关，仅供用户快速判断本次检索质量。
+        """
+
+        scores = [
+            float(item["score"])
+            for item in self.sources
+            if isinstance(item.get("score"), (int, float))
+        ]
+        positive = sum(1 for score in scores if score >= 0)
+        hit_rate = positive / len(scores) if scores else 0.0
+        top_score = max(scores) if scores else 0.0
+        return KnowledgeSearchResult(
+            sources=self.sources,
+            recall_k=self.recall_k,
+            candidate_count=self.candidate_count,
+            top_k=self.top_k,
+            reranked=self.reranked,
+            avg_score=self.avg_score,
+            hit_rate=round(hit_rate, 4),
+            top_score=round(top_score, 4),
+        )
+
+
+def _matches_expect(source: dict[str, object], expect: str) -> bool:
+    """判断某个来源是否命中期望路径片段（不区分大小写）。"""
+
+    needle = expect.strip().lower()
+    if not needle:
+        return False
+    path = str(source.get("sourcePath") or "").lower()
+    if needle in path:
+        return True
+    filename = path.split("/")[-1]
+    return needle in filename
+
+
+async def evaluate_knowledge_recall(
+    cases: list[tuple[str, str]],
+    *,
+    api_key: str = "",
+    recall_k: int | None = None,
+    top_k: int | None = None,
+) -> dict[str, object]:
+    """用“问题 → 期望文档”测试集计算检索召回率/精确率/F1。
+
+    每个用例跑一次知识库检索（向量召回 → 重排 → top-K），判断返回结果中
+    是否包含期望文档。指标口径：
+    - 召回率@K = 命中的用例数 ÷ 用例总数；
+    - 精确率@K = top-K 返回槽位中真正命中的数量 ÷ (K × 用例总数)；
+    - F1 = 2 × P × R ÷ (P + R)。
+    """
+
+    settings = get_settings()
+    used_recall_k = recall_k or settings.jina_recall_k
+    used_top_k = top_k or settings.jina_top_k
+    total = len(cases)
+    hits = 0
+    correct_slots = 0
+    score_sum = 0.0
+    score_count = 0
+    per_case: list[dict[str, object]] = []
+
+    for question, expect in cases:
+        result = await search_knowledge(
+            question,
+            api_key=api_key,
+            recall_k=used_recall_k,
+            top_k=used_top_k,
+        )
+        sources = result.sources
+        matched = [
+            {
+                "sourcePath": str(item.get("sourcePath") or ""),
+                "position": str(item.get("position") or ""),
+                "score": item.get("score"),
+            }
+            for item in sources
+            if _matches_expect(item, expect)
+        ]
+        hit = bool(matched)
+        if hit:
+            hits += 1
+        correct_slots += len(matched)
+        scores = [
+            float(item["score"]) for item in sources if isinstance(item.get("score"), (int, float))
+        ]
+        if scores:
+            score_sum += sum(scores)
+            score_count += len(scores)
+        per_case.append(
+            {
+                "question": question,
+                "expect": expect,
+                "hit": hit,
+                "matchedSources": matched,
+                "topSources": [
+                    {
+                        "sourcePath": str(item.get("sourcePath") or ""),
+                        "position": str(item.get("position") or ""),
+                        "score": item.get("score"),
+                    }
+                    for item in sources
+                ],
+                "avgScore": round(sum(scores) / len(scores), 4) if scores else 0.0,
+            }
+        )
+
+    recall = hits / total if total else 0.0
+    precision = correct_slots / (used_top_k * total) if total else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0
+    return {
+        "recallK": used_recall_k,
+        "topK": used_top_k,
+        "totalCases": total,
+        "hits": hits,
+        "recallRate": round(recall, 4),
+        "precisionRate": round(precision, 4),
+        "f1": round(f1, 4),
+        "avgScore": round(score_sum / score_count, 4) if score_count else 0.0,
+        "cases": per_case,
+    }
 
 
 def _rrf_merge(ranked: list[list[str]], constant: int = RRF_CONSTANT) -> dict[str, float]:
@@ -219,4 +347,4 @@ async def search_knowledge(
         top_k=top_k,
         reranked=reranked,
         avg_score=round(avg_score, 4),
-    )
+    ).with_derived_metrics()

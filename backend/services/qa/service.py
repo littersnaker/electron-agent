@@ -177,5 +177,7 @@ async def _load_knowledge_context(
         "topK": result.top_k,
         "reranked": result.reranked,
         "avgScore": result.avg_score,
+        "hitRate": result.hit_rate,
+        "topScore": result.top_score,
     }
     return _render_knowledge_block(result.sources), sources, metrics

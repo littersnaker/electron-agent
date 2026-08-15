@@ -222,6 +222,10 @@ export interface KnowledgeMetrics {
   reranked: boolean;
   /** 最终 Top-K 来源的平均相关度分数 */
   avgScore: number;
+  /** 命中率：精排结果中正相关（分数≥0）来源的占比（0~1） */
+  hitRate: number;
+  /** 最终 Top-K 来源的最高相关度分数 */
+  topScore: number;
 }
 
 /** 知识库来源广播事件的数据结构。 */
@@ -234,6 +238,8 @@ export interface KnowledgeSourcesPayload {
   topK: number;
   reranked: boolean;
   avgScore: number;
+  hitRate: number;
+  topScore: number;
 }
 
 /** 视觉验证请求：前端需要启动预览、截图并用 GLM 核对页面渲染。 */

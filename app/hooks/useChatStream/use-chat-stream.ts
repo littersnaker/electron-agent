@@ -380,6 +380,8 @@ export function useChatStream({
                   topK: payload.topK,
                   reranked: payload.reranked,
                   avgScore: payload.avgScore,
+                  hitRate: payload.hitRate,
+                  topScore: payload.topScore,
                 });
                 continue;
               }

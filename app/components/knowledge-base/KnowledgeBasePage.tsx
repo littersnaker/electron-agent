@@ -14,6 +14,7 @@ import { apiFetch } from "../../lib/api-client";
 import CustomTitleBar from "../CustomTitleBar";
 import { JinaKeyCard, SettingsCard } from "./knowledge-config-cards";
 import { KnowledgeDocumentList } from "./knowledge-document-list";
+import KnowledgeEvalModal from "./knowledge-eval-modal";
 import {
   ACCEPT_EXTENSIONS,
   FREE_TOKEN_QUOTA,
@@ -50,6 +51,7 @@ export default function KnowledgeBasePage({
   const [reindexing, setReindexing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
+  const [showEval, setShowEval] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   /** 展示一次性提示，4 秒后自动消失。 */
@@ -413,21 +415,35 @@ export default function KnowledgeBasePage({
               </div>
             )}
 
-            <div className="flex shrink-0 items-center justify-between">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
               <h2 className="text-[13px] font-semibold">文档列表（{documents.length}）</h2>
-              <button
-                type="button"
-                onClick={() => void reindex()}
-                disabled={reindexing || uploading}
-                className="h-8 cursor-pointer rounded-[10px] border px-3 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] hover:border-[var(--border-strong)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  background: "var(--glass)",
-                  borderColor: "var(--border)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                {reindexing ? "重建中…" : "重建全部索引"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEval(true)}
+                  className="h-8 cursor-pointer rounded-[10px] border px-3 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] hover:border-[var(--border-strong)] active:scale-[0.98]"
+                  style={{
+                    background: "var(--glass)",
+                    borderColor: "var(--border)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  评估检索效果
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void reindex()}
+                  disabled={reindexing || uploading}
+                  className="h-8 cursor-pointer rounded-[10px] border px-3 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] hover:border-[var(--border-strong)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    background: "var(--glass)",
+                    borderColor: "var(--border)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  {reindexing ? "重建中…" : "重建全部索引"}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2.5 pr-1 lg:max-h-[calc(100vh-330px)] lg:overflow-y-auto">
@@ -457,6 +473,7 @@ export default function KnowledgeBasePage({
           </div>
         </div>
       )}
+      <KnowledgeEvalModal open={showEval} jinaKey={jinaKey} onClose={() => setShowEval(false)} />
     </main>
   );
 }

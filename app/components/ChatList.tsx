@@ -308,10 +308,11 @@ function ChatList({
                               borderColor: COLORS.border,
                               color: COLORS.textMuted,
                             }}
+                            title={`命中率 = 精排结果中正相关（重排分数≥0）来源的占比；最高相关度 ${knowledgeMetrics.topScore.toFixed(3)}`}
                           >
-                            候选 {knowledgeMetrics.candidateCount} → 精排 {knowledgeMetrics.topK}
-                            {knowledgeMetrics.reranked ? "" : "（未重排）"} · 均分{" "}
+                            命中率 {Math.round(knowledgeMetrics.hitRate * 100)}% · 均分{" "}
                             {knowledgeMetrics.avgScore.toFixed(2)}
+                            {knowledgeMetrics.reranked ? "" : "（未重排）"}
                           </span>
                         )}
                         <span className="min-w-0 truncate">

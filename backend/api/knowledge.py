@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 
 from backend.core.background import spawn
+from backend.schemas.knowledge import KnowledgeEvalRequest
 from backend.services.embeddings.knowledge import (
     add_knowledge_document,
     delete_knowledge_document,
@@ -13,6 +14,7 @@ from backend.services.embeddings.knowledge import (
     index_knowledge_document,
     list_knowledge_documents,
 )
+from backend.services.embeddings.retrieval import evaluate_knowledge_recall
 
 router = APIRouter(tags=["knowledge"])
 
@@ -66,3 +68,24 @@ async def get_knowledge_status_endpoint(request: Request) -> dict[str, object]:
     """返回知识库与 Jina 配置状态（不含密钥）。"""
 
     return await get_knowledge_status(_jina_api_key(request))
+
+
+@router.post("/api/knowledge/evaluate")
+async def post_knowledge_evaluate(
+    body: KnowledgeEvalRequest, request: Request
+) -> dict[str, object]:
+    """用标注测试集评估知识库检索的召回率/精确率/F1。"""
+
+    cases = [
+        (case.question.strip(), case.expect.strip())
+        for case in body.cases
+        if case.question.strip() and case.expect.strip()
+    ]
+    if not cases:
+        raise HTTPException(status_code=400, detail="请至少提供一条“问题 | 期望文档”测试用例。")
+    return await evaluate_knowledge_recall(
+        cases,
+        api_key=_jina_api_key(request),
+        recall_k=body.recall_k,
+        top_k=body.top_k,
+    )
