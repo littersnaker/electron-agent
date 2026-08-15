@@ -89,6 +89,7 @@ class Settings:
     jina_tokens_per_minute: int
     jina_max_call_tokens: int
     knowledge_doc_extensions: tuple[str, ...]
+    code_structural_extensions: tuple[str, ...]
 
     @property
     def database_path(self) -> Path:
@@ -129,6 +130,13 @@ def get_settings() -> Settings:
 
     enabled_raw = os.getenv("JINA_EMBEDDING_ENABLED", "1").strip().lower()
     extensions_raw = os.getenv("KNOWLEDGE_DOC_EXTENSIONS", ".md,.txt,.pdf,.docx").strip()
+    code_extensions_raw = os.getenv(
+        "JINA_CODE_STRUCTURAL_EXTENSIONS",
+        (
+            ".py,.ts,.tsx,.js,.jsx,.mjs,.cjs,.vue,.go,.rs,.java,.c,.cpp,.h,"
+            ".hpp,.kt,.kts,.swift,.php,.rb,.cs,.scala,.lua"
+        ),
+    ).strip()
 
     return Settings(
         host=os.getenv("BACKEND_HOST", "127.0.0.1"),
@@ -163,5 +171,8 @@ def get_settings() -> Settings:
         ),
         knowledge_doc_extensions=tuple(
             item.strip().lower() for item in extensions_raw.split(",") if item.strip()
+        ),
+        code_structural_extensions=tuple(
+            item.strip().lower() for item in code_extensions_raw.split(",") if item.strip()
         ),
     )
