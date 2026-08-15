@@ -3,7 +3,8 @@
  * 知识库管理独立页面：Jina Key 配置、文档上传、列表、删除与重建索引。
  *
  * 布局沿用 Skills 管理页的 Apple 风格（玻璃卡片 + 深浅色主题）；
- * Jina Key 只写入 Electron 主进程安全凭证文件，不落 localStorage 明文。
+ * Jina Key 优先写入 Electron 主进程安全凭证文件，纯浏览器开发模式
+ * 回退到 localStorage，保证重启后仍能读到。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
@@ -16,6 +17,7 @@ import { KnowledgeDocumentList } from "./knowledge-document-list";
 import {
   ACCEPT_EXTENSIONS,
   FREE_TOKEN_QUOTA,
+  JINA_STORAGE_KEY,
   type KnowledgeDocument,
   type KnowledgeStatus,
   type ToastData,
@@ -56,15 +58,17 @@ export default function KnowledgeBasePage({
     window.setTimeout(() => setToast(null), 4000);
   }, []);
 
-  /** 从 Electron 安全凭证读取 Jina Key（纯浏览器模式跳过）。 */
+  /** 从 Electron 安全凭证读取 Jina Key，纯浏览器模式回退 localStorage。 */
   const loadKey = useCallback(async () => {
+    let value = window.localStorage.getItem(JINA_STORAGE_KEY)?.trim() ?? "";
     try {
       const store = await window.electronAPI?.credentials?.read();
-      const value = store?.["JINA_API_KEY"]?.trim() ?? "";
-      setJinaKey(value);
+      const electronValue = store?.[JINA_STORAGE_KEY]?.trim() ?? "";
+      if (electronValue) value = electronValue;
     } catch {
-      setJinaKey("");
+      // 读取失败时继续使用 localStorage 兜底值。
     }
+    setJinaKey(value);
   }, []);
 
   /** 加载知识库状态与文档列表。 */
@@ -115,11 +119,15 @@ export default function KnowledgeBasePage({
     }
     setKeySaving(true);
     try {
-      const store = await window.electronAPI?.credentials?.read();
-      await window.electronAPI?.credentials?.write({
-        ...(store ?? {}),
-        JINA_API_KEY: value,
-      });
+      // Electron 存在时写入安全凭证；浏览器开发模式至少落 localStorage。
+      if (window.electronAPI?.credentials) {
+        const store = (await window.electronAPI.credentials.read()) ?? {};
+        await window.electronAPI.credentials.write({
+          ...store,
+          [JINA_STORAGE_KEY]: value,
+        });
+      }
+      window.localStorage.setItem(JINA_STORAGE_KEY, value);
       showToast("success", "Jina API Key 已保存");
       await loadData();
     } catch (caught) {
@@ -350,16 +358,67 @@ export default function KnowledgeBasePage({
                 className="h-9 shrink-0 cursor-pointer rounded-[10px] px-4 text-[12px] font-medium transition-all hover:opacity-90 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ background: "var(--accent-blue)", color: "#ffffff" }}
               >
-                {uploading ? "上传中…" : "上传并索引"}
+                {uploading ? (
+                  <>
+                    <svg
+                      viewBox="0 0 20 20"
+                      className="h-3.5 w-3.5 animate-spin"
+                      fill="none"
+                      aria-hidden="true"
+                    >
+                      <circle
+                        cx="10"
+                        cy="10"
+                        r="7"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                        strokeDasharray="30 14"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    上传中…
+                  </>
+                ) : (
+                  "上传并索引"
+                )}
               </button>
             </form>
+
+            {uploading && (
+              <div
+                className="flex shrink-0 items-center gap-2 rounded-[12px] border px-3 py-2 text-[11px]"
+                style={{
+                  borderColor: "rgba(48,209,88,0.25)",
+                  background: "rgba(48,209,88,0.06)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  className="h-3.5 w-3.5 animate-spin"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="10"
+                    cy="10"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeDasharray="30 14"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                正在上传并索引：文档切块与向量化中，请稍候…
+              </div>
+            )}
 
             <div className="flex shrink-0 items-center justify-between">
               <h2 className="text-[13px] font-semibold">文档列表（{documents.length}）</h2>
               <button
                 type="button"
                 onClick={() => void reindex()}
-                disabled={reindexing}
+                disabled={reindexing || uploading}
                 className="h-8 cursor-pointer rounded-[10px] border px-3 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] hover:border-[var(--border-strong)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   background: "var(--glass)",

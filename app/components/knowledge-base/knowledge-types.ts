@@ -40,6 +40,9 @@ export const ACCEPT_EXTENSIONS = ".md,.txt,.pdf,.docx";
 /** Jina 免费额度估算值（非商用，embedding 与重排共用）。 */
 export const FREE_TOKEN_QUOTA = 10_000_000;
 
+/** Jina Key 的 Electron 安全凭证 / localStorage 统一键名。 */
+export const JINA_STORAGE_KEY = "JINA_API_KEY";
+
 /** 把字节数格式化为人类可读大小。 */
 export function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;

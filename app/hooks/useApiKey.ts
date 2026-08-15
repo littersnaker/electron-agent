@@ -34,13 +34,12 @@ export function useApiKey() {
   const initial = readInitialSnapshot();
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [apiKeys, setApiKeys] = useState<LlmCredentials>(initial.llm);
-  const [endpointOverrides, setEndpointOverrides] =
-    useState<LlmEndpointOverrides>(initial.endpoints);
-  const [serviceKeys, setServiceKeys] =
-    useState<AuxiliaryServiceCredentials>(initial.services);
+  const [endpointOverrides, setEndpointOverrides] = useState<LlmEndpointOverrides>(
+    initial.endpoints,
+  );
+  const [serviceKeys, setServiceKeys] = useState<AuxiliaryServiceCredentials>(initial.services);
   const [credentialsReady, setCredentialsReady] = useState(false);
-  const [environmentMarketDataConfigured, setEnvironmentMarketDataConfigured] =
-    useState(false);
+  const [environmentMarketDataConfigured, setEnvironmentMarketDataConfigured] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,9 +94,7 @@ export function useApiKey() {
         if (!response.ok) return;
         const payload = (await response.json()) as DataSourceStatusResponse;
         if (!cancelled) {
-          setEnvironmentMarketDataConfigured(
-            payload.environmentConfigured === true,
-          );
+          setEnvironmentMarketDataConfigured(payload.environmentConfigured === true);
         }
       } catch {
         // 状态元数据仅用于提示，真实请求仍会在服务端重新解析环境变量。
@@ -110,19 +107,25 @@ export function useApiKey() {
   }, [showKeyModal]);
 
   const handleSaveKeys = useCallback(
-    (
+    async (
       nextKeys: LlmCredentials,
       nextEndpoints: LlmEndpointOverrides,
       nextServiceKeys: AuxiliaryServiceCredentials,
     ) => {
-      const store = snapshotToCredentialStore(
-        nextKeys,
-        nextEndpoints,
-        nextServiceKeys,
-      );
-      writeLegacyLocalCredentialStore(store);
+      const store = snapshotToCredentialStore(nextKeys, nextEndpoints, nextServiceKeys);
+      // 合并已有 Electron 凭证，避免把 Jina Key 等非 LLM 字段覆盖丢失。
+      let merged = store;
       if (window.electronAPI?.credentials) {
-        void window.electronAPI.credentials.write(store).catch((error) => {
+        try {
+          const existing = (await window.electronAPI.credentials.read()) ?? {};
+          merged = { ...existing, ...store };
+        } catch {
+          merged = store;
+        }
+      }
+      writeLegacyLocalCredentialStore(merged);
+      if (window.electronAPI?.credentials) {
+        void window.electronAPI.credentials.write(merged).catch((error) => {
           console.warn("[Renderer] API Key 写入主进程失败", error);
         });
       }
@@ -134,12 +137,11 @@ export function useApiKey() {
     [],
   );
 
-  const commerceDataSourceState: CommerceDataSourceState =
-    serviceKeys.talorDataToken?.trim()
-      ? "local"
-      : environmentMarketDataConfigured
-        ? "environment"
-        : "none";
+  const commerceDataSourceState: CommerceDataSourceState = serviceKeys.talorDataToken?.trim()
+    ? "local"
+    : environmentMarketDataConfigured
+      ? "environment"
+      : "none";
 
   return {
     apiKeys,
