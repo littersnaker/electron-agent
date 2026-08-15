@@ -12,8 +12,8 @@ from backend.core.config import get_settings
 from backend.services.embeddings.chunking import (
     PROJECT_CHUNK_CHARS,
     PROJECT_CHUNK_OVERLAP,
-    build_chunks,
 )
+from backend.services.embeddings.code_chunking import build_code_chunks
 from backend.services.embeddings.jina_client import JinaClient, JinaError
 from backend.services.embeddings.pipeline import embed_and_store
 from backend.services.embeddings.store import ChunkRecord
@@ -213,7 +213,7 @@ async def _vectorize_project_files(project_id: str, records: list[IndexedFile]) 
     for record in records:
         if not record.content.strip():
             continue
-        chunks = build_chunks(
+        chunks = build_code_chunks(
             scope=project_id,
             source_type="file",
             source_path=record.relative_path,

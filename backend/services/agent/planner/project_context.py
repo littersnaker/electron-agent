@@ -136,5 +136,7 @@ def render_context(files: list[dict[str, object]]) -> str:
             continue
         content = str(item.get("content") or "")
         source = "结构概览回退" if item.get("fallback") else "索引匹配"
-        sections.append(f"--- FILE: {path} [{source}] ---\n{content}")
+        position = str(item.get("position") or "")
+        location = f" · {position}" if position else ""
+        sections.append(f"--- FILE: {path} [{source}]{location} ---\n{content}")
     return "\n\n".join(sections)

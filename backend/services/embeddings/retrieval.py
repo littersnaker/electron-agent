@@ -250,6 +250,7 @@ async def hybrid_search_project(
                 "content": str(item.get("chunkText") or ""),
                 "size": len(str(item.get("chunkText") or "")),
                 "vectorScore": item.get("score"),
+                "position": str(item.get("position") or ""),
                 "source": "vector",
             }
     candidates = [by_key[key] for key in ordered_keys if key in by_key]
