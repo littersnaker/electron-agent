@@ -86,6 +86,8 @@ class Settings:
     jina_parent_child_enabled: bool
     jina_max_batch: int
     jina_timeout_seconds: float
+    jina_tokens_per_minute: int
+    jina_max_call_tokens: int
     knowledge_doc_extensions: tuple[str, ...]
 
     @property
@@ -149,6 +151,16 @@ def get_settings() -> Settings:
         in {"1", "true", "yes", "on"},
         jina_max_batch=max(1, min(int(os.getenv("JINA_MAX_BATCH", "64")), 256)),
         jina_timeout_seconds=float(os.getenv("JINA_TIMEOUT_SECONDS", "120")),
+        # Jina 免费额度约 10 万 token/分钟，留 20% 余量避免 429。
+        jina_tokens_per_minute=max(
+            1_000,
+            int(os.getenv("JINA_TOKENS_PER_MINUTE", "80000")),
+        ),
+        # 单次请求 token 上限：过大批次即使不超分钟限速也容易被拒绝。
+        jina_max_call_tokens=max(
+            500,
+            int(os.getenv("JINA_MAX_CALL_TOKENS", "20000")),
+        ),
         knowledge_doc_extensions=tuple(
             item.strip().lower() for item in extensions_raw.split(",") if item.strip()
         ),
