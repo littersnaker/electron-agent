@@ -12,7 +12,9 @@ from backend.core.config import get_settings
 from backend.services.embeddings.chunking import build_chunks, split_text
 from backend.services.embeddings.jina_client import JinaClient, JinaError
 from backend.services.embeddings.retrieval import (
+    KnowledgeSearchResult,
     _rrf_merge,
+    evaluate_knowledge_recall,
     hybrid_search_project,
     search_knowledge,
 )
@@ -59,6 +61,33 @@ def test_build_chunks_keeps_parent_text() -> None:
     assert chunks[0].parent_id == "docs/manual.md"
     assert "第一章 简介" in chunks[0].parent_text
     assert all(chunk.chunk_text for chunk in chunks)
+
+
+def test_build_chunks_index_offset_keeps_global_unique_indexes() -> None:
+    """多页拼接（PDF 按页切）时块序号应全局连续，避免 UNIQUE 冲突。"""
+
+    first = build_chunks(
+        scope="knowledge",
+        source_type="doc",
+        source_path="manual.pdf",
+        text="第一页内容" * 80,
+        max_chars=60,
+        overlap=10,
+        position="第1页",
+    )
+    second = build_chunks(
+        scope="knowledge",
+        source_type="doc",
+        source_path="manual.pdf",
+        text="第二页内容" * 80,
+        max_chars=60,
+        overlap=10,
+        position="第2页",
+        index_offset=len(first),
+    )
+    indexes = [chunk.chunk_index for chunk in [*first, *second]]
+    assert len(indexes) == len(set(indexes))
+    assert indexes == sorted(indexes)
 
 
 def test_rrf_merge_prefers_common_items() -> None:
@@ -272,3 +301,40 @@ async def test_search_knowledge_returns_empty_without_key(monkeypatch, tmp_path:
     result = await search_knowledge("知识库问题")
     assert result.sources == []
     assert result.candidate_count == 0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_knowledge_recall_computes_metrics(monkeypatch) -> None:
+    """检索评估应正确计算命中数、召回率、精确率与 F1。"""
+
+    from backend.services.embeddings import retrieval
+
+    async def fake_search(question: str, **_kwargs):
+        if question == "命中题":
+            return KnowledgeSearchResult(
+                sources=[{"sourcePath": "docs/auth.py", "score": 0.9}],
+                recall_k=10,
+                candidate_count=10,
+                top_k=5,
+                reranked=True,
+                avg_score=0.9,
+            )
+        return KnowledgeSearchResult(
+            sources=[],
+            recall_k=10,
+            candidate_count=10,
+            top_k=5,
+            reranked=True,
+            avg_score=0.0,
+        )
+
+    monkeypatch.setattr(retrieval, "search_knowledge", fake_search)
+    result = await evaluate_knowledge_recall(
+        [("命中题", "auth.py"), ("未命中题", "manual.pdf")],
+        api_key="test-key",
+    )
+    assert result["hits"] == 1
+    assert result["totalCases"] == 2
+    assert result["recallRate"] == 0.5
+    assert result["precisionRate"] == 0.1  # 1 个正确槽位 / (5 × 2)
+    assert result["f1"] > 0

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
@@ -212,7 +213,7 @@ async def index_knowledge_document(document_id: str, api_key: str = "") -> dict[
             error_message="",
         )
         return {"ok": True, "documentId": document_id, "chunkCount": len(chunks)}
-    except (JinaError, ValueError, OSError) as exc:
+    except (JinaError, ValueError, OSError, sqlite3.IntegrityError) as exc:
         await _update_document_status(
             document_id, status="error", chunk_count=0, error_message=str(exc)
         )
@@ -228,20 +229,22 @@ def _build_document_chunks(path: Path) -> list[ChunkRecord]:
 
     if path.suffix.lower() == ".pdf":
         chunks: list[ChunkRecord] = []
+        running_index = 0
         for page_index, page_text in enumerate(extract_pdf_pages(path), start=1):
             if not page_text:
                 continue
-            chunks.extend(
-                build_chunks(
-                    scope="knowledge",
-                    source_type="doc",
-                    source_path=str(path),
-                    text=page_text,
-                    max_chars=KNOWLEDGE_CHUNK_CHARS,
-                    overlap=KNOWLEDGE_CHUNK_OVERLAP,
-                    position=f"第{page_index}页",
-                )
+            page_chunks = build_chunks(
+                scope="knowledge",
+                source_type="doc",
+                source_path=str(path),
+                text=page_text,
+                max_chars=KNOWLEDGE_CHUNK_CHARS,
+                overlap=KNOWLEDGE_CHUNK_OVERLAP,
+                position=f"第{page_index}页",
+                index_offset=running_index,
             )
+            running_index += len(page_chunks)
+            chunks.extend(page_chunks)
         return chunks
 
     text = extract_document_text(path)

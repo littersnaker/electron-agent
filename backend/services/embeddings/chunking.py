@@ -67,6 +67,7 @@ def build_chunks(
     max_chars: int = KNOWLEDGE_CHUNK_CHARS,
     overlap: int = KNOWLEDGE_CHUNK_OVERLAP,
     position: str = "",
+    index_offset: int = 0,
 ) -> list[ChunkRecord]:
     """把一段文本切成带父子结构的向量块记录。
 
@@ -77,8 +78,8 @@ def build_chunks(
     parent_text = text.strip()[:MAX_PARENT_TEXT_CHARS]
     return [
         ChunkRecord(
-            chunk_id=_chunk_id(scope, source_path, index, position),
-            chunk_index=index,
+            chunk_id=_chunk_id(scope, source_path, index_offset + index, position),
+            chunk_index=index_offset + index,
             chunk_text=piece,
             embedding=[],
             model=model,
