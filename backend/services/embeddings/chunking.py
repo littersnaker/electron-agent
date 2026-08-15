@@ -48,10 +48,12 @@ def split_text(text: str, *, max_chars: int, overlap: int) -> list[str]:
     return pieces
 
 
-def _chunk_id(scope: str, source_path: str, index: int) -> str:
+def _chunk_id(scope: str, source_path: str, index: int, position: str = "") -> str:
     """生成确定性的块 ID，便于增量重建时按来源整体替换。"""
 
-    digest = hashlib.sha256(f"{scope}\n{source_path}\n{index}".encode()).hexdigest()[:24]
+    digest = hashlib.sha256(f"{scope}\n{source_path}\n{index}\n{position}".encode()).hexdigest()[
+        :24
+    ]
     return f"chunk_{digest}"
 
 
@@ -64,6 +66,7 @@ def build_chunks(
     model: str = "",
     max_chars: int = KNOWLEDGE_CHUNK_CHARS,
     overlap: int = KNOWLEDGE_CHUNK_OVERLAP,
+    position: str = "",
 ) -> list[ChunkRecord]:
     """把一段文本切成带父子结构的向量块记录。
 
@@ -74,16 +77,30 @@ def build_chunks(
     parent_text = text.strip()[:MAX_PARENT_TEXT_CHARS]
     return [
         ChunkRecord(
-            chunk_id=_chunk_id(scope, source_path, index),
+            chunk_id=_chunk_id(scope, source_path, index, position),
             chunk_index=index,
             chunk_text=piece,
             embedding=[],
             model=model,
             parent_id=source_path,
             parent_text=parent_text,
+            position=position,
         )
         for index, piece in enumerate(pieces)
     ]
+
+
+def extract_pdf_pages(path: Path) -> list[str]:
+    """按页抽取 PDF 文本，返回每页一个字符串；失败时返回空列表。"""
+
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(path))
+        return [(page.extract_text() or "").strip() for page in reader.pages]
+    except Exception as exc:  # noqa: BLE001 - 单文档解析失败不应中断整个知识库
+        LOGGER.warning("解析 PDF 失败：%s（%s）", path, exc)
+        return []
 
 
 def extract_document_text(path: Path) -> str:

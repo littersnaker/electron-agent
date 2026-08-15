@@ -19,6 +19,7 @@ from backend.services.embeddings.chunking import (
     KNOWLEDGE_CHUNK_OVERLAP,
     build_chunks,
     extract_document_text,
+    extract_pdf_pages,
 )
 from backend.services.embeddings.jina_client import JinaClient, JinaError
 from backend.services.embeddings.pipeline import embed_and_store
@@ -199,15 +200,7 @@ async def index_knowledge_document(document_id: str, api_key: str = "") -> dict[
     path = Path(str(row["file_path"]))
     try:
         client = JinaClient(api_key)
-        text = extract_document_text(path)
-        chunks = build_chunks(
-            scope="knowledge",
-            source_type="doc",
-            source_path=str(path),
-            text=text,
-            max_chars=KNOWLEDGE_CHUNK_CHARS,
-            overlap=KNOWLEDGE_CHUNK_OVERLAP,
-        )
+        chunks = _build_document_chunks(path)
         await embed_and_store(
             client,
             [("knowledge", "doc", str(path), chunk) for chunk in chunks],
@@ -224,6 +217,42 @@ async def index_knowledge_document(document_id: str, api_key: str = "") -> dict[
             document_id, status="error", chunk_count=0, error_message=str(exc)
         )
         return {"ok": False, "documentId": document_id, "error": str(exc)}
+
+
+def _build_document_chunks(path: Path) -> list[ChunkRecord]:
+    """把单个知识库文档切成向量块，PDF 按页记录 position。
+
+    PDF 按页切块并记录页码，回答时可以展示“文件名（第 X 页）”；
+    md/txt/docx 先抽取全文再统一切块，position 留空。
+    """
+
+    if path.suffix.lower() == ".pdf":
+        chunks: list[ChunkRecord] = []
+        for page_index, page_text in enumerate(extract_pdf_pages(path), start=1):
+            if not page_text:
+                continue
+            chunks.extend(
+                build_chunks(
+                    scope="knowledge",
+                    source_type="doc",
+                    source_path=str(path),
+                    text=page_text,
+                    max_chars=KNOWLEDGE_CHUNK_CHARS,
+                    overlap=KNOWLEDGE_CHUNK_OVERLAP,
+                    position=f"第{page_index}页",
+                )
+            )
+        return chunks
+
+    text = extract_document_text(path)
+    return build_chunks(
+        scope="knowledge",
+        source_type="doc",
+        source_path=str(path),
+        text=text,
+        max_chars=KNOWLEDGE_CHUNK_CHARS,
+        overlap=KNOWLEDGE_CHUNK_OVERLAP,
+    )
 
 
 async def _index_memory_entries(client: JinaClient) -> int:

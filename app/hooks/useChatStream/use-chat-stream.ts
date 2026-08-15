@@ -11,6 +11,7 @@ import { apiFetch } from "../../lib/api-client";
 import type {
   AgentLifecycleEventPayload,
   InteractiveRequest,
+  KnowledgeMetrics,
   KnowledgeSourceItem,
   KnowledgeSourcesPayload,
   StreamPacket,
@@ -56,6 +57,7 @@ export function useChatStream({
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSourceItem[] | null>(null);
   const [knowledgeSearched, setKnowledgeSearched] = useState(false);
+  const [knowledgeMetrics, setKnowledgeMetrics] = useState<KnowledgeMetrics | null>(null);
   const [agentStatus, setAgentStatus] = useState("");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [agentLifecycleEvents, setAgentLifecycleEvents] = useState<AgentLifecycleEventPayload[]>(
@@ -130,6 +132,7 @@ export function useChatStream({
     setToolActivities([]);
     setKnowledgeSources(null);
     setKnowledgeSearched(false);
+    setKnowledgeMetrics(null);
     setAgentStatus("");
     setTokenInfo(null);
     setAgentLifecycleEvents([]);
@@ -280,6 +283,10 @@ export function useChatStream({
         } catch {
           // 读取失败时由服务端回退环境变量 JINA_API_KEY。
         }
+        if (!jinaApiKey) {
+          // 纯浏览器开发模式没有 Electron 凭证，回退 localStorage。
+          jinaApiKey = window.localStorage.getItem("JINA_API_KEY")?.trim() ?? "";
+        }
         const response = await apiFetch(endpoint, {
           method: "POST",
           headers: buildLlmRequestHeaders(apiKeys, requestModel, endpointOverrides, jinaApiKey),
@@ -367,6 +374,13 @@ export function useChatStream({
                 const payload = packet.payload as KnowledgeSourcesPayload;
                 setKnowledgeSources(payload.sources);
                 setKnowledgeSearched(payload.searched);
+                setKnowledgeMetrics({
+                  recallK: payload.recallK,
+                  candidateCount: payload.candidateCount,
+                  topK: payload.topK,
+                  reranked: payload.reranked,
+                  avgScore: payload.avgScore,
+                });
                 continue;
               }
               if (
@@ -561,6 +575,7 @@ export function useChatStream({
     toolActivities,
     knowledgeSources,
     knowledgeSearched,
+    knowledgeMetrics,
     agentStatus,
     tokenInfo,
     agentLifecycleEvents,

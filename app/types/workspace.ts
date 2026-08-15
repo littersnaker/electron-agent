@@ -202,10 +202,26 @@ export interface KnowledgeSourceItem {
   sourcePath: string;
   /** doc / memory */
   sourceType: string;
+  /** 来源内位置（如 PDF 的“第 3 页”），md/txt/docx 可能为空 */
+  position?: string;
   /** 重排或向量相关度分数 */
   score?: number;
   /** 是否使用了父文本替换 */
   parentUsed?: boolean;
+}
+
+/** 知识库检索质量指标。 */
+export interface KnowledgeMetrics {
+  /** 配置的召回候选数 */
+  recallK: number;
+  /** 重排前的实际候选数 */
+  candidateCount: number;
+  /** 最终精排条数 */
+  topK: number;
+  /** 是否成功执行了重排 */
+  reranked: boolean;
+  /** 最终 Top-K 来源的平均相关度分数 */
+  avgScore: number;
 }
 
 /** 知识库来源广播事件的数据结构。 */
@@ -213,6 +229,11 @@ export interface KnowledgeSourcesPayload {
   sources: KnowledgeSourceItem[];
   count: number;
   searched: boolean;
+  recallK: number;
+  candidateCount: number;
+  topK: number;
+  reranked: boolean;
+  avgScore: number;
 }
 
 /** 视觉验证请求：前端需要启动预览、截图并用 GLM 核对页面渲染。 */

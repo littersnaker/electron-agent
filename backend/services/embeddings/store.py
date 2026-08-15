@@ -29,6 +29,7 @@ class ChunkRecord:
     model: str = ""
     parent_id: str = ""
     parent_text: str = ""
+    position: str = ""
 
 
 def _embedding_to_blob(values: list[float]) -> bytes:
@@ -82,6 +83,7 @@ async def upsert_chunks(
             chunk.model or model,
             chunk.parent_id,
             chunk.parent_text,
+            chunk.position,
             utc_now_iso(),
         )
         for chunk in chunks
@@ -95,8 +97,9 @@ async def upsert_chunks(
             """
             INSERT INTO document_chunks(
                 chunk_id, scope, source_type, source_path, chunk_index,
-                chunk_text, embedding, model, parent_id, parent_text, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                chunk_text, embedding, model, parent_id, parent_text, position,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -148,7 +151,7 @@ async def search_vectors(
         cursor = await connection.execute(
             """
             SELECT chunk_id, chunk_index, chunk_text, source_type, source_path,
-                   embedding, parent_id, parent_text
+                   embedding, parent_id, parent_text, position
             FROM document_chunks WHERE scope = ?
             """,
             (scope,),
@@ -178,6 +181,7 @@ async def search_vectors(
                 "sourcePath": str(row["source_path"]),
                 "parentId": str(row["parent_id"]),
                 "parentText": str(row["parent_text"]),
+                "position": str(row["position"] or ""),
                 "score": float(scores[int(index)]),
             }
         )

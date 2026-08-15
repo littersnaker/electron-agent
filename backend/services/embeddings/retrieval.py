@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from backend.core.config import get_settings
@@ -21,6 +22,23 @@ RRF_CONSTANT = 60
 RERANK_DOCUMENT_CHARS = 3000
 # 父子替换的父文本长度上限：超过上限时保留子块，避免上下文爆炸。
 MAX_PARENT_REPLACE_CHARS = 8000
+
+
+@dataclass(slots=True)
+class KnowledgeSearchResult:
+    """知识库检索结果与质量指标。
+
+    ``candidate_count`` 是重排前的候选数（即向量召回数量）；
+    ``avg_score`` 是最终 Top-K 来源的相关度分数均值，分数越高表示
+    本轮检索结果与问题越相关，可作为“检索质量”的参考。
+    """
+
+    sources: list[dict[str, object]]
+    recall_k: int
+    candidate_count: int
+    top_k: int
+    reranked: bool
+    avg_score: float
 
 
 def _rrf_merge(ranked: list[list[str]], constant: int = RRF_CONSTANT) -> dict[str, float]:
@@ -136,11 +154,11 @@ async def search_knowledge(
     api_key: str = "",
     recall_k: int | None = None,
     top_k: int | None = None,
-) -> list[dict[str, object]]:
+) -> KnowledgeSearchResult:
     """知识库检索：向量召回 → 重排 →（可选）父子替换 → Top-K。
 
-    返回结果包含来源路径与父文本；未开启 Jina 时返回空列表（QA 降级为
-    无知识库上下文）。
+    返回 ``KnowledgeSearchResult``，包含来源列表与检索质量指标；
+    未开启 Jina 时来源为空列表（QA 降级为无知识库上下文）。
     """
 
     settings = get_settings()
@@ -148,19 +166,21 @@ async def search_knowledge(
     top_k = top_k or settings.jina_top_k
     client = _resolve_client(api_key)
     if client is None:
-        return []
+        return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
 
     try:
         vectors, _usage = await client.embed_texts([query], task="retrieval.query")
     except JinaError as exc:
         LOGGER.warning("知识库向量召回失败，本轮跳过：%s", exc)
-        return []
+        return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
     if not vectors:
-        return []
+        return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
     hits = await search_vectors(scope="knowledge", query_vector=vectors[0], limit=recall_k)
     if not hits:
-        return []
+        return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
 
+    candidate_count = len(hits)
+    reranked = False
     try:
         documents = [
             f"{item.get('sourcePath')}\n{str(item.get('chunkText') or '')[:RERANK_DOCUMENT_CHARS]}"
@@ -174,6 +194,7 @@ async def search_knowledge(
                 item = dict(hits[index])
                 item["score"] = hit.get("score")
                 ordered.append(item)
+        reranked = True
     except JinaError as exc:
         LOGGER.warning("知识库重排失败，返回向量候选：%s", exc)
         ordered = [dict(item) for item in hits[:top_k]]
@@ -187,4 +208,15 @@ async def search_knowledge(
         ):
             item["chunkText"] = parent_text
             item["parentUsed"] = True
-    return ordered
+    scores = [
+        float(item["score"]) for item in ordered if isinstance(item.get("score"), (int, float))
+    ]
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+    return KnowledgeSearchResult(
+        sources=ordered,
+        recall_k=recall_k,
+        candidate_count=candidate_count,
+        top_k=top_k,
+        reranked=reranked,
+        avg_score=round(avg_score, 4),
+    )

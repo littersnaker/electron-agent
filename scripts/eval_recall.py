@@ -19,19 +19,22 @@ async def _run_one(
     project_id: str,
     question: str,
     expect: str,
-) -> None:
-    """对单个问题跑三档候选数并打印命中情况。"""
+) -> dict[int, bool]:
+    """对单个问题跑三档候选数并打印命中情况，返回 候选数->是否命中。"""
 
     print(f"\n问题：{question}")
+    hits: dict[int, bool] = {}
     for recall_k in (10, 20, 30):
         top_k = 5
         results = await hybrid_search_project(project_id, question, recall_k=recall_k, top_k=top_k)
         paths = [str(item.get("path") or "") for item in results]
         hit = any(expect and expect.lower() in path.lower() for path in paths)
+        hits[recall_k] = hit
         marker = "✔ 命中" if hit else "✘ 未命中"
         print(f"  RECALL_K={recall_k:>2} TOP_K={top_k} -> {marker}")
         for path in paths:
             print(f"    - {path}")
+    return hits
 
 
 def main() -> None:
@@ -46,8 +49,18 @@ def main() -> None:
     if not questions:
         print("未提供有效问题。")
         return
+    totals: dict[int, int] = {10: 0, 20: 0, 30: 0}
     for question in questions:
-        asyncio.run(_run_one(args.project, question, args.expect))
+        hits = asyncio.run(_run_one(args.project, question, args.expect))
+        for recall_k, hit in hits.items():
+            if hit:
+                totals[recall_k] += 1
+    print("\n=== 召回率汇总（需通过 --expect 提供期望命中路径）===")
+    total = len(questions)
+    for recall_k in (10, 20, 30):
+        hit_count = totals[recall_k]
+        rate = hit_count / total * 100 if total else 0.0
+        print(f"  召回率@{recall_k:>2}: {hit_count}/{total}（{rate:.1f}%）")
 
 
 if __name__ == "__main__":

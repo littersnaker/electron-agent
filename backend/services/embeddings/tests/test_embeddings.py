@@ -81,6 +81,7 @@ async def test_upsert_and_search_vectors(monkeypatch, tmp_path: Path) -> None:
             chunk_index=index,
             chunk_text=f"文本 {index}",
             embedding=vector,
+            position=f"第{index + 1}页" if index == 0 else "",
         )
         for index, vector in enumerate(([1, 0, 0], [0, 1, 0], [0, 0, 1]))
     ]
@@ -95,6 +96,7 @@ async def test_upsert_and_search_vectors(monkeypatch, tmp_path: Path) -> None:
     assert hits[0]["sourcePath"] == "manual.md"
     assert hits[0]["chunkIndex"] == 0
     assert hits[0]["score"] > 0.9
+    assert hits[0]["position"] == "第1页"
 
     # 重新写入同一来源应整体替换，不残留旧块。
     await upsert_chunks(
@@ -159,9 +161,7 @@ async def test_jina_client_embed_and_rerank_use_transport() -> None:
     vectors, usage = await client.embed_texts(["hello"])
     assert vectors == [[1.0, 2.0, 3.0]]
     assert usage.total_tokens == 4
-    query_vectors, _query_usage = await client.embed_texts(
-        ["query"], task="retrieval.query"
-    )
+    query_vectors, _query_usage = await client.embed_texts(["query"], task="retrieval.query")
     assert query_vectors == [[1.0, 2.0, 3.0]]
     assert seen_tasks == ["retrieval.passage", "retrieval.query"]
 
@@ -176,6 +176,48 @@ def test_jina_client_requires_api_key() -> None:
     get_settings.cache_clear()
     with pytest.raises(JinaError):
         JinaClient("")
+
+
+@pytest.mark.asyncio
+async def test_jina_client_splits_batches_and_rate_limits() -> None:
+    """客户端应按 token 上限拆批，并在接近分钟限额时等待窗口滚动。"""
+
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        payload = json.loads(request.content)
+        items = list(payload["input"])
+        return httpx.Response(
+            200,
+            json={
+                "model": payload["model"],
+                "data": [{"index": index, "embedding": [1.0]} for index in range(len(items))],
+                "usage": {
+                    "prompt_tokens": 10 * len(items),
+                    "total_tokens": 10 * len(items),
+                },
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = JinaClient(
+        "test-key",
+        embedding_model="embed-test",
+        transport=transport,
+        timeout_seconds=10,
+        max_batch=64,
+        tokens_per_minute=25,
+        max_call_tokens=15,
+        window_seconds=0.2,
+    )
+    # 每个文本估算约 13 token（10 字符 //2 + 8），超过 max_call_tokens 时各自成批。
+    texts = ["0123456789", "abcdefghij", "ABCDEFGHIJ"]
+    vectors, usage = await client.embed_texts(texts)
+    assert len(vectors) == 3
+    assert request_count == 3
+    assert usage.total_tokens == 30
 
 
 def test_extract_docx_text_reads_paragraphs_and_tables() -> None:
@@ -227,5 +269,6 @@ async def test_search_knowledge_returns_empty_without_key(monkeypatch, tmp_path:
     monkeypatch.delenv("JINA_API_KEY", raising=False)
     get_settings.cache_clear()
     await initialize_database()
-    results = await search_knowledge("知识库问题")
-    assert results == []
+    result = await search_knowledge("知识库问题")
+    assert result.sources == []
+    assert result.candidate_count == 0

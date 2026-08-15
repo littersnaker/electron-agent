@@ -6,7 +6,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
 import type { Message } from "../constants/page-constants";
-import type { KnowledgeSourceItem } from "../types/workspace";
+import type { KnowledgeMetrics, KnowledgeSourceItem } from "../types/workspace";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
@@ -18,6 +18,7 @@ interface ChatListProps {
   agentStatus?: string;
   knowledgeSources?: KnowledgeSourceItem[] | null;
   knowledgeSearched?: boolean;
+  knowledgeMetrics?: KnowledgeMetrics | null;
 }
 
 const COLORS = {
@@ -62,6 +63,7 @@ function ChatList({
   agentStatus,
   knowledgeSources = null,
   knowledgeSearched = false,
+  knowledgeMetrics = null,
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
@@ -299,9 +301,25 @@ function ChatList({
                         >
                           知识库命中 {knowledgeSources.length} 条
                         </span>
+                        {knowledgeMetrics && (
+                          <span
+                            className="rounded-full border px-2 py-0.5"
+                            style={{
+                              borderColor: COLORS.border,
+                              color: COLORS.textMuted,
+                            }}
+                          >
+                            候选 {knowledgeMetrics.candidateCount} → 精排 {knowledgeMetrics.topK}
+                            {knowledgeMetrics.reranked ? "" : "（未重排）"} · 均分{" "}
+                            {knowledgeMetrics.avgScore.toFixed(2)}
+                          </span>
+                        )}
                         <span className="min-w-0 truncate">
                           {knowledgeSources
-                            .map((item) => item.sourcePath.split("/").pop() || item.sourcePath)
+                            .map((item) => {
+                              const name = item.sourcePath.split("/").pop() || item.sourcePath;
+                              return item.position ? `${name}（${item.position}）` : name;
+                            })
                             .join("、")}
                         </span>
                       </>

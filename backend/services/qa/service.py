@@ -70,8 +70,10 @@ async def stream_qa_agent(
     """执行 QA 模型调用，并输出与现有 React 前端兼容的 SSE 数据帧。"""
 
     yield encode_sse_comment()
-    knowledge_context, knowledge_sources = await _load_knowledge_context(body, jina_api_key)
-    if knowledge_sources is not None:
+    knowledge_context, knowledge_sources, knowledge_metrics = await _load_knowledge_context(
+        body, jina_api_key
+    )
+    if knowledge_metrics is not None:
         # 只要执行了知识库检索，就向前端广播来源（空列表表示未命中），
         # 让用户能明确判断回答是否基于知识库内容。
         yield encode_sse(
@@ -81,6 +83,7 @@ async def stream_qa_agent(
                     "sources": knowledge_sources,
                     "count": len(knowledge_sources),
                     "searched": True,
+                    **knowledge_metrics,
                 },
             }
         )
@@ -134,37 +137,45 @@ async def stream_qa_agent(
 
 async def _load_knowledge_context(
     body: ChatRequest, jina_api_key: str
-) -> tuple[str, list[dict[str, object]] | None]:
-    """执行知识库检索并返回（提示词片段, 来源列表）。
+) -> tuple[str, list[dict[str, object]], dict[str, object] | None]:
+    """执行知识库检索并返回（提示词片段, 来源列表, 检索指标）。
 
-    来源列表为 ``None`` 表示本轮没有执行检索（未开启/未配置密钥/用户显式
-    关闭）；空列表表示执行了检索但没有命中，前端据此区分展示。
+    检索指标为 ``None`` 表示本轮没有执行检索（未开启/未配置密钥/用户显式
+    关闭）；来源空列表表示执行了检索但没有命中，前端据此区分展示。
     """
 
     settings = get_settings()
     if not settings.jina_embedding_enabled:
-        return "", None
+        return "", [], None
     if body.knowledge_search is False:
-        return "", None
+        return "", [], None
     user_text = ""
     for message in reversed(body.messages):
         if message.role == "user":
             user_text = message.content.strip()
             break
     if not user_text:
-        return "", None
+        return "", [], None
     try:
-        results = await search_knowledge(user_text, api_key=jina_api_key, top_k=settings.jina_top_k)
+        result = await search_knowledge(user_text, api_key=jina_api_key, top_k=settings.jina_top_k)
     except JinaError as exc:
         LOGGER.warning("知识库检索失败，本轮不注入知识：%s", exc)
-        return "", None
+        return "", [], None
     sources = [
         {
             "sourcePath": str(item.get("sourcePath") or ""),
             "sourceType": str(item.get("sourceType") or ""),
+            "position": str(item.get("position") or ""),
             "score": item.get("score"),
             "parentUsed": bool(item.get("parentUsed")),
         }
-        for item in results
+        for item in result.sources
     ]
-    return _render_knowledge_block(results), sources
+    metrics = {
+        "recallK": result.recall_k,
+        "candidateCount": result.candidate_count,
+        "topK": result.top_k,
+        "reranked": result.reranked,
+        "avgScore": result.avg_score,
+    }
+    return _render_knowledge_block(result.sources), sources, metrics

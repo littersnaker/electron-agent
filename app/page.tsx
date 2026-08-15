@@ -386,6 +386,7 @@ export default function Home() {
                     agentStatus={activeStatus}
                     knowledgeSources={chat.knowledgeSources}
                     knowledgeSearched={chat.knowledgeSearched}
+                    knowledgeMetrics={chat.knowledgeMetrics}
                   />
                   <div className="shrink-0 pt-2">
                     {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (
