@@ -43,7 +43,11 @@ def write_recognition_excel(
         from openpyxl.styles import Alignment, Font, PatternFill
         from openpyxl.utils import get_column_letter
     except ImportError as exc:  # pragma: no cover - 构建环境必带 openpyxl
-        raise RuntimeError("图片识别导出 Excel 依赖 openpyxl 未安装。") from exc
+        raise RuntimeError(
+            "图片识别导出 Excel 依赖缺失（"
+            f"{exc}）。开发环境请执行 pip install -r requirements.txt；"
+            "桌面版需要重新构建（pnpm electron:make:win）后才会包含 openpyxl。"
+        ) from exc
 
     directory.mkdir(parents=True, exist_ok=True)
     filename = build_excel_filename()

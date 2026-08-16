@@ -106,11 +106,12 @@ def test_build_recognition_prompt_contains_fixed_rules() -> None:
 @pytest.mark.asyncio
 async def test_recognize_single_image_parses_pipe_rows() -> None:
     client = FakeClient("003|第1层|第2位|\n005|第2层|第3位|编号无法辨认")
-    rows, summary = await recognize_single_image(
+    rows, summary, error = await recognize_single_image(
         image=SimpleNamespace(name="shelf_a.jpg"),
         client=client,
         prompt="识别",
     )
+    assert error is None
     assert len(rows) == 2
     assert rows[0].sheet_no == "003"
     assert rows[0].row == "第1层"
@@ -121,9 +122,50 @@ async def test_recognize_single_image_parses_pipe_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recognize_single_image_parses_real_glm_output() -> None:
+    """GLM-4.6V 真实输出：编号带方括号、多条记录挤在一行、空格分隔。"""
+
+    content = (
+        "[325]|[第1层|第1位| [89]|[第1层|第2位| [302]|[第1层|第3位| "
+        "[386]|[第1层|第4位| [88]|[第1层|第5位| [734]|[第1层|第6位|"
+    )
+    client = FakeClient(content)
+    rows, _summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_a.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert len(rows) == 6
+    assert [item.sheet_no for item in rows] == ["325", "89", "302", "386", "88", "734"]
+    assert rows[0].row == "第1层"
+    assert rows[0].col == "第1位"
+    assert rows[-1].col == "第6位"
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_parses_note_after_position() -> None:
+    """位号之后出现的“编号无法辨认”应进入备注而非编号。"""
+
+    content = "005|第2层|第3位|编号无法辨认\n[008]|[第2层|第4位|"
+    client = FakeClient(content)
+    rows, _summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_b.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert len(rows) == 2
+    assert rows[0].sheet_no == "005"
+    assert rows[0].note == "编号无法辨认"
+    assert rows[1].sheet_no == "008"
+    assert rows[1].note == ""
+
+
+@pytest.mark.asyncio
 async def test_recognize_single_image_degrades_on_failure() -> None:
     client = FakeClient(content="")  # analyze_images 抛 RuntimeError
-    rows, error = await recognize_single_image(
+    rows, _summary, error = await recognize_single_image(
         image=SimpleNamespace(name="shelf_b.jpg"),
         client=client,
         prompt="识别",
@@ -136,12 +178,13 @@ async def test_recognize_single_image_degrades_on_failure() -> None:
 @pytest.mark.asyncio
 async def test_recognize_single_image_handles_no_shelf() -> None:
     client = FakeClient("未检测到货架图纸")
-    rows, summary = await recognize_single_image(
+    rows, summary, error = await recognize_single_image(
         image=SimpleNamespace(name="shelf_c.jpg"),
         client=client,
         prompt="识别",
     )
     assert rows == []
+    assert error is None  # 未检测到图纸不算失败
     assert "未检测到货架图纸" in summary
 
 
@@ -295,6 +338,7 @@ async def test_stream_image_recognition_emits_sse_frames(monkeypatch, tmp_path) 
     async def fake_recognize(*, image, client, prompt):
         return (
             [SheetRecognition("003", "第1层", "第2位", image.name)],
+            "识别到 1 个编号",
             None,
         )
 

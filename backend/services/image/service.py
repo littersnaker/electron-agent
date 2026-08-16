@@ -154,7 +154,7 @@ async def stream_image_recognition(
     )
     per_image: list[tuple[str, list[SheetRecognition], str | None]] = []
     for index, (name, image) in enumerate(prepared, start=1):
-        rows, error = await recognize_single_image(
+        rows, _summary, error = await recognize_single_image(
             image=image,
             client=client,
             prompt=build_recognition_prompt(image_names=name),

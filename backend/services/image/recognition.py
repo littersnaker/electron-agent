@@ -3,11 +3,16 @@
 每张照片独立调用 GLM-4.6V（共享层已做全局节流，此处不再自建锁）。单张失败
 （超时/限流重试耗尽/无法辨认）只记入失败清单并继续下一张，保证已消耗的速率
 不白费——成功张的结果全部保留。
+
+GLM-4.6V 是免费模型，输出格式不稳定（可能给编号加方括号、把多条记录挤在一行、
+使用全角符号）。解析器因此使用正则从任意文本中提取 ``编号+第N层+第M位`` 三元组，
+不依赖换行或分隔符位置，并对编号做方括号/空白清洗。
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 from backend.services.glm46v.client import (
     GLM46VClient,
@@ -20,6 +25,12 @@ LOGGER = logging.getLogger(__name__)
 
 MAX_RECOGNITIONS_PER_IMAGE = 120
 
+# 容忍 [编号]、[第N层]、全角｜、多余空白与缺失分隔符，从任意文本中提取三元组。
+_RECORD_PATTERN = re.compile(
+    r"\[?\s*(\d{1,4})\s*\]?\s*[|｜]\s*\[?\s*第\s*(\d+)\s*层"
+    r"\s*[|｜]?\s*\[?\s*第\s*(\d+)\s*位"
+)
+
 _RECOGNITION_PROMPT = """你是货架图纸识别员。请仔细查看这张货架照片，完成以下任务：
 
 1. 货架可能有若干层，每层从左到右有若干货位；每个货位贴着唯一编号的图纸。
@@ -27,10 +38,10 @@ _RECOGNITION_PROMPT = """你是货架图纸识别员。请仔细查看这张货�
    识别每个货位上的图纸编号。
 3. 只输出贴有图纸的货位；空出的货位、看不清的货位不要输出编号。
 4. 编号看不清时，在备注写“编号无法辨认”，但仍给出它所在的层与位。
-5. 输出格式，每行一条，严格如下：
-   [编号]|[层]|[位]|[备注]
-   例：003|第1层|第2位|
-   例：005|第2层|第3位|编号无法辨认
+5. 输出格式：每条记录独占一行，编号只写数字，不要加方括号、引号或其他符号。
+   行内用竖线分隔，例如：
+   003|第1层|第2位|
+   005|第2层|第3位|编号无法辨认
 6. 不要输出任何解释、前言或 Markdown 标记。
 """
 
@@ -50,64 +61,65 @@ async def recognize_single_image(
     image: ImageInput,
     client: GLM46VClient,
     prompt: str,
-) -> tuple[list[SheetRecognition], str | None]:
-    """识别单张照片，返回识别行与可读总结；失败返回 (空列表, 错误文本)。"""
+) -> tuple[list[SheetRecognition], str, str | None]:
+    """识别单张照片，返回 ``(识别行, 总结, 失败原因)``。
+
+    ``失败原因`` 非 None 表示调用或解析级失败（由上层降级，不中断其他照片）；
+    为 None 但行数为空表示识别成功但未找到图纸编号（同样不算失败）。
+    """
 
     try:
         result = await client.analyze_images([image], prompt=prompt)
     except GLM46VError as exc:
-        return [], f"视觉识别失败：{exc}"
+        return [], "", f"视觉识别失败：{exc}"
     except Exception as exc:  # noqa: BLE001 - 单张降级需兼容未知网络/客户端错误。
         LOGGER.exception("GLM 视觉识别出现未预期错误")
-        return [], f"视觉识别出现未预期错误：{exc}"
+        return [], "", f"视觉识别出现未预期错误：{exc}"
 
     content = str(result.get("content") or "").strip()
     if not content:
-        return [], "视觉模型没有返回识别结果"
+        return [], "", "视觉模型没有返回识别结果"
     rows, summary = _parse_glm_output(content, source_image=image.name)
-    return rows, summary
+    return rows, summary, None
 
 
 def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRecognition], str]:
-    """把 GLM 的输出解析成结构化的识别行与总结文本。
+    """从 GLM 输出中提取全部 ``编号|第N层|第M位`` 记录。
 
-    优先按 ``[编号]|[层]|[位]|[备注]`` 解析；无法按行解析时把全文作为总结，
-    不产出任何识别行，由上层标注为需要人工复核。
+    使用正则 ``finditer`` 一次扫描整段文本（不依赖换行），编号去除方括号等杂质；
+    位号之后到下一条记录之间的文本作为备注，清洗掉方括号与分隔符。
     """
 
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
     parsed: list[SheetRecognition] = []
-    free_text: list[str] = []
-    for line in lines:
-        cleaned = line.lstrip("-*· ").strip()
-        if not cleaned:
-            continue
-        parts = [part.strip() for part in cleaned.split("|")]
-        if len(parts) >= 3 and parts[0]:
-            sheet_no = parts[0]
-            if not sheet_no.replace(".", "", 1).isdigit() and not sheet_no.isalnum():
-                free_text.append(cleaned)
-                continue
-            parsed.append(
-                SheetRecognition(
-                    sheet_no=sheet_no,
-                    row=parts[1] or "未知层",
-                    col=parts[2] or "未知位",
-                    source_image=source_image,
-                    note=parts[3] if len(parts) > 3 else "",
-                )
-            )
-            if len(parsed) >= MAX_RECOGNITIONS_PER_IMAGE:
-                break
+    matches = list(_RECORD_PATTERN.finditer(content))
+    for index, match in enumerate(matches):
+        sheet_no = match.group(1)
+        row_number = int(match.group(2))
+        col_number = int(match.group(3))
+        note = ""
+        if index + 1 < len(matches):
+            between = content[match.end() : matches[index + 1].start()]
         else:
-            free_text.append(cleaned)
+            between = content[match.end() :]
+        cleaned = re.sub(r"[\[\]|｜·\s]", "", between)
+        if cleaned and cleaned != sheet_no:
+            note = cleaned
+        parsed.append(
+            SheetRecognition(
+                sheet_no=sheet_no,
+                row=f"第{row_number}层",
+                col=f"第{col_number}位",
+                source_image=source_image,
+                note=note,
+            )
+        )
+        if len(parsed) >= MAX_RECOGNITIONS_PER_IMAGE:
+            break
 
     if not parsed:
         summary = content
     else:
         summary = f"照片 {source_image} 识别到 {len(parsed)} 个图纸编号"
-    if free_text:
-        summary = f"{summary}\n" + "\n".join(free_text[:10])
     return parsed, summary
 
 
