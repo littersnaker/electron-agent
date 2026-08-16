@@ -449,8 +449,10 @@ def _split_into_bands(
     glm-4v-flash 的输出上限只有 1024 token，一口气输出 6 层会在第 3~4 层
     自行停止；切成两段后每段 2~4 层，输出预算充足。重叠段用于避免
     正好落在切分线上的标签被裁断，层号在合并时统一偏移。
-    切分位置可用环境变量 ``IMAGE_SPLIT_RATIO`` 调整（0~1，默认 0.55，
-    表示上段占图高 55%）；货架层高分布不均时调它避免切穿某一层。
+    切分位置可用环境变量 ``IMAGE_SPLIT_RATIO`` 调整（0~1，默认 0.46，
+    表示上段占图高 46%）；货架层高分布不均时调它避免切穿某一层。
+    常见货架"上段多层层高更扁、下段层高更高"，0.55 会把下半段多算一层
+    （叠放货物的视觉层次被当成层），0.46 更贴近上 4 层/下 2 层的布局。
     """
 
     import base64 as b64
@@ -459,7 +461,7 @@ def _split_into_bands(
     from PIL import Image as PILImage
 
     if top_ratio is None:
-        top_ratio = float(os.getenv("IMAGE_SPLIT_RATIO", "0.55"))
+        top_ratio = float(os.getenv("IMAGE_SPLIT_RATIO", "0.46"))
     top_ratio = min(0.9, max(0.1, top_ratio))
     raw = b64.b64decode(image.data)
     img = PILImage.open(io.BytesIO(raw)).convert("RGB")
