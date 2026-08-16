@@ -24,11 +24,12 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class RecognizedRow(BaseModel):
-    """LLM 整理后的单行图纸记录。"""
+    """LLM 整理后的单行图纸记录（三维货架坐标）。"""
 
     sheetNo: str
-    row: str = ""
-    col: str = ""
+    layer: int = 1
+    position: int = 1
+    stack: int = 1
     sourceImage: str = ""
     note: str = ""
 
@@ -40,15 +41,16 @@ class StructuredRows(BaseModel):
 
 
 _STRUCTURING_SYSTEM_PROMPT = """你是表格整理助手。下面是一份货架图纸识别结果，每行格式为
-“[编号]|[所在层]|[所在位]|[备注]”，也可能包含“未检测到货架图纸”等说明。
+“编号|层号|货位号|叠放排号|来源照片|备注”，也可能包含“未检测到货架图纸”等说明。
 
 请把它整理成 JSON 数组，数组元素字段：
-- sheetNo：图纸编号（去掉前导零之外的杂质，如“003”保持“003”）
-- row：所在层（如“第1层”）
-- col：所在位（如“第2位”）
+- sheetNo：图纸编号（如“003”）
+- layer：货架层号（整数，1 = 最下层）
+- position：层内货位序号（整数，1 = 最左）
+- stack：同一货位叠放排号（整数，1 = 最下；无叠放时也是 1）
 - sourceImage：来源照片文件名
 - note：备注（如“编号无法辨认”），没有则留空字符串
-- 空位不要输出；无法辨认编号的货位也要输出，note 标“编号无法辨认”
+- 无法辨认编号的货位也要输出，note 标“编号无法辨认”
 
 只输出 JSON 数组本身，不要 Markdown 围栏、不要解释。"""
 
@@ -65,7 +67,8 @@ async def structure_rows(
     if not available:
         return _deterministic_rows(raw_rows)
     lines = [
-        f"{item.sheet_no}|{item.row}|{item.col}|{item.source_image}|{item.note}"
+        f"{item.sheet_no}|{item.layer}|{item.position}|{item.stack}|"
+        f"{item.source_image}|{item.note}"
         for item in raw_rows
     ]
     user_prompt = "识别结果如下：\n" + "\n".join(lines)
@@ -103,8 +106,9 @@ def _rows_from_model(items: list[RecognizedRow]) -> list[SheetRecognition]:
         result.append(
             SheetRecognition(
                 sheet_no=sheet_no,
-                row=item.row.strip() or "未知层",
-                col=item.col.strip() or "未知位",
+                layer=max(1, int(item.layer)),
+                position=max(1, int(item.position)),
+                stack=max(1, int(item.stack)),
                 source_image=item.sourceImage.strip(),
                 note=item.note.strip(),
             )
@@ -112,27 +116,21 @@ def _rows_from_model(items: list[RecognizedRow]) -> list[SheetRecognition]:
     return result
 
 
-def _position_number(value: str) -> int:
-    """从“第10层/第2位/排3”中提取数字用于数值排序，避免字典序把第10排到第2前。"""
-
-    match = __import__("re").search(r"\d+", value or "")
-    return int(match.group(0)) if match else 0
-
-
 def _deterministic_rows(raw_rows: list[SheetRecognition]) -> list[SheetRecognition]:
-    """确定性兜底：按层/排数值排序、去重（同编号同位置保留一条）。"""
+    """确定性兜底：按层/位/叠放排数值排序、去重（同编号同位置保留一条）。"""
 
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, int, int, int]] = set()
     result: list[SheetRecognition] = []
     for item in sorted(
         raw_rows,
         key=lambda entry: (
-            _position_number(entry.row),
-            _position_number(entry.col),
+            entry.layer,
+            entry.position,
+            entry.stack,
             entry.sheet_no,
         ),
     ):
-        key = (item.sheet_no, item.row, item.col)
+        key = (item.sheet_no, item.layer, item.position, item.stack)
         if key in seen:
             continue
         seen.add(key)

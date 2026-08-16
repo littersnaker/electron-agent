@@ -28,15 +28,6 @@ export type Message = {
   imageResult?: ImageRecognitionResult;
 };
 
-/** 图片识别 Agent 的单行识别结果。 */
-export type ImageRecognitionRow = {
-  sheetNo: string;
-  row: string;
-  col: string;
-  sourceImage: string;
-  note: string;
-};
-
 /** 图片识别 Agent 的失败照片记录。 */
 export type ImageRecognitionFailure = {
   imageName: string;
@@ -45,9 +36,27 @@ export type ImageRecognitionFailure = {
   kind: "rate_limited" | "quality" | "other";
 };
 
-/** 图片识别 Agent 的结构化结果。 */
+/** 图片识别 Agent 的单个货位格子（看不清/不确定时不存在 → 前端留空）。 */
+export type ImageRecognitionCell = {
+  sheetNo: string;
+  sourceImage: string;
+  note: string;
+};
+
+/** 图片识别 Agent 的一层货架网格。 */
+export type ImageRecognitionLayer = {
+  layer: number;
+  /** 叠放排数（矩阵行数）。 */
+  maxStack: number;
+  /** 货位数（矩阵列数）。 */
+  maxPosition: number;
+  /** cells[stack-1][position-1]；null = 看不清/不确定（前端渲染为空）。 */
+  cells: Array<Array<ImageRecognitionCell | null>>;
+};
+
+/** 图片识别 Agent 的结构化结果（按层分组的货架网格）。 */
 export type ImageRecognitionResult = {
-  rows: ImageRecognitionRow[];
+  layers: ImageRecognitionLayer[];
   failures: ImageRecognitionFailure[];
   summary: string;
   excelFileName: string;

@@ -130,8 +130,9 @@ def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRec
         parsed.append(
             SheetRecognition(
                 sheet_no=sheet_no,
-                row=f"第{row_number}层",
-                col=f"第{col_number}位",
+                layer=row_number,
+                position=col_number,
+                stack=1,
                 source_image=source_image,
                 note=note,
             )

@@ -1,7 +1,8 @@
-"""把识别结果导出为 openpyxl 生成的 Excel 长表。
+"""把识别结果导出为 openpyxl 生成的 Excel 货架矩阵。
 
-表格字段：图纸编号 | 所在层 | 所在位 | 排位 | 来源照片 | 备注。识别失败的图片单独
-记录在“识别失败清单”工作表，方便用户补拍后重跑。
+主工作表按货架网格布局：每个层一个区块，区块内每行是一个叠放排、每列是一个
+货位，格子为编号或留空（看不清/不确定的位置留空）。识别失败的图片单独记录在
+“识别失败清单”工作表。
 
 所有写入单元格的文本都会先清洗 XML 非法控制字符（GLM 识别文本可能夹杂
 \\x00-\\x08 等字符，直接写入会让 xlsx 损坏、WPS/Excel 打不开）。
@@ -12,6 +13,8 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from pathlib import Path
+
+from openpyxl.utils import get_column_letter
 
 from backend.services.image.models import ImageRecognitionFailure, SheetRecognition
 
@@ -55,12 +58,15 @@ def write_recognition_excel(
     failures: list[ImageRecognitionFailure],
     summary: str,
 ) -> Path:
-    """生成 Excel 文件并返回其路径。"""
+    """生成 Excel 文件并返回其路径。
+
+    主工作表按货架网格布局：每个层一个区块，区块内每一行是一个叠放排，
+    每一列是一个货位，格子为编号或留空（看不清/不确定的位置留空）。
+    """
 
     try:
         from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Font, PatternFill
-        from openpyxl.utils import get_column_letter
+        from openpyxl.styles import Font, PatternFill
     except ImportError as exc:  # pragma: no cover - 构建环境必带 openpyxl
         raise RuntimeError(
             "图片识别导出 Excel 依赖缺失（"
@@ -74,30 +80,55 @@ def write_recognition_excel(
     workbook = Workbook()
 
     if rows:
+        from backend.services.image.models import build_layers
+
         sheet = workbook.active
         sheet.title = "图纸编号"
-        headers = ["图纸编号", "所在层", "所在排", "来源照片", "备注"]
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="4472C4")
-        for column, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=1, column=column, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        for row_index, item in enumerate(rows, start=2):
-            values = [
-                clean_cell_text(item.sheet_no),
-                clean_cell_text(item.row),
-                clean_cell_text(item.col),
-                clean_cell_text(item.source_image),
-                clean_cell_text(item.note),
-            ]
-            for column, value in enumerate(values, start=1):
-                sheet.cell(row=row_index, column=column, value=value)
-        for column in range(1, len(headers) + 1):
-            sheet.column_dimensions[get_column_letter(column)].width = 16
+        board_font = Font(bold=True, color="FFFFFF")
+        board_fill = PatternFill("solid", fgColor="70AD47")
+        cursor = 1
+        for layer_block in build_layers(rows):
+            layer = int(layer_block["layer"])
+            max_stack = int(layer_block["maxStack"])
+            max_position = int(layer_block["maxPosition"])
+            cells = layer_block["cells"]  # list[list[dict | None]]  [stack][position]
+
+            # 层标题
+            board = sheet.cell(row=cursor, column=1, value=f"第{layer}层")
+            board.font = board_font
+            board.fill = board_fill
+            cursor += 1
+
+            # 表头：货位
+            sheet.cell(row=cursor, column=1, value="货位")
+            for position in range(1, max_position + 1):
+                header = sheet.cell(row=cursor, column=1 + position, value=f"第{position}位")
+                header.font = header_font
+                header.fill = header_fill
+            cursor += 1
+
+            # 每排一行：格子为编号或留空（看不清/不确定）
+            for stack_index in range(max_stack):
+                stack_label = sheet.cell(row=cursor, column=1, value=f"排{stack_index + 1}")
+                stack_label.font = header_font
+                stack_label.fill = header_fill
+                row_cells = cells[stack_index] if stack_index < len(cells) else []
+                for position in range(1, max_position + 1):
+                    value = None
+                    if position - 1 < len(row_cells):
+                        cell = row_cells[position - 1]
+                        if cell is not None:
+                            value = clean_cell_text(cell["sheetNo"])
+                    if value is not None:
+                        sheet.cell(row=cursor, column=1 + position, value=value)
+                cursor += 1
+            cursor += 1  # 层之间的空行分隔
+
+        for column in range(1, 40):
+            sheet.column_dimensions[get_column_letter(column)].width = 10
         sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
     else:
         # 无识别结果时第一个工作表给明确说明，避免打开只见空表头。
         notice = workbook.active

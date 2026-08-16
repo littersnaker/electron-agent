@@ -463,7 +463,7 @@ export function useChatStream({
                 packet.type === "IMAGE_RESULT" &&
                 packet.payload &&
                 typeof packet.payload === "object" &&
-                "rows" in packet.payload &&
+                "layers" in packet.payload &&
                 "failures" in packet.payload
               ) {
                 imageResultRef.current = packet.payload as Message["imageResult"];

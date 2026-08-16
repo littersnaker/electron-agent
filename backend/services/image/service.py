@@ -91,39 +91,36 @@ def _rows_from_boxes(
 ) -> tuple[list[SheetRecognition], list[ImageRecognitionFailure]]:
     """把定位框与识别编号组装成识别行；未识别编号记入失败清单。
 
-    每层内按 (列, 排位) 排序后连续编号为“第N排”：同一货位叠放的货物
-    自然得到 第1排/第2排/第3排…（第一层第一排、第一层第二排…）。
+    坐标直接映射：layer=TagBox.row、position=TagBox.col（货位）、
+    stack=TagBox.rank（叠放排）。未识别编号的格子不出现在 rows 中，
+    前端矩阵按 maxStack×maxPosition 渲染时对应格子留空。
     """
-
-    by_row: dict[int, list[tuple[TagBox, str | None]]] = {}
-    for box, number in zip(boxes, numbers, strict=False):
-        by_row.setdefault(box.row, []).append((box, number))
 
     rows: list[SheetRecognition] = []
     failures: list[ImageRecognitionFailure] = []
-    for row_index in sorted(by_row):
-        entries = sorted(
-            by_row[row_index],
-            key=lambda pair: (pair[0].col, pair[0].rank),
-        )
-        for position, (_box, number) in enumerate(entries, start=1):
-            if number is None:
-                failures.append(
-                    ImageRecognitionFailure(
-                        image_name=source_image,
-                        reason=f"标签（第{row_index}层 第{position}排）编号无法辨认",
-                        kind="quality",
-                    )
-                )
-                continue
-            rows.append(
-                SheetRecognition(
-                    sheet_no=number,
-                    row=f"第{row_index}层",
-                    col=f"第{position}排",
-                    source_image=source_image,
+    for box, number in zip(boxes, numbers, strict=False):
+        if number is None:
+            failures.append(
+                ImageRecognitionFailure(
+                    image_name=source_image,
+                    reason=(
+                        f"第{box.row}层 第{box.col}位"
+                        + (f" 第{box.rank}排" if box.rank > 1 else "")
+                        + " 编号无法辨认（已留空）"
+                    ),
+                    kind="quality",
                 )
             )
+            continue
+        rows.append(
+            SheetRecognition(
+                sheet_no=number,
+                layer=box.row,
+                position=box.col,
+                stack=box.rank,
+                source_image=source_image,
+            )
+        )
     return rows, failures
 
 

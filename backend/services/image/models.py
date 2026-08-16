@@ -7,28 +7,19 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True, slots=True)
 class SheetRecognition:
-    """货架识别结果中的一行：某个图纸编号的位置。
+    """货架识别结果中的单个图纸编号，携带三维货架坐标。
 
-    ``row`` 为层（第N层，从下到上），``col`` 为排（第N排，层内连续编号；
-    同一货位叠放的货物按上→下顺序连续编号，即“第一层第一排/第二排/第三排”）。
+    - ``layer``：货架层号（1 = 最下层，从下到上）
+    - ``position``：层内货位序号（1 = 最左，从左到右）
+    - ``stack``：同一货位内叠放排号（1 = 最下，叠放货物上下编号）
     """
 
     sheet_no: str
-    row: str
-    col: str
-    source_image: str
+    layer: int = 1
+    position: int = 1
+    stack: int = 1
+    source_image: str = ""
     note: str = ""
-
-    def to_json(self) -> dict[str, str]:
-        """转换为前端可消费的 JSON。"""
-
-        return {
-            "sheetNo": self.sheet_no,
-            "row": self.row,
-            "col": self.col,
-            "sourceImage": self.source_image,
-            "note": self.note,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +44,43 @@ class ImageRecognitionFailure:
         }
 
 
+def build_layers(rows: list[SheetRecognition]) -> list[dict[str, object]]:
+    """把识别行组装成按层分组的货架网格。
+
+    每个层输出 ``maxStack × maxPosition`` 的 cells 二维数组
+    （``cells[stack-1][position-1]``）；格子为 ``None`` 表示该位置
+    没有识别出编号（看不清/不确定，前端渲染为空）。
+    """
+
+    layers_map: dict[int, list[SheetRecognition]] = {}
+    for row in rows:
+        layers_map.setdefault(row.layer, []).append(row)
+
+    layers: list[dict[str, object]] = []
+    for layer in sorted(layers_map):
+        layer_rows = layers_map[layer]
+        max_stack = max(item.stack for item in layer_rows)
+        max_position = max(item.position for item in layer_rows)
+        cells: list[list[dict[str, str] | None]] = [
+            [None] * max_position for _ in range(max_stack)
+        ]
+        for item in layer_rows:
+            cells[item.stack - 1][item.position - 1] = {
+                "sheetNo": item.sheet_no,
+                "sourceImage": item.source_image,
+                "note": item.note,
+            }
+        layers.append(
+            {
+                "layer": layer,
+                "maxStack": max_stack,
+                "maxPosition": max_position,
+                "cells": cells,
+            }
+        )
+    return layers
+
+
 @dataclass(slots=True)
 class RecognitionOutcome:
     """一次图片识别会话的完整结果。"""
@@ -65,7 +93,7 @@ class RecognitionOutcome:
 
     def to_json(self) -> dict[str, object]:
         return {
-            "rows": [item.to_json() for item in self.rows],
+            "layers": build_layers(self.rows),
             "failures": [item.to_json() for item in self.failures],
             "summary": self.summary,
             "excelFileName": self.excel_file_name,
@@ -77,4 +105,5 @@ __all__ = [
     "ImageRecognitionFailure",
     "RecognitionOutcome",
     "SheetRecognition",
+    "build_layers",
 ]

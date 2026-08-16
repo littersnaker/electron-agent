@@ -194,7 +194,7 @@ def _assign_grid_with_boards(
     board_ys: list[float],
     image_height: int,
 ) -> list[TagBox]:
-    """用层板位置把图片分成若干条带，每条带为一层，层内连续编号排位。"""
+    """用层板位置把图片分成若干条带；层内 x 聚类货位，同货位 y 排序叠放排。"""
 
     boundaries = [0.0, *[float(value) for value in board_ys], float(image_height)]
     bands: dict[int, list[tuple[int, int, int, int]]] = {}
@@ -205,20 +205,37 @@ def _assign_grid_with_boards(
 
     tagged: list[TagBox] = []
     for band_index, band_boxes in sorted(bands.items()):
-        band_boxes = sorted(band_boxes, key=lambda box: (box[0] + box[2] / 2, box[1]))
-        # 条带自下而上编号，最下面为第 1 层；层内按 (x, y) 连续编号排位。
-        for position, box in enumerate(band_boxes, start=1):
-            tagged.append(
-                TagBox(
-                    x=box[0],
-                    y=box[1],
-                    w=box[2],
-                    h=box[3],
-                    row=len(bands) - band_index,
-                    col=position,
-                    rank=1,
+        band_boxes = sorted(band_boxes, key=lambda box: box[0] + box[2] / 2)
+        widths = sorted(box[2] for box in band_boxes)
+        median_w = widths[len(widths) // 2] if widths else 40
+        col_gap = max(8.0, median_w * COL_GAP_FACTOR)
+        positions: list[list[tuple[int, int, int, int]]] = []
+        current: list[tuple[int, int, int, int]] = []
+        previous_cx: float | None = None
+        for box in band_boxes:
+            cx = box[0] + box[2] / 2
+            if previous_cx is None or cx - previous_cx <= col_gap:
+                current.append(box)
+            else:
+                positions.append(current)
+                current = [box]
+            previous_cx = cx
+        if current:
+            positions.append(current)
+        for position_index, position_boxes in enumerate(positions, start=1):
+            position_boxes = sorted(position_boxes, key=lambda box: box[1])
+            for rank, box in enumerate(position_boxes, start=1):
+                tagged.append(
+                    TagBox(
+                        x=box[0],
+                        y=box[1],
+                        w=box[2],
+                        h=box[3],
+                        row=len(bands) - band_index,
+                        col=position_index,
+                        rank=rank,
+                    )
                 )
-            )
     return tagged
 
 

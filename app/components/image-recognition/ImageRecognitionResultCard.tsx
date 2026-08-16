@@ -1,11 +1,11 @@
-// 模块说明：图片识别结果卡片（货架矩阵 + 来源 + 失败清单 + Excel 下载）。
+// 模块说明：图片识别结果卡片（货架矩阵 层×叠放排×货位 + 失败清单 + Excel 下载）。
 "use client";
 
 import { useMemo } from "react";
 import type {
   ImageRecognitionFailure,
+  ImageRecognitionLayer,
   ImageRecognitionResult,
-  ImageRecognitionRow,
 } from "../../constants/page-constants";
 
 const COLORS = {
@@ -20,68 +20,125 @@ const COLORS = {
   red: "var(--accent-red)",
 };
 
-/** 把“第1层”/“第2排”这类中文序号统一成排序可用的数字键。 */
-function indexOfChinesePosition(value: string): number {
-  const match = /第\s*(\d+)\s*[层排位]/.exec(value || "");
-  return match ? Number.parseInt(match[1], 10) : 0;
-}
+/** 一层货架网格：每行一个叠放排、每列一个货位，看不清的格子留空。 */
+function LayerGrid({ layer }: { layer: ImageRecognitionLayer }) {
+  const maxStack = Math.max(1, layer.maxStack);
+  const maxPosition = Math.max(1, layer.maxPosition);
 
-/** 按层号、排号排序识别行，保证展示与 Excel 顺序一致。 */
-function sortedRows(rows: ImageRecognitionRow[]): ImageRecognitionRow[] {
-  return [...rows].sort(
-    (a, b) =>
-      indexOfChinesePosition(a.row) - indexOfChinesePosition(b.row) ||
-      indexOfChinesePosition(a.col) - indexOfChinesePosition(b.col) ||
-      a.sheetNo.localeCompare(b.sheetNo, "zh-CN"),
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-center">
+        <thead>
+          <tr>
+            <th
+              className="border px-1.5 py-1 text-[10px] font-semibold"
+              style={{ borderColor: COLORS.border, color: COLORS.textSubtle }}
+            >
+              排 \\ 位
+            </th>
+            {Array.from({ length: maxPosition }, (_, index) => (
+              <th
+                key={index}
+                className="border px-1.5 py-1 text-[10px] font-semibold"
+                style={{ borderColor: COLORS.border, color: COLORS.textSubtle }}
+              >
+                {index + 1}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: maxStack }, (_, stackIndex) => {
+            const row = stackIndex + 1;
+            return (
+              <tr key={row}>
+                <td
+                  className="border px-1.5 py-1 text-[10px] font-semibold"
+                  style={{ borderColor: COLORS.border, color: COLORS.textSubtle }}
+                >
+                  排{row}
+                </td>
+                {Array.from({ length: maxPosition }, (_, positionIndex) => {
+                  const cell = layer.cells?.[stackIndex]?.[positionIndex];
+                  if (!cell) {
+                    return (
+                      <td
+                        key={positionIndex}
+                        className="border px-1.5 py-1.5"
+                        style={{
+                          borderColor: COLORS.border,
+                          background: "color-mix(in srgb, var(--app-bg) 55%, transparent)",
+                        }}
+                      />
+                    );
+                  }
+                  return (
+                    <td
+                      key={positionIndex}
+                      className="border px-1.5 py-1.5"
+                      style={{
+                        borderColor: COLORS.border,
+                        background: "color-mix(in srgb, var(--accent-blue-soft) 55%, transparent)",
+                      }}
+                      title={`${cell.sheetNo} · ${cell.sourceImage}${cell.note ? ` · ${cell.note}` : ""}`}
+                    >
+                      <span className="text-[13px] font-semibold tracking-[-0.01em]" style={{ color: COLORS.blue }}>
+                        {cell.sheetNo}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-/** 按层分组、层内按排连续编号的列表式渲染（与 Excel“第N层 第M排”一致）。 */
-function ShelfGrid({ rows }: { rows: ImageRecognitionRow[] }) {
-  const sorted = useMemo(() => sortedRows(rows), [rows]);
-  const grouped = useMemo(() => {
-    const map = new Map<number, ImageRecognitionRow[]>();
-    for (const row of sorted) {
-      const layer = indexOfChinesePosition(row.row);
-      if (!map.has(layer)) map.set(layer, []);
-      map.get(layer)!.push(row);
-    }
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
-  }, [sorted]);
+function ShelfGrid({ layers }: { layers: ImageRecognitionLayer[] }) {
+  const sorted = useMemo(
+    () => [...layers].sort((a, b) => a.layer - b.layer),
+    [layers],
+  );
+  const totalSheets = useMemo(
+    () =>
+      sorted.reduce(
+        (sum, layer) =>
+          sum +
+          layer.cells.reduce(
+            (inner, row) => inner + row.filter((cell) => cell !== null).length,
+            0,
+          ),
+        0,
+      ),
+    [sorted],
+  );
 
   return (
     <div className="space-y-2">
-      {grouped.map(([layer, layerRows]) => (
+      {sorted.map((layer) => (
         <div
-          key={layer}
+          key={layer.layer}
           className="rounded-[12px] border px-3 py-2"
-          style={{ borderColor: COLORS.border, background: "color-mix(in srgb, var(--glass) 45%, transparent)" }}
+          style={{
+            borderColor: COLORS.border,
+            background: "color-mix(in srgb, var(--glass) 45%, transparent)",
+          }}
         >
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: COLORS.textSubtle }}>
-            第{layer}层
+          <div
+            className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em]"
+            style={{ color: COLORS.textSubtle }}
+          >
+            第{layer.layer}层
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {layerRows.map((item) => (
-              <span
-                key={`${item.sheetNo}-${item.col}`}
-                className="inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-[12px] font-semibold tracking-[-0.01em]"
-                style={{
-                  color: COLORS.text,
-                  background: "color-mix(in srgb, var(--accent-blue-soft-strong) 45%, transparent)",
-                  borderColor: "color-mix(in srgb, var(--accent-blue) 32%, transparent)",
-                }}
-                title={`${item.sheetNo} · ${item.row}${item.col}${item.note ? ` · ${item.note}` : ""} · ${item.sourceImage}`}
-              >
-                {item.col}
-                <span className="text-[13px]" style={{ color: COLORS.blue }}>
-                  {item.sheetNo}
-                </span>
-                {item.note && <span className="text-[9px] font-normal" style={{ color: COLORS.amber }}>{item.note}</span>}
-              </span>
-            ))}
-          </div>
+          <LayerGrid layer={layer} />
         </div>
       ))}
+      <div className="text-[10px]" style={{ color: COLORS.textSubtle }}>
+        共 {totalSheets} 个编号；看不清/不确定的位置已留空。
+      </div>
     </div>
   );
 }
@@ -104,11 +161,11 @@ function FailureList({ failures }: { failures: ImageRecognitionFailure[] }) {
       >
         {rateLimited
           ? "⚠️ 部分照片因模型限流未识别（免费模型访问量大，稍后重试即可）"
-          : `⚠️ ${failures.length} 张照片识别失败（已跳过，未影响其他照片）`}
+          : `⚠️ ${failures.length} 处未识别（已留空，未影响其他位置）`}
       </div>
       <ul className="mt-1.5 space-y-1">
         {failures.map((failure) => (
-          <li key={failure.imageName} className="flex gap-2 text-[11px]" style={{ color: COLORS.textMuted }}>
+          <li key={`${failure.imageName}-${failure.reason}`} className="flex gap-2 text-[11px]" style={{ color: COLORS.textMuted }}>
             <span className="shrink-0 font-medium" style={{ color: COLORS.text }}>
               {failure.imageName}
             </span>
@@ -130,10 +187,18 @@ export default function ImageRecognitionResultCard({
 }: {
   result: ImageRecognitionResult;
 }) {
-  const sorted = useMemo(() => sortedRows(result.rows), [result.rows]);
-  const sourceCount = useMemo(
-    () => new Set(sorted.map((row) => row.sourceImage).filter(Boolean)).size,
-    [sorted],
+  const totalSheets = useMemo(
+    () =>
+      result.layers.reduce(
+        (sum, layer) =>
+          sum +
+          layer.cells.reduce(
+            (inner, row) => inner + row.filter((cell) => cell !== null).length,
+            0,
+          ),
+        0,
+      ),
+    [result.layers],
   );
 
   return (
@@ -144,7 +209,7 @@ export default function ImageRecognitionResultCard({
             📷 货架图纸识别
           </span>
           <span className="text-[10px]" style={{ color: COLORS.textSubtle }}>
-            {sorted.length} 个编号 · {sourceCount} 张照片
+            {totalSheets} 个编号 · {result.layers.length} 层
           </span>
         </div>
         {result.excelDownloadUrl && (
@@ -164,8 +229,8 @@ export default function ImageRecognitionResultCard({
         )}
       </div>
 
-      {sorted.length > 0 ? (
-        <ShelfGrid rows={sorted} />
+      {result.layers.length > 0 ? (
+        <ShelfGrid layers={result.layers} />
       ) : (
         <div className="rounded-[12px] border px-3 py-2.5 text-[11px]" style={{ borderColor: COLORS.border, color: COLORS.textMuted }}>
           未识别到图纸编号。

@@ -115,8 +115,8 @@ async def test_recognize_single_image_parses_pipe_rows() -> None:
     assert error is None
     assert len(rows) == 1  # 005 标注无法辨认，不确定的编号不输出
     assert rows[0].sheet_no == "003"
-    assert rows[0].row == "第1层"
-    assert rows[0].col == "第2位"
+    assert rows[0].layer == 1
+    assert rows[0].position == 2
     assert rows[0].source_image == "shelf_a.jpg"
     assert "识别到 1 个图纸编号" in summary
 
@@ -138,9 +138,9 @@ async def test_recognize_single_image_parses_real_glm_output() -> None:
     assert error is None
     assert len(rows) == 6
     assert [item.sheet_no for item in rows] == ["325", "89", "302", "386", "88", "734"]
-    assert rows[0].row == "第1层"
-    assert rows[0].col == "第1位"
-    assert rows[-1].col == "第6位"
+    assert rows[0].layer == 1
+    assert rows[0].position == 1
+    assert rows[-1].position == 6
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ def test_merge_recognitions_keeps_successes_and_failures() -> None:
         [
             (
                 "a.jpg",
-                [SheetRecognition("001", "第1层", "第1位", "a.jpg")],
+                [SheetRecognition("001", layer=1, position=1, stack=1, source_image="a.jpg")],
                 None,
             ),
             ("b.jpg", [], "视觉识别失败：mock"),
@@ -216,17 +216,17 @@ def test_classify_failure_kind() -> None:
 # ---------- structuring ----------
 
 
-def test_deterministic_rows_sorts_by_layer_then_row() -> None:
+def test_deterministic_rows_sorts_by_layer_then_position() -> None:
     rows = _deterministic_rows(
         [
-            SheetRecognition("010", "第10层", "第1排", "a.jpg"),
-            SheetRecognition("002", "第2层", "第1排", "a.jpg"),
-            SheetRecognition("001", "第1层", "第1排", "a.jpg"),
-            SheetRecognition("010", "第2层", "第1排", "b.jpg"),  # 重复
+            SheetRecognition("010", layer=10, position=1, stack=1, source_image="a.jpg"),
+            SheetRecognition("002", layer=2, position=1, stack=1, source_image="a.jpg"),
+            SheetRecognition("001", layer=1, position=1, stack=1, source_image="a.jpg"),
+            SheetRecognition("010", layer=2, position=1, stack=1, source_image="b.jpg"),  # 重复
         ]
     )
     # 数值排序：第10层排在第2层之后，而不是字典序排到前面；
-    # 第2层第1排的 010（b.jpg）与 a.jpg 重复被去重。
+    # 第2层第1位的 010（b.jpg）与 a.jpg 重复被去重。
     assert [item.sheet_no for item in rows] == ["001", "002", "010", "010"]
     assert len(rows) == 4
 
@@ -237,8 +237,8 @@ async def test_structure_rows_falls_back_without_credentials() -> None:
         credentials=None,
         preferred_model_id="auto",
         raw_rows=[
-            SheetRecognition("002", "第1层", "第3排", "a.jpg"),
-            SheetRecognition("001", "第1层", "第1排", "a.jpg"),
+            SheetRecognition("002", layer=1, position=3, stack=1, source_image="a.jpg"),
+            SheetRecognition("001", layer=1, position=1, stack=1, source_image="a.jpg"),
         ],
     )
     assert [item.sheet_no for item in rows] == ["001", "002"]  # 确定性排序
@@ -253,7 +253,7 @@ async def test_structure_rows_uses_llm_when_available(monkeypatch) -> None:
     async def fake_complete(*, preferred_model_id, credentials, messages, **kwargs):
         captured["model"] = preferred_model_id
         return (
-            '[{"sheetNo":"003","row":"第1层","col":"第2位","sourceImage":"a.jpg","note":""}]',
+            '[{"sheetNo":"003","layer":1,"position":2,"stack":1,"sourceImage":"a.jpg","note":""}]',
             object(),
             "fake-model",
         )
@@ -264,7 +264,7 @@ async def test_structure_rows_uses_llm_when_available(monkeypatch) -> None:
         credentials=credentials,
         preferred_model_id="qwen-test",
         raw_rows=[
-            SheetRecognition("003", "第1层", "第2排", "a.jpg"),
+            SheetRecognition("003", layer=1, position=2, stack=1, source_image="a.jpg"),
         ],
     )
     assert captured["model"] == "qwen-test"
@@ -295,13 +295,16 @@ def test_clean_cell_text_strips_illegal_xml_characters() -> None:
 
 
 def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
+    """矩阵布局：层标题、货位表头、排行、编号与留空格子。"""
+
     from openpyxl import load_workbook
 
     target = write_recognition_excel(
         directory=tmp_path,
         rows=[
-            SheetRecognition("003\x00", "第1层", "第2排", "shelf_a.jpg", ""),
-            SheetRecognition("005", "第2层", "第3排", "shelf_a.jpg", "编号无法辨认"),
+            # 第1层：2 排（叠放）× 3 位，缺失格子留空
+            SheetRecognition("003\x00", layer=1, position=2, stack=1, source_image="shelf_a.jpg"),
+            SheetRecognition("005", layer=1, position=1, stack=2, source_image="shelf_a.jpg"),
         ],
         failures=[ImageRecognitionFailure("shelf_b.jpg", "视觉识别失败：mock")],
         summary="共识别 2 个图纸编号",
@@ -310,12 +313,19 @@ def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
     workbook = load_workbook(target)
     assert workbook.sheetnames == ["图纸编号", "识别失败清单", "识别总结"]
     sheet = workbook["图纸编号"]
-    assert sheet["A1"].value == "图纸编号"
-    assert sheet["A2"].value == "003"  # 清洗掉控制字符
-    assert sheet["B2"].value == "第1层"
-    assert sheet["C2"].value == "第2排"
-    assert sheet["D2"].value == "shelf_a.jpg"  # 来源照片列
-    assert sheet["E3"].value == "编号无法辨认"  # 第二行数据（005）的备注
+    # 行 1：第1层标题
+    assert sheet["A1"].value == "第1层"
+    # 行 2：货位表头（数据最大 position=2 → 只有第1位/第2位）
+    assert sheet["A2"].value == "货位"
+    assert sheet["B2"].value == "第1位"
+    assert sheet["C2"].value == "第2位"
+    # 行 3：排1（003 在 第2位）
+    assert sheet["A3"].value == "排1"
+    assert sheet["C3"].value == "003"  # 清洗掉控制字符
+    assert sheet["B3"].value is None  # 第1位留空
+    # 行 4：排2（005 在 第1位）
+    assert sheet["A4"].value == "排2"
+    assert sheet["B4"].value == "005"
     failure_sheet = workbook["识别失败清单"]
     assert failure_sheet["A2"].value == "shelf_b.jpg"
     assert workbook["识别总结"]["A1"].value == "共识别 2 个图纸编号"
@@ -380,7 +390,7 @@ async def test_stream_image_recognition_emits_sse_frames(monkeypatch, tmp_path) 
 
     async def fake_recognize(*, image, client, prompt):
         return (
-            [SheetRecognition("003", "第1层", "第2位", image.name)],
+            [SheetRecognition("003", layer=1, position=2, stack=1, source_image=image.name)],
             "识别到 1 个编号",
             None,
         )
