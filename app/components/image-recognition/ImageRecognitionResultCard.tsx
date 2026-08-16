@@ -20,6 +20,53 @@ const COLORS = {
   red: "var(--accent-red)",
 };
 
+const EMPTY_RESULT: ImageRecognitionResult = {
+  layers: [],
+  failures: [],
+  summary: "",
+  excelFileName: "",
+  excelDownloadUrl: "",
+};
+
+/**
+ * 归一化识别结果：SQLite 里可能保存着旧版本（rows 结构）或损坏的消息，
+ * 渲染前统一兜底，避免 result.layers 为 undefined 导致整页崩溃。
+ */
+function normalizeResult(result: ImageRecognitionResult | undefined): {
+  result: ImageRecognitionResult;
+  legacy: boolean;
+} {
+  if (!result || typeof result !== "object") {
+    return { result: EMPTY_RESULT, legacy: false };
+  }
+  const legacy = !Array.isArray((result as { layers?: unknown }).layers);
+  if (legacy) {
+    return { result: EMPTY_RESULT, legacy: true };
+  }
+  const safeLayers = (result.layers as ImageRecognitionLayer[]).map((layer) => ({
+    layer: Number(layer?.layer) || 0,
+    maxStack: Math.max(1, Number(layer?.maxStack) || 1),
+    maxPosition: Math.max(1, Number(layer?.maxPosition) || 1),
+    cells: Array.isArray(layer?.cells)
+      ? (layer.cells as ImageRecognitionLayer["cells"]).map((row) =>
+          Array.isArray(row) ? row : [],
+        )
+      : [],
+  }));
+  return {
+    result: {
+      layers: safeLayers,
+      failures: Array.isArray(result.failures) ? result.failures : [],
+      summary: typeof result.summary === "string" ? result.summary : "",
+      excelFileName:
+        typeof result.excelFileName === "string" ? result.excelFileName : "",
+      excelDownloadUrl:
+        typeof result.excelDownloadUrl === "string" ? result.excelDownloadUrl : "",
+    },
+    legacy: false,
+  };
+}
+
 /** 一层货架网格：每行一个叠放排、每列一个货位，看不清的格子留空。 */
 function LayerGrid({ layer }: { layer: ImageRecognitionLayer }) {
   const maxStack = Math.max(1, layer.maxStack);
@@ -187,9 +234,13 @@ export default function ImageRecognitionResultCard({
 }: {
   result: ImageRecognitionResult;
 }) {
+  const { result: safeResult, legacy } = useMemo(
+    () => normalizeResult(result),
+    [result],
+  );
   const totalSheets = useMemo(
     () =>
-      result.layers.reduce(
+      safeResult.layers.reduce(
         (sum, layer) =>
           sum +
           layer.cells.reduce(
@@ -198,8 +249,16 @@ export default function ImageRecognitionResultCard({
           ),
         0,
       ),
-    [result.layers],
+    [safeResult.layers],
   );
+
+  if (legacy) {
+    return (
+      <div className="mb-3 rounded-[12px] border px-3 py-2.5 text-[11px]" style={{ borderColor: COLORS.border, color: COLORS.textMuted }}>
+        ⚠️ 此结果来自旧版本格式，无法以矩阵展示。请重新上传照片识别一次。
+      </div>
+    );
+  }
 
   return (
     <div className="mb-3 space-y-3">
@@ -209,13 +268,13 @@ export default function ImageRecognitionResultCard({
             📷 货架图纸识别
           </span>
           <span className="text-[10px]" style={{ color: COLORS.textSubtle }}>
-            {totalSheets} 个编号 · {result.layers.length} 层
+            {totalSheets} 个编号 · {safeResult.layers.length} 层
           </span>
         </div>
-        {result.excelDownloadUrl && (
+        {safeResult.excelDownloadUrl && (
           <a
-            href={result.excelDownloadUrl}
-            download={result.excelFileName || undefined}
+            href={safeResult.excelDownloadUrl}
+            download={safeResult.excelFileName || undefined}
             className="inline-flex items-center gap-1.5 rounded-[10px] border px-3 py-1.5 text-[11px] font-semibold transition-all active:scale-[0.98]"
             style={{
               color: COLORS.text,
@@ -229,22 +288,22 @@ export default function ImageRecognitionResultCard({
         )}
       </div>
 
-      {result.layers.length > 0 ? (
-        <ShelfGrid layers={result.layers} />
+      {safeResult.layers.length > 0 ? (
+        <ShelfGrid layers={safeResult.layers} />
       ) : (
         <div className="rounded-[12px] border px-3 py-2.5 text-[11px]" style={{ borderColor: COLORS.border, color: COLORS.textMuted }}>
           未识别到图纸编号。
         </div>
       )}
 
-      <FailureList failures={result.failures} />
+      <FailureList failures={safeResult.failures} />
 
-      {result.summary && (
+      {safeResult.summary && (
         <div
           className="rounded-[12px] border px-3 py-2.5 text-[11px] whitespace-pre-wrap"
           style={{ borderColor: COLORS.border, color: COLORS.textMuted, background: COLORS.material }}
         >
-          {result.summary}
+          {safeResult.summary}
         </div>
       )}
     </div>
