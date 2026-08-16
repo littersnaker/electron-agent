@@ -37,7 +37,10 @@ NMS_IOU_THRESHOLD = float(os.getenv("IMAGE_LOCATE_NMS_IOU", "0.5"))
 # 并位、相邻货位（间距 >1.2×）分开。不同照片可用 env 微调。
 ROW_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_ROW_GAP", "1.3"))
 COL_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_COL_GAP", "1.2"))
-MIN_TAGS = int(os.getenv("IMAGE_LOCATE_MIN_TAGS", "5"))
+# 定位标签数低于该值时判定为"漏检严重"，放弃定位路径、回退整图 GLM 识别。
+# 默认 5 太宽松：斜拍/压缩照片只检出 10 个标签也会走定位，结果只有 4 层、
+# 内容大量缺失；提到 15 后，漏检过半的图会整图识别，层数覆盖更完整。
+MIN_TAGS = int(os.getenv("IMAGE_LOCATE_MIN_TAGS", "15"))
 PADDING_FACTOR = float(os.getenv("IMAGE_LOCATE_PADDING", "0.06"))
 # Otsu 阈值过低说明该通道几乎没有前景可分（如纯背景 S 通道全 0），跳过。
 # 真实照片中 S/灰度 Otsu 阈值通常几十，这里只拦截接近 0 的纯背景通道。

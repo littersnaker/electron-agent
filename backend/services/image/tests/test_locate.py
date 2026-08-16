@@ -55,9 +55,13 @@ def _image_with_tags(tags: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def test_locate_multicolor_tags() -> None:
+def test_locate_multicolor_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     """红/蓝/黄/白标签混合，全部应被定位且行列正确。"""
 
+    from backend.services.image import locate as locate_module
+
+    # 默认 MIN_TAGS=15，此用例只有 5 个标签，单独压低阈值测试定位本身。
+    monkeypatch.setattr(locate_module, "MIN_TAGS", 3)
     raw = _image_with_tags(
         [
             {"x": 120, "y": 120, "color": (220, 30, 30)},  # 红（顶层）
