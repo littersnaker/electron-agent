@@ -281,13 +281,26 @@ def test_excel_filename_safety() -> None:
     assert not is_safe_excel_filename("a/b.xlsx")
 
 
+def test_clean_cell_text_strips_illegal_xml_characters() -> None:
+    """GLM 识别文本夹杂的控制字符会让 xlsx 损坏，必须清洗。"""
+
+    from backend.services.image.excel import clean_cell_text
+
+    dirty = "编号\x00无法辨认\x08\n换行\x1f"
+    cleaned = clean_cell_text(dirty)
+    assert "\x00" not in cleaned
+    assert "\x08" not in cleaned
+    assert "\x1f" not in cleaned
+    assert "编号无法辨认 换行" == cleaned
+
+
 def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
     from openpyxl import load_workbook
 
     target = write_recognition_excel(
         directory=tmp_path,
         rows=[
-            SheetRecognition("003", "第1层", "第2位", "shelf_a.jpg", ""),
+            SheetRecognition("003\x00", "第1层", "第2位", "shelf_a.jpg", ""),
             SheetRecognition("005", "第2层", "第3位", "shelf_a.jpg", "编号无法辨认", rank="排2"),
         ],
         failures=[ImageRecognitionFailure("shelf_b.jpg", "视觉识别失败：mock")],
@@ -298,7 +311,7 @@ def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
     assert workbook.sheetnames == ["图纸编号", "识别失败清单", "识别总结"]
     sheet = workbook["图纸编号"]
     assert sheet["A1"].value == "图纸编号"
-    assert sheet["A2"].value == "003"
+    assert sheet["A2"].value == "003"  # 清洗掉控制字符
     assert sheet["D2"].value in (None, "")  # 排位列：单标签无排位为空
     assert sheet["E2"].value == "shelf_a.jpg"  # 来源照片列
     assert sheet["D3"].value == "排2"  # 叠放排位

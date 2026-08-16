@@ -31,9 +31,11 @@ MIN_ASPECT = float(os.getenv("IMAGE_LOCATE_MIN_ASPECT", "0.5"))
 MAX_ASPECT = float(os.getenv("IMAGE_LOCATE_MAX_ASPECT", "2.0"))
 MIN_CIRCULARITY = float(os.getenv("IMAGE_LOCATE_MIN_CIRCULARITY", "0"))
 NMS_IOU_THRESHOLD = float(os.getenv("IMAGE_LOCATE_NMS_IOU", "0.5"))
-# 层间隙（层板间距）通常远大于同货位叠放标签的间距，因此行聚类阈值取标签高×2，
-# 确保叠放标签归同层、不同层板严格分开。
-ROW_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_ROW_GAP", "2.0"))
+# 聚类阈值 = 标签中位尺寸 × 系数。同一货位内叠放/同一层并排的标签中心距
+# 接近标签尺寸（相接），层板间/货位间空隙显著更大：行系数取 1.3 保证
+# 叠放（≈1.0×）并组、层板（≥1.5×）分割；列系数取 1.2 让叠放（x 距 0）
+# 并位、相邻货位（间距 >1.2×）分开。不同照片可用 env 微调。
+ROW_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_ROW_GAP", "1.3"))
 COL_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_COL_GAP", "1.2"))
 MIN_TAGS = int(os.getenv("IMAGE_LOCATE_MIN_TAGS", "5"))
 PADDING_FACTOR = float(os.getenv("IMAGE_LOCATE_PADDING", "0.06"))
@@ -100,7 +102,8 @@ def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
     combined = binary_masks[0]
     for binary in binary_masks[1:]:
         combined = cv2.bitwise_or(combined, binary)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    # 小核形态学：只去孤立噪点，不把叠放货物上相邻标签的缝隙粘连。
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
     combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel)
 
@@ -177,7 +180,14 @@ def _pad(
 def _assign_grid(
     boxes: list[tuple[int, int, int, int]],
 ) -> list[TagBox]:
-    """按坐标三层聚类：y 分层 → 层内 x 分位 → 桶内 y 排序得排位。"""
+    """按坐标三层聚类：y 分层（层板间隙）→ 行内 x 分位 → 桶内 y 排序得排位。
+
+    - 聚类阈值基于标签中位尺寸：同一货位内叠放/同一层并排标签的中心距
+      接近标签尺寸，层板间/货位间的空隙显著更大，固定阈值即可稳定分割，
+      不采用自适应中位数（稀疏布局下单个大空隙会污染中位数）。
+    - 同一 (层,位) 桶内多个标签按 y 排序得到排位（垂直叠放，靠上为排 1）。
+    - 层号从下到上：照片最下面（y 最大）为第 1 层，符合货架惯例。
+    """
 
     heights = sorted(box[3] for box in boxes)
     widths = sorted(box[2] for box in boxes)
@@ -201,8 +211,10 @@ def _assign_grid(
     if current:
         rows.append(current)
 
+    # 层号从下到上：最下面（y 最大的行）为第 1 层。
+    row_count = len(rows)
     tagged: list[TagBox] = []
-    for row_index, row_boxes in enumerate(rows, start=1):
+    for row_index, row_boxes in enumerate(rows):
         row_boxes = sorted(row_boxes, key=lambda box: box[0] + box[2] / 2)
         columns: list[list[tuple[int, int, int, int]]] = []
         current_column: list[tuple[int, int, int, int]] = []
@@ -226,7 +238,7 @@ def _assign_grid(
                         y=box[1],
                         w=box[2],
                         h=box[3],
-                        row=row_index,
+                        row=row_count - row_index,
                         col=col_index,
                         rank=rank,
                     )

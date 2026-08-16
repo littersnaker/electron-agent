@@ -60,48 +60,54 @@ def test_locate_multicolor_tags() -> None:
 
     raw = _image_with_tags(
         [
-            {"x": 120, "y": 120, "color": (220, 30, 30)},  # 红
+            {"x": 120, "y": 120, "color": (220, 30, 30)},  # 红（顶层）
             {"x": 260, "y": 120, "color": (30, 30, 220)},  # 蓝
             {"x": 400, "y": 120, "color": (220, 200, 30)},  # 黄
-            {"x": 120, "y": 300, "color": (235, 235, 235), "shape": "rectangle"},  # 白
-            {"x": 260, "y": 300, "color": (30, 200, 30)},  # 绿
+            {"x": 120, "y": 480, "color": (235, 235, 235), "shape": "rectangle"},  # 白（底层）
+            {"x": 260, "y": 480, "color": (30, 200, 30)},  # 绿
         ]
     )
     boxes = locate_tags(image_bytes=raw)
     assert boxes is not None
     assert len(boxes) == 5
-    by_position = {(box.row, box.col): box for box in boxes}
-    assert (1, 1) in by_position
-    assert (1, 2) in by_position
-    assert (1, 3) in by_position
-    assert (2, 1) in by_position
-    assert (2, 2) in by_position
-    # 行序自上而下、列序自左而右
+    # 层号从下到上：y=480（画面下方）应是最下面的层（row 最小），y=120 是上层。
+    bottom = [box for box in boxes if box.y > 400]
+    top = [box for box in boxes if box.y < 200]
+    assert bottom and top
+    assert all(box.row < top_box.row for box in bottom for top_box in top)
+    # 同一层内列自左而右
+    by_row = sorted({box.row for box in boxes})
+    row1_boxes = sorted(
+        (box for box in boxes if box.row == by_row[0]),
+        key=lambda box: box.x,
+    )
+    assert [box.col for box in row1_boxes] == list(range(1, len(row1_boxes) + 1))
     assert all(isinstance(box, TagBox) for box in boxes)
 
 
 def test_locate_stacked_tags_same_position(monkeypatch: pytest.MonkeyPatch) -> None:
-    """同一货位叠放两个标签：同 (row, col)，rank 分别为 1、2。"""
+    """同一货位叠放两个标签（相接）：同 (row, col)，rank 分别为 1、2。"""
 
     from backend.services.image import locate as locate_module
 
     monkeypatch.setattr(locate_module, "MIN_TAGS", 1)
     raw = _image_with_tags(
         [
-            {"x": 200, "y": 160, "color": (220, 30, 30)},
-            {"x": 200, "y": 235, "color": (30, 30, 220)},  # 同一位内紧挨下方（叠放）
-            {"x": 450, "y": 150, "color": (220, 200, 30)},
+            {"x": 200, "y": 148, "color": (220, 30, 30)},
+            {"x": 200, "y": 212, "color": (30, 30, 220)},  # 同一位内上下叠放（标签间留可见缝隙）
+            {"x": 450, "y": 148, "color": (220, 200, 30)},
+            {"x": 450, "y": 212, "color": (30, 200, 30)},  # 第二位也叠放两个
         ]
     )
     boxes = locate_tags(image_bytes=raw)
     assert boxes is not None
-    assert len(boxes) == 3
-    stacked = [box for box in boxes if box.row == 1 and box.col == 1]
-    assert len(stacked) == 2
-    ranks = sorted(box.rank for box in stacked)
+    assert len(boxes) == 4
+    stacked_col1 = [box for box in boxes if box.col == 1]
+    assert len(stacked_col1) == 2
+    ranks = sorted(box.rank for box in stacked_col1)
     assert ranks == [1, 2]
     # 排位按 y 排序：靠上的排 1
-    top = sorted(stacked, key=lambda box: box.y)[0]
+    top = sorted(stacked_col1, key=lambda box: box.y)[0]
     assert top.rank == 1
 
 

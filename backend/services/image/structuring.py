@@ -112,14 +112,26 @@ def _rows_from_model(items: list[RecognizedRow]) -> list[SheetRecognition]:
     return result
 
 
+def _position_number(value: str) -> int:
+    """从“第10层/第2位/排3”中提取数字用于数值排序，避免字典序把第10排到第2前。"""
+
+    match = __import__("re").search(r"\d+", value or "")
+    return int(match.group(0)) if match else 0
+
+
 def _deterministic_rows(raw_rows: list[SheetRecognition]) -> list[SheetRecognition]:
-    """确定性兜底：按编号排序、去重（同编号同位置保留一条）。"""
+    """确定性兜底：按层/位/排位数值排序、去重（同编号同位置保留一条）。"""
 
     seen: set[tuple[str, str, str]] = set()
     result: list[SheetRecognition] = []
     for item in sorted(
         raw_rows,
-        key=lambda entry: (entry.sheet_no, entry.row, entry.col),
+        key=lambda entry: (
+            _position_number(entry.row),
+            _position_number(entry.col),
+            _position_number(entry.rank),
+            entry.sheet_no,
+        ),
     ):
         key = (item.sheet_no, item.row, item.col)
         if key in seen:

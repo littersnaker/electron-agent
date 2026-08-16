@@ -17,6 +17,8 @@ UPSCALE_FACTOR = 2
 TARGET_EDGE_PIXELS = 1536
 ENHANCE_STRENGTH = float(os.getenv("IMAGE_ENHANCE_STRENGTH", "1.6"))
 MAX_JPEG_BYTES = int(os.getenv("IMAGE_MAX_JPEG_BYTES", str(20 * 1024 * 1024)))
+# 单个标签小图放大到的目标边长：数字太小识别不准，放大到接近整图识别尺度。
+TAG_TARGET_EDGE = int(os.getenv("IMAGE_TAG_TARGET_EDGE", "256"))
 
 
 def preprocess_image(
@@ -113,13 +115,13 @@ def crop_tag(
 ) -> ImageInput:
     """按定位框裁剪单个标签小图并放大，输出 GLM 可识别的 ImageInput。
 
-    定位框坐标来自 ``locate.py`` 的 TagBox（已带外边距）；裁剪后 LANCZOS
-    放大 ``upscale`` 倍并转 JPEG，让编号数字足够清晰。失败抛 GLM46VError，
-    由上层按降级策略处理。
+    定位框坐标来自 ``locate.py`` 的 TagBox（已带外边距）；裁剪后放大到
+    ``TAG_TARGET_EDGE`` 目标边长并锐化增强，让编号数字足够大、足够清晰。
+    失败抛 GLM46VError，由上层按降级策略处理。
     """
 
     try:
-        from PIL import Image
+        from PIL import Image, ImageFilter
     except ImportError as exc:  # pragma: no cover - 构建环境必带 Pillow
         raise GLM46VError("图片识别依赖 Pillow 未安装，无法裁剪标签。") from exc
 
@@ -148,9 +150,20 @@ def crop_tag(
     )
     if region.width <= 0 or region.height <= 0:
         raise GLM46VError("标签裁剪区域为空。")
+    # 目标边长放大：等比放到长边达到 TAG_TARGET_EDGE，保证数字足够大；
+    # 放大后再 UnsharpMask 锐化，补偿 LANCZOS 插值带来的轻微模糊。
+    longest = max(region.width, region.height)
+    scale = max(1.0, upscale, TAG_TARGET_EDGE / longest)
     region = region.resize(
-        (region.width * max(1, upscale), region.height * max(1, upscale)),
+        (max(1, int(region.width * scale)), max(1, int(region.height * scale))),
         Image.Resampling.LANCZOS,
+    )
+    region = region.filter(
+        ImageFilter.UnsharpMask(
+            radius=2,
+            percent=int(150 * ENHANCE_STRENGTH),
+            threshold=3,
+        )
     )
     jpeg_bytes = _encode_jpeg(region)
     encoded = base64.b64encode(jpeg_bytes).decode("ascii")
@@ -168,4 +181,10 @@ def _encode_jpeg(image, quality: int = 85) -> bytes:
     return buffer.getvalue()
 
 
-__all__ = ["ENHANCE_STRENGTH", "UPSCALE_FACTOR", "crop_tag", "preprocess_image"]
+__all__ = [
+    "ENHANCE_STRENGTH",
+    "TAG_TARGET_EDGE",
+    "UPSCALE_FACTOR",
+    "crop_tag",
+    "preprocess_image",
+]
