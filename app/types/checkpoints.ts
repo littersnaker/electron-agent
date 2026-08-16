@@ -8,7 +8,7 @@ import type {
 import type { CommerceWorkflowMode } from "../lib/commerce/listing/types";
 import type { CommerceMarketplaceCode } from "../lib/commerce/types";
 
-export type AgentCheckpointKind = "qa" | "code" | "media" | "commerce";
+export type AgentCheckpointKind = "qa" | "code" | "media" | "commerce" | "image";
 export type AgentCheckpointStatus =
   | "running"
   | "paused"

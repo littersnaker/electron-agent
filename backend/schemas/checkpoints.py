@@ -13,7 +13,7 @@ class CheckpointCreateBody(FlexibleModel):
     """创建通用 Agent Checkpoint。"""
 
     session_id: str = Field(alias="sessionId")
-    agent_kind: Literal["qa", "code", "media", "commerce"] = Field(
+    agent_kind: Literal["qa", "code", "media", "commerce", "image"] = Field(
         alias="agentKind"
     )
     route: str

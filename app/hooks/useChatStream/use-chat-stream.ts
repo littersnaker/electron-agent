@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-lines */ // 统一 SSE 消费与多 Agent 路由，文件天然较长。
 /**
  * 模块职责：聊天流式请求、SSE 消费和会话状态协调。
  */
@@ -69,6 +70,7 @@ export function useChatStream({
   const abortRef = useRef<AbortController | null>(null);
   const finalTextRef = useRef("");
   const mediaAttachmentsRef = useRef<Message["attachments"] | undefined>(undefined);
+  const imageResultRef = useRef<Message["imageResult"] | undefined>(undefined);
   const hasLifecycleRef = useRef(false);
   const checkpointBinding = useChatCheckpointBinding();
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -266,6 +268,8 @@ export function useChatStream({
         status: "completed",
       };
       finalTextRef.current = "";
+      mediaAttachmentsRef.current = undefined;
+      imageResultRef.current = undefined;
       const abortController = new AbortController();
       abortRef.current = abortController;
       const requestModel = options.modelOverride || selectedModel;
@@ -275,7 +279,9 @@ export function useChatStream({
             ? "/api/chat"
             : activeSession.mode === "media"
               ? "/api/media/chat"
-              : "/api/qa";
+              : activeSession.mode === "image"
+                ? "/api/image/chat"
+                : "/api/qa";
         let jinaApiKey = "";
         try {
           const credentialStore = await window.electronAPI?.credentials?.read();
@@ -453,6 +459,16 @@ export function useChatStream({
                 void runVisualVerification(packet.payload as VisualVerifyPayload);
                 continue;
               }
+              if (
+                packet.type === "IMAGE_RESULT" &&
+                packet.payload &&
+                typeof packet.payload === "object" &&
+                "rows" in packet.payload &&
+                "failures" in packet.payload
+              ) {
+                imageResultRef.current = packet.payload as Message["imageResult"];
+                continue;
+              }
               if (packet.type === "MEDIA_RESULT" && isMediaResultPayload(packet)) {
                 if (packet.content) {
                   finalTextRef.current ||= packet.content;
@@ -512,6 +528,7 @@ export function useChatStream({
             role: "assistant",
             content: answer,
             attachments: mediaAttachmentsRef.current,
+            imageResult: imageResultRef.current,
           },
         ];
         const finalSession = {

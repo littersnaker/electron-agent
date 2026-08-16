@@ -29,6 +29,8 @@ export function buildWelcomeMessages(
             ? "已进入 Cross-border Market Intelligence Agent。告诉我一个大概品类或市场问题，我会用公开 SERP / Shopping 做核心研究，并把 Amazon、Keepa 等平台数据作为可选增强。"
             : mode === "media"
               ? "已进入 AI 漫剧工作室。输入剧本或剧情梗概，我会拆分成镜并等待你确认，然后并行出图、图生视频并合并成集。"
+              : mode === "image"
+                ? "已进入图片识别 Agent。上传货架照片，我会先增强清晰度并放大，再由视觉模型识别每个图纸编号在第几层第几位，最后生成 Excel 表格。"
             : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",
     },
   ];

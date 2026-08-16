@@ -46,7 +46,7 @@ async def test_commerce_adapter_streams_listing_workflow() -> None:
 
 
 def test_application_agent_registry_contains_qa_code_and_commerce() -> None:
-    """应用级配置必须同时注册 QA、Code 和 Commerce 三类 Agent。"""
+    """应用级配置必须同时注册 QA、Code、Commerce、Media 与 Image 五类 Agent。"""
 
     project_root = Path(__file__).resolve().parents[5]
     registry = AgentRegistry(project_root / "agents")
@@ -56,11 +56,13 @@ def test_application_agent_registry_contains_qa_code_and_commerce() -> None:
     assert registry.get("coding").adapter.agent_id == "coding"
     assert registry.get("commerce").adapter.agent_id == "commerce"
     assert registry.get("media").adapter.agent_id == "media"
+    assert registry.get("image").adapter.agent_id == "image"
     assert {item["id"] for item in registry.catalog()} == {
         "qa",
         "coding",
         "commerce",
         "media",
+        "image",
     }
 
 

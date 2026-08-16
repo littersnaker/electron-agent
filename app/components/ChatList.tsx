@@ -10,6 +10,7 @@ import type { KnowledgeMetrics, KnowledgeSourceItem } from "../types/workspace";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
+import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
 
 interface ChatListProps {
   messages: Message[];
@@ -349,6 +350,9 @@ function ChatList({
                   {message.commerceReport && <CommerceReportCard report={message.commerceReport} />}
                   {message.commerceListing && (
                     <AmazonListingCard report={message.commerceListing} />
+                  )}
+                  {message.imageResult && (
+                    <ImageRecognitionResultCard result={message.imageResult} />
                   )}
                   <MemoizedAssistantMessageRow
                     content={message.content}

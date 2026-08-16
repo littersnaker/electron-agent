@@ -51,7 +51,11 @@ def _session_from_row(row: object) -> ChatSession:
 
 
 async def list_workspace(
-    *, include_code: bool, include_commerce: bool, include_media: bool = False
+    *,
+    include_code: bool,
+    include_commerce: bool,
+    include_media: bool = False,
+    include_image: bool = False,
 ) -> WorkspaceResponse:
     """读取项目列表和按插件开关筛选后的会话列表。"""
 
@@ -62,6 +66,8 @@ async def list_workspace(
         allowed_modes.append("commerce")
     if include_media:
         allowed_modes.append("media")
+    if include_image:
+        allowed_modes.append("image")
 
     placeholders = ",".join("?" for _ in allowed_modes)
     async with open_database() as connection:

@@ -1,4 +1,5 @@
 // 模块说明：负责 ChatSidebar 用户界面组件。
+/* eslint-disable max-lines */ // 多个 Agent 入口区块聚合，文件天然较长。
 import type { MouseEvent } from "react";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
 import SidebarSettingsMenu from "./sidebar-settings-menu";
@@ -10,11 +11,13 @@ interface ChatSidebarProps {
   createQaSession: () => void;
   createCommerceSession: () => void;
   createMediaSession: () => void;
+  createImageSession: () => void;
   createCodeSession: (projectId: string) => void;
   addProject: () => void;
   codePluginEnabled: boolean;
   commercePluginEnabled: boolean;
   mediaPluginEnabled: boolean;
+  imagePluginEnabled: boolean;
   onOpenPluginCenter: () => void;
   reindexProject: (projectId: string) => void;
   deleteProject: (projectId: string) => void;
@@ -202,6 +205,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
   const qaSessions = props.sessions.filter((session) => session.mode === "qa");
   const commerceSessions = props.sessions.filter((session) => session.mode === "commerce");
   const mediaSessions = props.sessions.filter((session) => session.mode === "media");
+  const imageSessions = props.sessions.filter((session) => session.mode === "image");
 
   return (
     <aside
@@ -419,6 +423,85 @@ export default function ChatSidebar(props: ChatSidebarProps) {
               {mediaSessions.length > 0 && (
                 <div className="space-y-0.5">
                   {mediaSessions.map((session) => (
+                    <SessionItem
+                      key={session.id}
+                      session={session}
+                      activeSessionId={props.activeSessionId}
+                      isStreaming={props.isStreaming}
+                      switchSession={props.switchSession}
+                      deleteSession={props.deleteSession}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+
+        {props.imagePluginEnabled && (
+          <>
+            <section className="mb-5">
+              <div
+                className="mb-2 flex items-center justify-between px-2"
+                style={{ color: COLORS.textSubtle }}
+              >
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  <span>📷</span>
+                  图片识别
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={props.createImageSession}
+                disabled={props.isStreaming}
+                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
+                style={{
+                  background:
+                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
+                  borderColor: "var(--accent-blue-border)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
+                }}
+                title="新建图片识别会话"
+              >
+                <span
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border text-[16px]"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    borderColor: "var(--accent-blue-border-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  📷
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span
+                    className="block text-[12px] font-semibold tracking-[-0.01em]"
+                    style={{ color: COLORS.text }}
+                  >
+                    图片识别
+                  </span>
+                  <span
+                    className="mt-0.5 block truncate text-[9px]"
+                    style={{ color: COLORS.textSubtle }}
+                  >
+                    货架图纸识别 → 视觉 → Excel
+                  </span>
+                </span>
+                <span
+                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    color: "var(--accent-blue-hover)",
+                  }}
+                >
+                  <PlusIcon className="h-3.5 w-3.5" />
+                </span>
+              </button>
+
+              {imageSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  {imageSessions.map((session) => (
                     <SessionItem
                       key={session.id}
                       session={session}

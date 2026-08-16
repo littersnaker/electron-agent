@@ -188,6 +188,7 @@ export type StreamPacketType =
   | "COMMERCE_REPORT"
   | "COMMERCE_LISTING"
   | "MEDIA_RESULT"
+  | "IMAGE_RESULT"
   | "AGENT_START"
   | "AGENT_STATUS"
   | "AGENT_PROGRESS"

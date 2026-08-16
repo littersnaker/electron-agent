@@ -37,6 +37,15 @@ export const BUILTIN_PLUGINS: readonly BuiltinPluginManifest[] = [
     sessionMode: "media",
     defaultEnabled: false,
   },
+  {
+    id: "image-agent",
+    name: "Image Recognition Agent",
+    shortName: "图片识别",
+    description: "上传货架照片，自动增强放大后由视觉模型识别图纸编号位置，并整理成 Excel 表格。",
+    accent: "blue",
+    sessionMode: "image",
+    defaultEnabled: false,
+  },
 ] as const;
 
 export function createDefaultPluginState(): BuiltinPluginState {
@@ -46,6 +55,7 @@ export function createDefaultPluginState(): BuiltinPluginState {
       "code-agent": false,
       "commerce-research": false,
       "media-agent": false,
+      "image-agent": false,
     },
   );
 }

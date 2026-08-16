@@ -9,6 +9,7 @@ from backend.api.checkpoints import router as checkpoints_router
 from backend.api.code import router as code_router
 from backend.api.commerce import router as commerce_router
 from backend.api.health import router as health_router
+from backend.api.image import router as image_router
 from backend.api.knowledge import router as knowledge_router
 from backend.api.legacy import router as legacy_router
 from backend.api.mcp import router as mcp_router
@@ -39,6 +40,7 @@ def register_routes() -> None:
         code_router,
         media_router,
         commerce_router,
+        image_router,
         observability_router,
         review_router,
         skills_router,

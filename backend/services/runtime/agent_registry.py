@@ -12,6 +12,7 @@ import yaml
 from backend.services.agent.adapters.base import BaseAgent
 from backend.services.agent.adapters.coding import CodeAgentAdapter
 from backend.services.agent.adapters.commerce import CommerceAgentAdapter
+from backend.services.agent.adapters.image import ImageAgentAdapter
 from backend.services.agent.adapters.media import MediaAgentAdapter
 from backend.services.agent.adapters.qa import QAAgentAdapter
 
@@ -56,6 +57,7 @@ class AgentRegistry:
             "qa_agent": QAAgentAdapter,
             "commerce_agent": CommerceAgentAdapter,
             "media_agent": MediaAgentAdapter,
+            "image_agent": ImageAgentAdapter,
         }
 
     def load(self) -> None:

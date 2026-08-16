@@ -1,5 +1,6 @@
 // 模块说明：负责 page 页面或应用入口逻辑。
 /* eslint-disable react-hooks/immutability */
+/* eslint-disable max-lines */ // 应用根组件聚合所有 Agent 接线，文件天然较长。
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
@@ -76,16 +77,19 @@ export default function Home() {
   const codePluginEnabled = plugins.isEnabled("code-agent");
   const commercePluginEnabled = plugins.isEnabled("commerce-research");
   const mediaPluginEnabled = plugins.isEnabled("media-agent");
+  const imagePluginEnabled = plugins.isEnabled("image-agent");
   const workspace = useWorkspaceController({
     includeCode: codePluginEnabled,
     includeCommerce: commercePluginEnabled,
     includeMedia: mediaPluginEnabled,
+    includeImage: imagePluginEnabled,
   });
   const agentCoordinator = useAgentCoordinator();
   const effectiveComposerMode: ComposerMode =
     workspace.activeSession?.mode === "code" ||
     workspace.activeSession?.mode === "commerce" ||
-    workspace.activeSession?.mode === "media"
+    workspace.activeSession?.mode === "media" ||
+    workspace.activeSession?.mode === "image"
       ? "chat"
       : composerMode;
   const availableModels = useMemo(() => {
@@ -202,9 +206,13 @@ export default function Home() {
       setShowPluginCenter(true);
       return;
     }
+    if (mode === "image" && !imagePluginEnabled) {
+      setShowPluginCenter(true);
+      return;
+    }
     const session = await workspace.createSession(mode, projectId);
     if (session) resetConversationUi();
-    if (mode === "code" || mode === "commerce" || mode === "media") {
+    if (mode === "code" || mode === "commerce" || mode === "media" || mode === "image") {
       setComposerMode("chat");
     }
   };
@@ -231,7 +239,14 @@ export default function Home() {
   const handlePluginChange = (pluginId: BuiltinPluginId, enabled: boolean) => {
     plugins.setPluginEnabled(pluginId, enabled);
     // 如果用户关闭了当前正在查看的插件，立即回到核心 QA，避免页面停留在失效入口。
-    const disabledMode = pluginId === "code-agent" ? "code" : "commerce";
+    const disabledMode =
+      pluginId === "code-agent"
+        ? "code"
+        : pluginId === "image-agent"
+          ? "image"
+          : pluginId === "media-agent"
+            ? "media"
+            : "commerce";
     if (!enabled && workspace.activeSession?.mode === disabledMode) {
       const qaSession = workspace.sessions.find((session) => session.mode === "qa");
       if (qaSession) {
@@ -339,11 +354,13 @@ export default function Home() {
             createQaSession={() => void handleCreateSession("qa")}
             createCommerceSession={() => void handleCreateSession("commerce")}
             createMediaSession={() => void handleCreateSession("media")}
+            createImageSession={() => void handleCreateSession("image")}
             createCodeSession={(projectId: string) => void handleCreateSession("code", projectId)}
             addProject={() => void handleAddProject()}
             codePluginEnabled={codePluginEnabled}
             commercePluginEnabled={commercePluginEnabled}
             mediaPluginEnabled={mediaPluginEnabled}
+            imagePluginEnabled={imagePluginEnabled}
             onOpenPluginCenter={() => setShowPluginCenter(true)}
             reindexProject={(projectId: string) => void workspace.reindexProject(projectId)}
             switchSession={handleSwitchSession}

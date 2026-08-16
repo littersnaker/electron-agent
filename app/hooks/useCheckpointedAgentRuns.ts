@@ -46,6 +46,7 @@ function routeFor(kind: AgentCheckpointKind, request: AgentCheckpointRequest): s
   if (kind === "code") return "/api/chat";
   if (kind === "qa") return "/api/qa";
   if (kind === "media") return "/api/media/generate";
+  if (kind === "image") return "/api/image/chat";
   return request.commerceWorkflowMode === "listing"
     ? "/api/commerce/listing"
     : "/api/commerce/research";
@@ -60,7 +61,9 @@ function labelFor(kind: AgentCheckpointKind, request: AgentCheckpointRequest): s
         ? "Media Agent"
         : kind === "commerce"
           ? "Commerce Agent"
-          : "QA Agent";
+          : kind === "image"
+            ? "Image Agent"
+            : "QA Agent";
   return text ? `${prefix} · ${text}` : prefix;
 }
 
@@ -97,6 +100,16 @@ export function useCheckpointedAgentRuns(options: UseCheckpointedAgentRunsOption
           resumeExistingRun: resume,
           modelOverride: request.selectedModel,
           codeAgentModeOverride: request.codeAgentMode,
+          onCheckpointFinish,
+        });
+        return;
+      }
+      if (kind === "image") {
+        // 图片识别是固定流水线，复用聊天流（/api/image/chat）的 SSE 事件协议。
+        await options.chat.submitPrompt(request.input, request.attachments, {
+          checkpointId,
+          resumeExistingRun: resume,
+          modelOverride: request.selectedModel,
           onCheckpointFinish,
         });
         return;
@@ -156,9 +169,11 @@ export function useCheckpointedAgentRuns(options: UseCheckpointedAgentRunsOption
         ? "commerce"
         : options.sessionMode === "code"
           ? "code"
-          : options.composerMode === "chat"
-            ? "qa"
-            : "media";
+          : options.sessionMode === "image"
+            ? "image"
+            : options.composerMode === "chat"
+              ? "qa"
+              : "media";
     let checkpoint: AgentCheckpoint;
     try {
       checkpoint = await checkpoints.begin({

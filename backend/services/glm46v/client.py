@@ -3,6 +3,10 @@
 本模块只负责视觉预分析，不改变项目现有 LLM Gateway。API Key 优先读取当前请求中
 已配置的 ``glm`` 凭证，其次读取环境变量，确保 Code Agent 与 QA Agent 可以复用
 设置界面中的智谱 Key。
+
+GLM-4.6V-Flash 是免费模型，有每分钟速率限制；所有消费方（QA/Code 图片预处理、
+review 截图验证、图片识别 Agent）共享一个全局节拍器与并发信号量（见
+``rate_limit.py``），调用方无需自行节流。
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
+
+from backend.services.glm46v.rate_limit import glm46v_request_slot
 
 DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 DEFAULT_MODEL = "glm-4.6v-flash"
@@ -337,14 +343,17 @@ class GLM46VClient:
         payload: dict[str, Any],
         headers: dict[str, str],
     ) -> tuple[dict[str, Any], httpx.Headers]:
+        """发送请求并在可重试错误上指数退避；429 使用更长退避等待额度恢复。"""
+
         last_error: Exception | None = None
         for attempt in range(self.settings.retries + 1):
             try:
-                response = await client.post(
-                    self.settings.endpoint,
-                    headers=headers,
-                    json=payload,
-                )
+                async with glm46v_request_slot():
+                    response = await client.post(
+                        self.settings.endpoint,
+                        headers=headers,
+                        json=payload,
+                    )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_error = exc
                 if attempt >= self.settings.retries:
@@ -367,13 +376,23 @@ class GLM46VClient:
             ):
                 retry_after = response.headers.get("retry-after", "").strip()
                 try:
-                    delay = float(retry_after) if retry_after else min(2**attempt, 4)
+                    delay = float(retry_after) if retry_after else _backoff_delay(
+                        attempt, response.status_code
+                    )
                 except ValueError:
-                    delay = min(2**attempt, 4)
-                await asyncio.sleep(max(0.0, min(delay, 10.0)))
+                    delay = _backoff_delay(attempt, response.status_code)
+                await asyncio.sleep(max(0.0, min(delay, 30.0)))
                 continue
             raise GLM46VError(
                 f"智谱 API 请求失败（HTTP {response.status_code}）：{message}"
             )
 
         raise GLM46VError(f"智谱 API 请求失败：{last_error or '未知错误'}")
+
+
+def _backoff_delay(attempt: int, status_code: int) -> float:
+    """429 限流退避更长，等待免费档额度窗口恢复；5xx/408/409 用常规指数退避。"""
+
+    if status_code == 429:
+        return min(2**attempt * 5, 30)
+    return min(2**attempt, 4)

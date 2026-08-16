@@ -23,6 +23,7 @@ async def get_workspace(
     code: str | None = Query(default=None),
     commerce: str | None = Query(default=None),
     media: str | None = Query(default=None),
+    image: str | None = Query(default=None),
 ) -> dict[str, object]:
     """返回本地项目列表和按插件开关筛选后的会话。"""
 
@@ -30,6 +31,7 @@ async def get_workspace(
         include_code=code == "1",
         include_commerce=commerce == "1",
         include_media=media == "1",
+        include_image=image == "1",
     )
     return workspace.model_dump(by_alias=True, exclude_none=True)
 

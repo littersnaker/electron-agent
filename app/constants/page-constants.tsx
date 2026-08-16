@@ -24,6 +24,32 @@ export type Message = {
   commerceReport?: CommerceResearchReport;
   /** Amazon Listing Demo 的结构化草稿、事实和本地校验结果。 */
   commerceListing?: AmazonListingDemoReport;
+  /** Image Recognition Agent 的货架图纸识别结果（矩阵 + Excel 下载）。 */
+  imageResult?: ImageRecognitionResult;
+};
+
+/** 图片识别 Agent 的单行识别结果。 */
+export type ImageRecognitionRow = {
+  sheetNo: string;
+  row: string;
+  col: string;
+  sourceImage: string;
+  note: string;
+};
+
+/** 图片识别 Agent 的失败照片记录。 */
+export type ImageRecognitionFailure = {
+  imageName: string;
+  reason: string;
+};
+
+/** 图片识别 Agent 的结构化结果。 */
+export type ImageRecognitionResult = {
+  rows: ImageRecognitionRow[];
+  failures: ImageRecognitionFailure[];
+  summary: string;
+  excelFileName: string;
+  excelDownloadUrl: string;
 };
 
 export type AttachedFile = {
@@ -165,7 +191,7 @@ export function toMessageAttachment(
   return attachment ? toMessageAttachments([attachment]) : undefined;
 }
 
-export type SessionMode = "qa" | "code" | "commerce" | "media";
+export type SessionMode = "qa" | "code" | "commerce" | "media" | "image";
 
 export type CodeAgentExecutionMode = "suggest" | "auto_edit" | "full_auto";
 

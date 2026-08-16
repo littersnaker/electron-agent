@@ -43,6 +43,7 @@ interface WorkspaceControllerOptions {
   includeCode?: boolean;
   includeCommerce?: boolean;
   includeMedia?: boolean;
+  includeImage?: boolean;
 }
 
 export function useWorkspaceController(
@@ -68,6 +69,7 @@ export function useWorkspaceController(
     if (options.includeCode) params.set("code", "1");
     if (options.includeCommerce) params.set("commerce", "1");
     if (options.includeMedia) params.set("media", "1");
+    if (options.includeImage) params.set("image", "1");
     const query = params.toString();
     const response = await apiFetch(`/api/workspace${query ? `?${query}` : ""}`, {
       cache: "no-store",
@@ -78,7 +80,7 @@ export function useWorkspaceController(
     setProjects(workspace.projects);
     setSessions(workspace.sessions);
     return workspace;
-  }, [options.includeCode, options.includeCommerce, options.includeMedia]);
+  }, [options.includeCode, options.includeCommerce, options.includeMedia, options.includeImage]);
 
   const createSession = useCallback(
     async (

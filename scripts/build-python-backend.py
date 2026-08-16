@@ -99,6 +99,11 @@ def _pyinstaller_arguments() -> list[str]:
     collect_optional("langgraph_sdk")
     collect_optional("langgraph_checkpoint")
     collect_optional("langchain_core")
+    # 图片识别 Agent：openpyxl 是函数内延迟导入且带动态子模块，静态分析常整包漏掉，
+    # 必须显式收集（与 langgraph 同一原因）；et_xmlfile 是 openpyxl 写文件时依赖的
+    # 流式 XML 库，不显式收集会漏进打包产物。PIL 已验证可被自动收集，无需显式处理。
+    collect_optional("openpyxl")
+    collect_optional("et_xmlfile")
     if importlib.util.find_spec("tzdata") is not None:
         arguments.extend(["--collect-data=tzdata", "--hidden-import=tzdata"])
     return arguments

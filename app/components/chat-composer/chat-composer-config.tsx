@@ -161,6 +161,9 @@ export function resolvePlaceholder(
       ? "描述商品，例如：品牌 DemoBrand，桌面夹式扶手，黑色软垫，适用于办公桌；其他字段由模拟 ERP 补齐…"
       : "描述一个市场方向，例如：美国宠物饮水机市场有哪些品牌、价格带和机会信号？";
   }
+  if (sessionMode === "image") {
+    return "上传货架照片（可多张），识别图纸编号并生成 Excel 表格…";
+  }
 
   switch (composerMode) {
     case "text-to-image":

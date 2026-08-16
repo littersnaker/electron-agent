@@ -14,6 +14,7 @@ const KIND_LABELS: Record<AgentCheckpoint["agentKind"], string> = {
   code: "Code Agent",
   media: "Media Agent",
   commerce: "Commerce Agent",
+  image: "Image Agent",
 };
 
 /** 显示上次中断任务，并提供恢复或放弃入口。 */
