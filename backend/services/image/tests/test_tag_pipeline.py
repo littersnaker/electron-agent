@@ -63,7 +63,14 @@ class SequenceClient:
     def settings(self) -> GLM46VSettings:
         return GLM46VSettings(api_key="fake", endpoint="https://example.test")
 
-    async def analyze_images(self, images, *, prompt: str, max_tokens: int = 6144):
+    async def analyze_images(
+        self,
+        images,
+        *,
+        prompt: str,
+        max_tokens: int = 6144,
+        include_thinking: bool = True,
+    ):
         self.calls.append(len(images))
         lines = self.numbers[self._offset : self._offset + len(images)]
         self._offset += len(images)
@@ -90,7 +97,14 @@ async def test_recognize_tag_batches_keeps_order_with_unclear() -> None:
         def settings(self) -> GLM46VSettings:
             return GLM46VSettings(api_key="fake", endpoint="https://example.test")
 
-        async def analyze_images(self, images, *, prompt: str, max_tokens: int = 6144):
+        async def analyze_images(
+            self,
+            images,
+            *,
+            prompt: str,
+            max_tokens: int = 6144,
+            include_thinking: bool = True,
+        ):
             return {
                 "model": "glm-4.6v-flash",
                 "content": "325\n无法辨认\n89\n302",
@@ -109,7 +123,14 @@ async def test_recognize_tag_batches_degrades_on_batch_failure() -> None:
         def settings(self) -> GLM46VSettings:
             return GLM46VSettings(api_key="fake", endpoint="https://example.test")
 
-        async def analyze_images(self, images, *, prompt: str, max_tokens: int = 6144):
+        async def analyze_images(
+            self,
+            images,
+            *,
+            prompt: str,
+            max_tokens: int = 6144,
+            include_thinking: bool = True,
+        ):
             raise RuntimeError("mock 失败")
 
     numbers = await recognize_tag_batches(

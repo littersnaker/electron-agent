@@ -57,7 +57,14 @@ class FakeClient:
     def settings(self) -> GLM46VSettings:
         return GLM46VSettings(api_key="fake", endpoint="https://example.test")
 
-    async def analyze_images(self, images, *, prompt: str, max_tokens: int = 6144):
+    async def analyze_images(
+        self,
+        images,
+        *,
+        prompt: str,
+        max_tokens: int = 6144,
+        include_thinking: bool = True,
+    ):
         self.calls.append(prompt)
         if not self.content:
             raise RuntimeError("mock 识别失败")
@@ -707,7 +714,14 @@ class FakeNoFailClient:
     def settings(self) -> GLM46VSettings:
         return GLM46VSettings(api_key="fake", endpoint="https://example.test")
 
-    async def analyze_images(self, images, *, prompt: str, max_tokens: int = 6144):
+    async def analyze_images(
+        self,
+        images,
+        *,
+        prompt: str,
+        max_tokens: int = 6144,
+        include_thinking: bool = True,
+    ):
         return {
             "model": "glm-4.6v-flash",
             "content": "003|第1层|第2位|",

@@ -159,7 +159,9 @@ async def recognize_single_image(
     """
 
     try:
-        result = await client.analyze_images([image], prompt=prompt)
+        result = await client.analyze_images(
+            [image], prompt=prompt, include_thinking=False
+        )
     except GLM46VError as exc:
         return [], "", f"视觉识别失败：{exc}"
     except Exception as exc:  # noqa: BLE001 - 单张降级需兼容未知网络/客户端错误。
@@ -563,6 +565,7 @@ async def recognize_tag_batches(
             result = await client.analyze_images(
                 batch,
                 prompt=build_tag_batch_prompt(len(batch)),
+                include_thinking=False,
             )
         except Exception as exc:  # noqa: BLE001 - 单批失败降级，与整图路径一致。
             LOGGER.warning("标签批次识别失败（%d 张）：%s", len(batch), exc)
