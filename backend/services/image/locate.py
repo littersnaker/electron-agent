@@ -41,6 +41,12 @@ COL_GAP_FACTOR = float(os.getenv("IMAGE_LOCATE_COL_GAP", "1.2"))
 # 默认 5 太宽松：斜拍/压缩照片只检出 10 个标签也会走定位，结果只有 4 层、
 # 内容大量缺失；提到 15 后，漏检过半的图会整图识别，层数覆盖更完整。
 MIN_TAGS = int(os.getenv("IMAGE_LOCATE_MIN_TAGS", "15"))
+# 仅用于"层界检测"的最少标签数：整图分片需要知道真实层数与层界，放宽阈值
+# 让行聚类尽量分出所有层；比正式定位的 MIN_TAGS 低，因为这里不要求标签全检。
+BAND_MIN_TAGS = int(os.getenv("IMAGE_BAND_MIN_TAGS", "6"))
+# 层界检测专用面积阈值：原图上小标签常低于正式定位的 0.0008 阈值，
+# 放宽到 0.0002 才能把叠放的小标签也检出来、行聚类才能分出真实层数。
+BAND_MIN_AREA_RATIO = float(os.getenv("IMAGE_BAND_MIN_AREA_RATIO", "0.0002"))
 PADDING_FACTOR = float(os.getenv("IMAGE_LOCATE_PADDING", "0.06"))
 # Otsu 阈值过低说明该通道几乎没有前景可分（如纯背景 S 通道全 0），跳过。
 # 真实照片中 S/灰度 Otsu 阈值通常几十，这里只拦截接近 0 的纯背景通道。
@@ -70,6 +76,48 @@ class TagBox:
 
 def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
     """定位照片中的标签并推导层/位/排位；标签过少返回 None（交由整图路径兜底）。"""
+
+    return _detect_boxes(image_bytes, MIN_TAGS)
+
+
+def detect_layer_band_ys(*, image_bytes: bytes) -> list[int] | None:
+    """检测货架真实层界 y 坐标（用于整图分片，避免固定比例切分）。
+
+    用与 ``locate_tags`` 相同的检测与行聚类，但放宽最少标签数（BAND_MIN_TAGS）；
+    只要聚类出 ≥2 行，就用相邻两行标签中心带之间的空隙中点作为层界。
+    返回按 y 排序的层界列表；检测失败返回 None，由上层回退固定比例。
+    """
+
+    boxes = _detect_boxes(
+        image_bytes,
+        BAND_MIN_TAGS,
+        min_area_ratio=BAND_MIN_AREA_RATIO,
+    )
+    if not boxes:
+        return None
+    by_row: dict[int, list[TagBox]] = {}
+    for box in boxes:
+        by_row.setdefault(box.row, []).append(box)
+    rows = sorted(by_row)
+    if len(rows) < 2:
+        return None
+    boundaries: list[int] = []
+    for row, next_row in zip(rows, rows[1:]):
+        row_max_cy = max(box.cy for box in by_row[row])
+        next_min_cy = min(box.cy for box in by_row[next_row])
+        if next_min_cy > row_max_cy:
+            boundaries.append(int((row_max_cy + next_min_cy) / 2))
+    return sorted(boundaries) if boundaries else None
+
+
+def _detect_boxes(
+    image_bytes: bytes,
+    min_tags: int,
+    *,
+    min_area_ratio: float | None = None,
+    max_area_ratio: float | None = None,
+) -> list[TagBox] | None:
+    """定位核心：检测标签并聚类行列排；标签数低于阈值返回 None。"""
 
     try:
         import cv2
@@ -114,8 +162,8 @@ def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
         combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
     total_pixels = width * height
-    min_area = MIN_AREA_RATIO * total_pixels
-    max_area = MAX_AREA_RATIO * total_pixels
+    min_area = (min_area_ratio or MIN_AREA_RATIO) * total_pixels
+    max_area = (max_area_ratio or MAX_AREA_RATIO) * total_pixels
     boxes: list[tuple[int, int, int, int]] = []
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -135,7 +183,7 @@ def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
         boxes.append((x, y, w, h))
 
     kept = _non_max_suppression(boxes)
-    if len(kept) < MIN_TAGS:
+    if len(kept) < min_tags:
         return None
     padded = [_pad(box, height, width) for box in kept]
     # 优先用货架层板分割层：层板是实体隔板，叠放货物不会跨层板，
@@ -144,9 +192,10 @@ def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
     board_ys = _detect_board_ys(gray)
     if board_ys:
         tagged = _assign_grid_with_boards(padded, board_ys, height)
-        if len(tagged) >= MIN_TAGS:
+        if len(tagged) >= min_tags:
             return tagged
-    return _assign_grid(padded)
+    tagged = _assign_grid(padded)
+    return tagged if len(tagged) >= min_tags else None
 
 
 def _detect_board_ys(gray) -> list[float]:
@@ -406,4 +455,4 @@ def absolutize_columns(boxes: list[TagBox]) -> list[TagBox]:
     return result
 
 
-__all__ = ["TagBox", "absolutize_columns", "locate_tags"]
+__all__ = ["TagBox", "absolutize_columns", "detect_layer_band_ys", "locate_tags"]

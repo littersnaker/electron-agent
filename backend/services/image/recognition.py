@@ -136,11 +136,26 @@ _COMPACT_RECOGNITION_PROMPT = """你是货架图纸识别员。照片里的货�
 """
 
 
-def build_compact_recognition_prompt(image_names: str) -> str:
-    """生成 glm-4v-flash 可用的紧凑网格识别提示词（1024 token 输出预算内）。"""
+def build_compact_recognition_prompt(
+    image_names: str, *, layer_hint: tuple[int, int] | None = None
+) -> str:
+    """生成 glm-4v-flash 可用的紧凑网格识别提示词（1024 token 输出预算内）。
 
+    ``layer_hint`` 为 ``(起始层号, 层数)``：分片识别知道真实层界时传入，
+    提示模型该片段共有几层、对应完整货架的哪几层，抑制叠放层次被误判成层；
+    模型仍按"片段内第1层"相对编号，层号由上层合并时统一偏移。
+    """
+
+    hint = ""
+    if layer_hint is not None:
+        start, count = layer_hint
+        hint = (
+            f"\n此片段共 {count} 层，对应完整货架的第 {start}~{start + count - 1} 层；"
+            "输出时仍从“第1层”开始相对编号，但必须只输出这 "
+            f"{count} 层，不要多不要少。\n"
+        )
     return (
-        f"{_COMPACT_RECOGNITION_PROMPT}\n\n"
+        f"{_COMPACT_RECOGNITION_PROMPT}\n{hint}\n"
         f"当前照片：{image_names}\n"
         "如照片中没有货架或图纸，请只输出“未检测到货架图纸”。"
     )
@@ -442,17 +457,21 @@ def _parse_compact_output(
 
 
 def _split_into_bands(
-    image: ImageInput, *, top_ratio: float | None = None
-) -> list[ImageInput]:
-    """把整图横向切成上下两段（10% 重叠），供 glm-4v-flash 分段识别。
+    image: ImageInput,
+    *,
+    original_bytes: bytes | None = None,
+    top_ratio: float | None = None,
+) -> tuple[list[ImageInput], list[int | None]]:
+    """把整图横向切成 2~4 段，供 glm-4v-flash 分段识别，返回段与各段已知层数。
 
     glm-4v-flash 的输出上限只有 1024 token，一口气输出 6 层会在第 3~4 层
-    自行停止；切成两段后每段 2~4 层，输出预算充足。重叠段用于避免
-    正好落在切分线上的标签被裁断，层号在合并时统一偏移。
-    切分位置可用环境变量 ``IMAGE_SPLIT_RATIO`` 调整（0~1，默认 0.46，
-    表示上段占图高 46%）；货架层高分布不均时调它避免切穿某一层。
-    常见货架"上段多层层高更扁、下段层高更高"，0.55 会把下半段多算一层
-    （叠放货物的视觉层次被当成层），0.46 更贴近上 4 层/下 2 层的布局。
+    自行停止；切成多段后每段 2~4 层，输出预算充足。
+    优先用 ``detect_layer_band_ys`` 检测真实层界，在层界处切分（切分点落在
+    层与层的空隙，不会切穿货物），层数按检测结果确定——不再依赖固定比例，
+    任何货架布局都能自适应；检测失败时才回退 ``IMAGE_SPLIT_RATIO`` 比例切分。
+    层界检测建议传原始字节（``original_bytes``）：原图标签清晰度高于 2x
+    放大后的预处理图，配合层界专用低阈值能稳定分出真实层数。
+    返回 ``(段列表, 各段已知层数列表)``，层数未知的段记为 None。
     """
 
     import base64 as b64
@@ -460,18 +479,56 @@ def _split_into_bands(
 
     from PIL import Image as PILImage
 
-    if top_ratio is None:
-        top_ratio = float(os.getenv("IMAGE_SPLIT_RATIO", "0.46"))
-    top_ratio = min(0.9, max(0.1, top_ratio))
+    from backend.services.image.locate import detect_layer_band_ys
+
     raw = b64.b64decode(image.data)
     img = PILImage.open(io.BytesIO(raw)).convert("RGB")
     width, height = img.size
     if height < 40:
-        return [image]
-    top = img.crop((0, 0, width, int(height * top_ratio)))
-    bottom = img.crop((0, int(height * (top_ratio - 0.10)), width, height))
+        return [image], [None]
+
+    crops: list[PILImage.Image] = []
+    layer_counts: list[int | None] = []
+    detect_bytes = original_bytes if original_bytes else raw
+    boundaries = detect_layer_band_ys(image_bytes=detect_bytes)
+    if boundaries and len(boundaries) >= 3:
+        # 层界确定层数：boundaries 分隔 n 层；照片下半段离镜头近、叠放层次多，
+        # GLM 更容易把视觉层次误判成层，所以优先让下半段更薄（2 层左右）、
+        # 上半段更厚（3~4 层），保证每段 2~4 层。
+        total_layers = len(boundaries) + 1
+        candidates = [
+            index
+            for index in range(2, total_layers - 1)
+            if 2 <= index <= 4 and 2 <= total_layers - index <= 4
+        ]
+        if candidates:
+            split_index = max(candidates)
+            pad = min(24, int(height * 0.02))
+            detect_height = PILImage.open(io.BytesIO(detect_bytes)).size[1]
+            split_y = (
+                boundaries[split_index - 1] * height // detect_height
+                if detect_height > 0
+                else boundaries[split_index - 1]
+            )
+            crops = [
+                img.crop((0, 0, width, min(height, split_y + pad))),
+                img.crop((0, max(0, split_y - pad), width, height)),
+            ]
+            layer_counts = [split_index, total_layers - split_index]
+
+    if not crops:
+        # 层界检测失败：回退固定比例切分（env 可调，默认 0.5）。
+        if top_ratio is None:
+            top_ratio = float(os.getenv("IMAGE_SPLIT_RATIO", "0.5"))
+        top_ratio = min(0.9, max(0.1, top_ratio))
+        crops = [
+            img.crop((0, 0, width, int(height * top_ratio))),
+            img.crop((0, int(height * top_ratio), width, height)),
+        ]
+        layer_counts = [None, None]
+
     bands: list[ImageInput] = []
-    for index, band in enumerate((top, bottom), start=1):
+    for index, band in enumerate(crops, start=1):
         buffer = io.BytesIO()
         band.save(buffer, format="JPEG", quality=90)
         jpeg = buffer.getvalue()
@@ -483,7 +540,7 @@ def _split_into_bands(
                 size_bytes=len(jpeg),
             )
         )
-    return bands
+    return bands, layer_counts
 
 
 async def recognize_image_segments(
@@ -491,6 +548,7 @@ async def recognize_image_segments(
     image: ImageInput,
     client: GLM46VClient,
     source_name: str,
+    original_bytes: bytes | None = None,
 ) -> tuple[list[SheetRecognition], str, str | None]:
     """整图路径 v2：横切两段用 glm-4v-flash 紧凑格式识别，再合并层号。
 
@@ -499,14 +557,31 @@ async def recognize_image_segments(
     """
 
     try:
-        bands = _split_into_bands(image)
+        bands, layer_counts = _split_into_bands(
+            image, original_bytes=original_bytes
+        )
     except Exception as exc:  # noqa: BLE001 - 分片失败降级为可读错误。
         return [], "", f"图片分片失败：{exc}"
 
     all_rows: list[SheetRecognition] = []
     summaries: list[str] = []
-    layer_offset = 0
+    # 层号偏移由检测出的层数决定，与 GLM 解析是否成功解耦：
+    # band i 的绝对起始层号 = 前面所有段已知层数之和。
+    offsets: list[int] = []
+    running = 0
+    for count in layer_counts:
+        offsets.append(running)
+        if count is not None:
+            running += count
     for index, band in enumerate(bands, start=1):
+        known_count = (
+            layer_counts[index - 1] if index - 1 < len(layer_counts) else None
+        )
+        if known_count is not None:
+            layer_offset = offsets[index - 1] if index - 1 < len(offsets) else 0
+        else:
+            # 层数未知（检测失败回退比例切分）：沿用已解析的最大层号偏移。
+            layer_offset = max((item.layer for item in all_rows), default=0)
         try:
             result = await client.analyze_images(
                 [band],
@@ -527,7 +602,7 @@ async def recognize_image_segments(
         if not rows:
             summaries.append(f"{source_name} 第{index}段未解析到编号")
             continue
-        if index > 1:
+        if layer_offset > 0:
             rows = [
                 SheetRecognition(
                     sheet_no=item.sheet_no,
@@ -540,7 +615,6 @@ async def recognize_image_segments(
                 for item in rows
             ]
         all_rows.extend(rows)
-        layer_offset = max(item.layer for item in all_rows)
         recognized = sum(1 for item in rows if item.sheet_no)
         summaries.append(f"{source_name} 第{index}段识别 {recognized} 个编号")
 

@@ -289,6 +289,7 @@ async def stream_image_recognition(
             image=image,
             client=client,
             source_name=name,
+            original_bytes=original_bytes,
         )
         if error is not None:
             failures.append(

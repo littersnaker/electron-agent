@@ -745,7 +745,7 @@ async def test_stream_image_recognition_emits_sse_frames(monkeypatch, tmp_path) 
     def fake_preprocess(*, name, mime_type, data, max_image_mb):
         return SimpleNamespace(name=name, data=data)
 
-    async def fake_segments(*, image, client, source_name):
+    async def fake_segments(*, image, client, source_name, original_bytes=None):
         return (
             [SheetRecognition("003", layer=1, position=2, stack=1, source_image=source_name)],
             "第1段识别 1 个编号",
