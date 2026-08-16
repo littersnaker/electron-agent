@@ -14,7 +14,10 @@ import os
 from backend.services.glm46v.client import GLM46VError, ImageInput
 
 UPSCALE_FACTOR = 2
-TARGET_EDGE_PIXELS = 1536
+# GLM 对图片的 token 计费与输入分辨率无关（内部统一缩放，实测 2275px 与
+# 1536px 输入 prompt_tokens 完全相同），缩小只会白丢真实像素；阈值提高到
+# 2560，让手机原图/微信图尽量以原始分辨率进入识别，仅对超清大图兜底缩小。
+TARGET_EDGE_PIXELS = int(os.getenv("IMAGE_TARGET_EDGE_PIXELS", "2560"))
 ENHANCE_STRENGTH = float(os.getenv("IMAGE_ENHANCE_STRENGTH", "1.6"))
 MAX_JPEG_BYTES = int(os.getenv("IMAGE_MAX_JPEG_BYTES", str(20 * 1024 * 1024)))
 # 单个标签小图放大到的目标边长：数字太小识别不准，放大到接近整图识别尺度。
