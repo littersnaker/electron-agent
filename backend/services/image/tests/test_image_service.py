@@ -25,6 +25,7 @@ from backend.services.image.recognition import (
     build_recognition_prompt,
     classify_failure_kind,
     merge_recognitions,
+    recognize_image_segments,
     recognize_single_image,
 )
 from backend.services.image.structuring import _deterministic_rows, structure_rows
@@ -193,6 +194,91 @@ def test_backfill_empty_slots_backfills_gaps() -> None:
         (3, "003", ""),
         (1, "", "空货位"),
     ]
+
+
+def test_parse_compact_output_handles_stacks_and_continuation() -> None:
+    """紧凑网格格式：叠放排、续行、空位与无法辨认占位都能解析。"""
+
+    from backend.services.image.recognition import _parse_compact_output
+
+    content = (
+        "第1层:1=325,2=空,3=编号无法辨认\n"
+        ";2排:1=179,2=222\n"
+        "第2层:1=62;2排:1=71,2=240"
+    )
+    rows = _parse_compact_output(content, source_image="shelf.jpg")
+    assert [(item.sheet_no, item.layer, item.stack, item.position, item.note) for item in rows] == [
+        ("325", 1, 1, 1, ""),
+        ("", 1, 1, 2, "空货位"),
+        ("", 1, 1, 3, "编号无法辨认"),
+        ("179", 1, 2, 1, ""),
+        ("222", 1, 2, 2, ""),
+        ("62", 2, 1, 1, ""),
+        ("71", 2, 2, 1, ""),
+        ("240", 2, 2, 2, ""),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recognize_image_segments_merges_layer_offsets() -> None:
+    """分段识别：两段层号偏移合并，且请求带 max_tokens=1024、关闭 thinking。"""
+
+    from PIL import Image as PILImage
+
+    class FakeSegmentClient:
+        def __init__(self, responses: list[str]) -> None:
+            self.responses = list(responses)
+            self.calls: list[tuple[int, int, bool]] = []
+
+        @property
+        def settings(self) -> GLM46VSettings:
+            return GLM46VSettings(api_key="fake", endpoint="https://example.test")
+
+        async def analyze_images(
+            self,
+            images,
+            *,
+            prompt: str,
+            max_tokens: int = 6144,
+            include_thinking: bool = True,
+        ):
+            self.calls.append((len(images), max_tokens, include_thinking))
+            return {
+                "model": "glm-4v-flash",
+                "content": self.responses.pop(0),
+                "usage": {},
+            }
+
+    client = FakeSegmentClient(
+        [
+            "第1层:1=003\n第2层:1=005",
+            "第1层:1=008\n第2层:1=009;2排:1=010",
+        ]
+    )
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (60, 300), (200, 200, 200)).save(buffer, format="PNG")
+    image = SimpleNamespace(
+        name="shelf.jpg",
+        mime_type="image/png",
+        data=base64.b64encode(buffer.getvalue()).decode("ascii"),
+        size_bytes=len(buffer.getvalue()),
+    )
+    rows, summary, error = await recognize_image_segments(
+        image=image,
+        client=client,
+        source_name="shelf.jpg",
+    )
+    assert error is None
+    assert [(item.sheet_no, item.layer, item.stack, item.position) for item in rows] == [
+        ("003", 1, 1, 1),
+        ("005", 2, 1, 1),
+        ("008", 3, 1, 1),
+        ("009", 4, 1, 1),
+        ("010", 4, 2, 1),
+    ]
+    assert client.calls == [(1, 1024, False), (1, 1024, False)]
+    assert "第1段识别 2 个编号" in summary
+    assert "第2段识别 3 个编号" in summary
 
 
 @pytest.mark.asyncio
@@ -645,10 +731,10 @@ async def test_stream_image_recognition_emits_sse_frames(monkeypatch, tmp_path) 
     def fake_preprocess(*, name, mime_type, data, max_image_mb):
         return SimpleNamespace(name=name, data=data)
 
-    async def fake_recognize(*, image, client, prompt):
+    async def fake_segments(*, image, client, source_name):
         return (
-            [SheetRecognition("003", layer=1, position=2, stack=1, source_image=image.name)],
-            "识别到 1 个编号",
+            [SheetRecognition("003", layer=1, position=2, stack=1, source_image=source_name)],
+            "第1段识别 1 个编号",
             None,
         )
 
@@ -660,7 +746,7 @@ async def test_stream_image_recognition_emits_sse_frames(monkeypatch, tmp_path) 
 
     monkeypatch.setattr(image_service, "GLM46VClient", lambda settings: FakeNoFailClient())
     monkeypatch.setattr(image_service, "preprocess_image", fake_preprocess)
-    monkeypatch.setattr(image_service, "recognize_single_image", fake_recognize)
+    monkeypatch.setattr(image_service, "recognize_image_segments", fake_segments)
     monkeypatch.setattr(image_service, "structure_rows", fake_structure)
     monkeypatch.setattr(image_service, "write_recognition_excel", fake_write)
 

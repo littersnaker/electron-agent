@@ -12,6 +12,7 @@ GLM-4.6V 是免费模型，输出格式不稳定（可能给编号加方括号�
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from backend.services.glm46v.client import (
@@ -62,6 +63,12 @@ _GRID_CELL_PATTERN = re.compile(
     r"第\s*(\d+)\s*位\s*[=＝:]?\s*([^,，;；、\n]+)"
 )
 
+# 紧凑网格模板（glm-4v-flash 的 max_tokens 上限 1024，必须压缩输出）：
+# 每层一行 “第N层:1=编号,2=编号;2排:1=编号;3排:1=编号”，叠放排作为分号段。
+_COMPACT_LAYER_LINE = re.compile(r"第\s*(\d+)\s*层\s*[:：]\s*([^\n]*)")
+_COMPACT_STACK_PREFIX = re.compile(r"^\s*(\d+)\s*排\s*[:：]\s*(.*)$")
+_COMPACT_CELL = re.compile(r"(\d+)\s*[=＝]\s*([^,，;；\n]+)")
+
 _TAG_BATCH_PROMPT = """你是货架标签识别员。下面有若干张标签小图，每张图上有且只有一个编号。
 
 要求：
@@ -106,6 +113,34 @@ def build_recognition_prompt(image_names: str) -> str:
 
     return (
         f"{_RECOGNITION_PROMPT}\n\n"
+        f"当前照片：{image_names}\n"
+        "如照片中没有货架或图纸，请只输出“未检测到货架图纸”。"
+    )
+
+
+_COMPACT_RECOGNITION_PROMPT = """你是货架图纸识别员。照片里的货架有若干层，每层从左到右有若干货位；**每个货位可能上下叠放多张图纸（2-3 层），叠放的每一张都要单独识别**。
+
+坐标规则：第1层=照片中最上面的一层；货位从左到右编号，第1位=最左；同一货位叠放时从上到下为第1排、第2排、第3排。
+
+输出格式（严格按模板，紧凑，不要任何解释或 Markdown）：
+第1层:1=325,2=89,3=302;2排:1=179,2=编号无法辨认,3=222;3排:1=129,2=354
+第2层:1=62,2=201;2排:1=71,2=240;3排:1=298,2=127
+
+规则：
+- 每层一行，以“第N层:”开头；第1排直接跟在冒号后，第2排用“;2排:”开头，第3排用“;3排:”开头；
+- 每排内用“位号=编号”列出该排所有货位，逗号分隔，位号从1开始连续，空位写“空”，看不清写“编号无法辨认”；
+- 有叠放才写“2排:”“3排:”，没有就不写；
+- 编号只写数字；
+- 不要虚构层、排、货位，数不清就写“数不清”；
+- 输出必须覆盖照片里的全部层，从上到下逐层输出。
+"""
+
+
+def build_compact_recognition_prompt(image_names: str) -> str:
+    """生成 glm-4v-flash 可用的紧凑网格识别提示词（1024 token 输出预算内）。"""
+
+    return (
+        f"{_COMPACT_RECOGNITION_PROMPT}\n\n"
         f"当前照片：{image_names}\n"
         "如照片中没有货架或图纸，请只输出“未检测到货架图纸”。"
     )
@@ -322,6 +357,194 @@ def _summarize_rows(
     return rows, summary
 
 
+def _parse_compact_output(
+    content: str, *, source_image: str
+) -> list[SheetRecognition]:
+    """解析 glm-4v-flash 的紧凑网格输出（第N层:1=编号,...;2排:...）。
+
+    每层一行，第 1 排跟在“第N层:”后，叠放排用“;N排:”分号段表示；
+    GLM 偶发把“;N排:”段拆到下一行，这里按“第N层:”行切块、其余行并入
+    当前层，保证叠放排不丢。空位/无法辨认仍保留为占位行。
+    """
+
+    blocks: dict[int, str] = {}
+    order: list[int] = []
+    current: int | None = None
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        match = _COMPACT_LAYER_LINE.search(line)
+        if match:
+            current = int(match.group(1))
+            if current not in blocks:
+                blocks[current] = ""
+                order.append(current)
+            blocks[current] += ";" + match.group(2)
+        elif current is not None and line:
+            # 续行（如单独一行的 “2排:...”），并入当前层
+            blocks[current] += ";" + line
+
+    parsed: list[SheetRecognition] = []
+    seen: set[tuple[int, int, int]] = set()
+    for layer in order:
+        for segment in blocks[layer].split(";"):
+            segment = segment.strip()
+            if not segment:
+                continue
+            stack_match = _COMPACT_STACK_PREFIX.match(segment)
+            if stack_match:
+                stack = int(stack_match.group(1))
+                cell_payload = stack_match.group(2)
+            else:
+                stack = 1
+                cell_payload = segment
+            for cell in _COMPACT_CELL.finditer(cell_payload):
+                position = int(cell.group(1))
+                raw_value = cell.group(2).strip()
+                key = (layer, stack, position)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if any(marker in raw_value for marker in UNCERTAIN_MARKERS):
+                    note = "编号无法辨认"
+                elif raw_value == "空" or raw_value.startswith("无"):
+                    note = "空货位"
+                else:
+                    number = _extract_sheet_no(raw_value)
+                    if not number:
+                        note = "编号无法辨认"
+                    else:
+                        parsed.append(
+                            SheetRecognition(
+                                sheet_no=number,
+                                layer=layer,
+                                position=position,
+                                stack=stack,
+                                source_image=source_image,
+                                note="",
+                            )
+                        )
+                        continue
+                parsed.append(
+                    SheetRecognition(
+                        sheet_no="",
+                        layer=layer,
+                        position=position,
+                        stack=stack,
+                        source_image=source_image,
+                        note=note,
+                    )
+                )
+                if len(parsed) >= MAX_RECOGNITIONS_PER_IMAGE:
+                    return parsed
+    return parsed
+
+
+def _split_into_bands(
+    image: ImageInput, *, top_ratio: float | None = None
+) -> list[ImageInput]:
+    """把整图横向切成上下两段（10% 重叠），供 glm-4v-flash 分段识别。
+
+    glm-4v-flash 的输出上限只有 1024 token，一口气输出 6 层会在第 3~4 层
+    自行停止；切成两段后每段 2~4 层，输出预算充足。重叠段用于避免
+    正好落在切分线上的标签被裁断，层号在合并时统一偏移。
+    切分位置可用环境变量 ``IMAGE_SPLIT_RATIO`` 调整（0~1，默认 0.55，
+    表示上段占图高 55%）；货架层高分布不均时调它避免切穿某一层。
+    """
+
+    import base64 as b64
+    import io
+
+    from PIL import Image as PILImage
+
+    if top_ratio is None:
+        top_ratio = float(os.getenv("IMAGE_SPLIT_RATIO", "0.55"))
+    top_ratio = min(0.9, max(0.1, top_ratio))
+    raw = b64.b64decode(image.data)
+    img = PILImage.open(io.BytesIO(raw)).convert("RGB")
+    width, height = img.size
+    if height < 40:
+        return [image]
+    top = img.crop((0, 0, width, int(height * top_ratio)))
+    bottom = img.crop((0, int(height * (top_ratio - 0.10)), width, height))
+    bands: list[ImageInput] = []
+    for index, band in enumerate((top, bottom), start=1):
+        buffer = io.BytesIO()
+        band.save(buffer, format="JPEG", quality=90)
+        jpeg = buffer.getvalue()
+        bands.append(
+            ImageInput(
+                name=f"{image.name}#{index}",
+                mime_type="image/jpeg",
+                data=b64.b64encode(jpeg).decode("ascii"),
+                size_bytes=len(jpeg),
+            )
+        )
+    return bands
+
+
+async def recognize_image_segments(
+    *,
+    image: ImageInput,
+    client: GLM46VClient,
+    source_name: str,
+) -> tuple[list[SheetRecognition], str, str | None]:
+    """整图路径 v2：横切两段用 glm-4v-flash 紧凑格式识别，再合并层号。
+
+    两段独立调用（共享全局限流，间隔 ≥2.5s），第一段层号保持 1..k，
+    第二段层号偏移 k，合并为完整货架；单段失败只记总结、不中断另一段。
+    """
+
+    try:
+        bands = _split_into_bands(image)
+    except Exception as exc:  # noqa: BLE001 - 分片失败降级为可读错误。
+        return [], "", f"图片分片失败：{exc}"
+
+    all_rows: list[SheetRecognition] = []
+    summaries: list[str] = []
+    layer_offset = 0
+    for index, band in enumerate(bands, start=1):
+        try:
+            result = await client.analyze_images(
+                [band],
+                prompt=build_compact_recognition_prompt(source_name),
+                max_tokens=1024,
+                include_thinking=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - 单段失败降级，另一段继续。
+            summaries.append(f"{source_name} 第{index}段识别失败：{exc}")
+            continue
+        content = str(result.get("content") or "").strip()
+        if not content or "未检测到货架图纸" in content or "数不清" in content:
+            summaries.append(f"{source_name} 第{index}段未识别到货架图纸")
+            continue
+        rows = _parse_compact_output(
+            content, source_image=f"{source_name}#{index}"
+        )
+        if not rows:
+            summaries.append(f"{source_name} 第{index}段未解析到编号")
+            continue
+        if index > 1:
+            rows = [
+                SheetRecognition(
+                    sheet_no=item.sheet_no,
+                    layer=item.layer + layer_offset,
+                    position=item.position,
+                    stack=item.stack,
+                    source_image=item.source_image,
+                    note=item.note,
+                )
+                for item in rows
+            ]
+        all_rows.extend(rows)
+        layer_offset = max(item.layer for item in all_rows)
+        recognized = sum(1 for item in rows if item.sheet_no)
+        summaries.append(f"{source_name} 第{index}段识别 {recognized} 个编号")
+
+    if not all_rows:
+        return [], "；".join(summaries) or "未识别到任何图纸编号。", None
+    return all_rows, "；".join(summaries), None
+
+
 async def recognize_tag_batches(
     *,
     crops: list[ImageInput],
@@ -415,10 +638,12 @@ def merge_recognitions(
 
 __all__ = [
     "TAG_BATCH_SIZE",
+    "build_compact_recognition_prompt",
     "build_recognition_prompt",
     "build_tag_batch_prompt",
     "classify_failure_kind",
     "merge_recognitions",
+    "recognize_image_segments",
     "recognize_single_image",
     "recognize_tag_batches",
 ]

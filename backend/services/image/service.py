@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import logging
+import os
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -23,9 +25,8 @@ from backend.services.image.models import (
 )
 from backend.services.image.preprocess import crop_tag, preprocess_image
 from backend.services.image.recognition import (
-    build_recognition_prompt,
     classify_failure_kind,
-    recognize_single_image,
+    recognize_image_segments,
     recognize_tag_batches,
 )
 from backend.services.image.locate import absolutize_columns
@@ -158,6 +159,11 @@ async def stream_image_recognition(
     """
 
     settings = GLM46VSettings.from_credentials(credentials)
+    # 整图识别改用 glm-4v-flash：编号读取更准、max_tokens=1024 配合分段识别。
+    # 其他消费方（QA/Code 图片预处理、review 截图）仍用默认 glm-4.6v-flash。
+    image_glm_model = os.getenv("IMAGE_GLM_MODEL", "glm-4v-flash").strip()
+    if image_glm_model and isinstance(settings, GLM46VSettings):
+        settings = dataclasses.replace(settings, model=image_glm_model)
     client = GLM46VClient(settings)
 
     attachments = collect_image_attachments(body)
@@ -279,10 +285,10 @@ async def stream_image_recognition(
                 "detail": f"照片 {index}/{total}：{name} 未定位到足够标签，改用整图识别…",
             },
         )
-        photo_rows, _summary, error = await recognize_single_image(
+        photo_rows, _summary, error = await recognize_image_segments(
             image=image,
             client=client,
-            prompt=build_recognition_prompt(image_names=name),
+            source_name=name,
         )
         if error is not None:
             failures.append(

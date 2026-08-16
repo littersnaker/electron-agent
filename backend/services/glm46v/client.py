@@ -268,8 +268,14 @@ class GLM46VClient:
         *,
         prompt: str,
         max_tokens: int = 6144,
+        include_thinking: bool = True,
     ) -> dict[str, Any]:
-        """联合分析一组图片并返回规范化结果。"""
+        """联合分析一组图片并返回规范化结果。
+
+        ``include_thinking`` 控制是否带 thinking 参数：glm-4v-flash 的
+        max_tokens 上限只有 1024，开启 thinking 会挤占输出预算，图片识别
+        分段路径显式传 False。
+        """
 
         if not self.settings.api_key:
             raise GLM46VError(
@@ -304,11 +310,12 @@ class GLM46VClient:
         payload = {
             "model": self.settings.model,
             "messages": [{"role": "user", "content": content}],
-            "thinking": {"type": "enabled"},
             "temperature": 0.1,
             "max_tokens": max(512, min(int(max_tokens), 16_384)),
             "stream": False,
         }
+        if include_thinking:
+            payload["thinking"] = {"type": "enabled"}
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
