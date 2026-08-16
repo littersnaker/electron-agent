@@ -13,7 +13,7 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from backend.services.agent.reflection.schema import extract_json_object
-from backend.services.image.models import SheetRecognition
+from backend.services.image.models import UNCERTAIN_MARKERS, SheetRecognition
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
@@ -45,12 +45,15 @@ _STRUCTURING_SYSTEM_PROMPT = """你是表格整理助手。下面是一份货架
 
 请把它整理成 JSON 数组，数组元素字段：
 - sheetNo：图纸编号（如“003”）
-- layer：货架层号（整数，1 = 最下层）
+- layer：货架层号（整数，1 = 最上层）
 - position：层内货位序号（整数，1 = 最左）
-- stack：同一货位叠放排号（整数，1 = 最下；无叠放时也是 1）
+- stack：同一货位叠放排号（整数，1 = 最上；无叠放时也是 1）
 - sourceImage：来源照片文件名
-- note：备注（如“编号无法辨认”），没有则留空字符串
-- 无法辨认编号的货位也要输出，note 标“编号无法辨认”
+- note：备注（“编号无法辨认”或“空货位”），没有则留空字符串
+- 无法辨认编号的货位也要输出：sheetNo 用空字符串，note 标“编号无法辨认”
+- 空货位也要输出：sheetNo 用空字符串，note 标“空货位”
+- 严禁重编号：layer/position/stack 必须原样保留输入值，空位号之间的间隔
+  不能压缩；严禁新增或删除任何一行
 
 只输出 JSON 数组本身，不要 Markdown 围栏、不要解释。"""
 
@@ -67,7 +70,7 @@ async def structure_rows(
     if not available:
         return _deterministic_rows(raw_rows)
     lines = [
-        f"{item.sheet_no}|{item.layer}|{item.position}|{item.stack}|"
+        f"{item.sheet_no or '编号无法辨认'}|{item.layer}|{item.position}|{item.stack}|"
         f"{item.source_image}|{item.note}"
         for item in raw_rows
     ]
@@ -89,20 +92,29 @@ async def structure_rows(
         structured = StructuredRows.model_validate(payload)
         if not structured.rows:
             return _deterministic_rows(raw_rows)
-        return [item for item in (_rows_from_model(structured.rows)) if item]
+        normalized = [item for item in (_rows_from_model(structured.rows)) if item]
+        if not _coords_preserved(raw_rows, normalized):
+            LOGGER.warning("图片识别 LLM 整理丢失/改动了坐标，回退确定性排序")
+            return _deterministic_rows(raw_rows)
+        return normalized
     except Exception as exc:
         LOGGER.warning("图片识别 LLM 整理失败，回退确定性排序：%s", exc)
         return _deterministic_rows(raw_rows)
 
 
 def _rows_from_model(items: list[RecognizedRow]) -> list[SheetRecognition]:
-    """把 LLM 输出转换为内部模型；缺编号的行直接丢弃。"""
+    """把 LLM 输出转换为内部模型；缺编号且备注无"无法辨认"标记的行直接丢弃。"""
 
     result: list[SheetRecognition] = []
     for item in items:
         sheet_no = (item.sheetNo or "").strip()
-        if not sheet_no:
+        note = (item.note or "").strip()
+        if not sheet_no and not any(
+            marker in note for marker in UNCERTAIN_MARKERS
+        ) and "空货位" not in note:
             continue
+        if not sheet_no:
+            note = "编号无法辨认" if "空货位" not in note else "空货位"
         result.append(
             SheetRecognition(
                 sheet_no=sheet_no,
@@ -110,10 +122,20 @@ def _rows_from_model(items: list[RecognizedRow]) -> list[SheetRecognition]:
                 position=max(1, int(item.position)),
                 stack=max(1, int(item.stack)),
                 source_image=item.sourceImage.strip(),
-                note=item.note.strip(),
+                note=note,
             )
         )
     return result
+
+
+def _coords_preserved(
+    raw_rows: list[SheetRecognition], structured: list[SheetRecognition]
+) -> bool:
+    """校验 LLM 整理结果是否完整保留输入坐标（含空位与叠放排）。"""
+
+    in_coords = {(item.layer, item.position, item.stack) for item in raw_rows}
+    out_coords = {(item.layer, item.position, item.stack) for item in structured}
+    return in_coords == out_coords
 
 
 def _deterministic_rows(raw_rows: list[SheetRecognition]) -> list[SheetRecognition]:

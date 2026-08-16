@@ -19,6 +19,7 @@ from backend.services.image.models import (
     ImageRecognitionFailure,
     RecognitionOutcome,
     SheetRecognition,
+    backfill_empty_slots,
 )
 from backend.services.image.preprocess import crop_tag, preprocess_image
 from backend.services.image.recognition import (
@@ -27,6 +28,7 @@ from backend.services.image.recognition import (
     recognize_single_image,
     recognize_tag_batches,
 )
+from backend.services.image.locate import absolutize_columns
 from backend.services.image.structuring import structure_rows
 from backend.services.llm.credentials import LlmCredentials
 from backend.utils.sse import sse_packet
@@ -92,14 +94,24 @@ def _rows_from_boxes(
     """把定位框与识别编号组装成识别行；未识别编号记入失败清单。
 
     坐标直接映射：layer=TagBox.row、position=TagBox.col（货位）、
-    stack=TagBox.rank（叠放排）。未识别编号的格子不出现在 rows 中，
-    前端矩阵按 maxStack×maxPosition 渲染时对应格子留空。
+    stack=TagBox.rank（叠放排）。未识别编号的格子保留为占位行
+    （sheet_no 为空），前端矩阵渲染为"空"，位置不会凭空消失。
     """
 
     rows: list[SheetRecognition] = []
     failures: list[ImageRecognitionFailure] = []
     for box, number in zip(boxes, numbers, strict=False):
         if number is None:
+            rows.append(
+                SheetRecognition(
+                    sheet_no="",
+                    layer=box.row,
+                    position=box.col,
+                    stack=box.rank,
+                    source_image=source_image,
+                    note="编号无法辨认",
+                )
+            )
             failures.append(
                 ImageRecognitionFailure(
                     image_name=source_image,
@@ -122,6 +134,12 @@ def _rows_from_boxes(
             )
         )
     return rows, failures
+
+
+def _recognized_count(rows: list[SheetRecognition]) -> int:
+    """统计识别成功的编号数（占位行 sheet_no 为空，不计入）。"""
+
+    return sum(1 for item in rows if item.sheet_no)
 
 
 async def stream_image_recognition(
@@ -221,6 +239,8 @@ async def stream_image_recognition(
             boxes = None
 
         if boxes:
+            # 列号扩展为绝对货位号（层内空位会在下方回填，不再压缩）。
+            boxes = absolutize_columns(boxes)
             yield sse_packet(
                 "STATUS",
                 {
@@ -243,10 +263,11 @@ async def stream_image_recognition(
             if crops:
                 numbers = await recognize_tag_batches(crops=crops, client=client)
                 photo_rows, photo_failures = _rows_from_boxes(boxes, numbers, name)
+                photo_rows = backfill_empty_slots(photo_rows)
                 rows.extend(photo_rows)
                 failures.extend(photo_failures)
                 summaries.append(
-                    f"{name}：定位 {len(boxes)} 个标签，识别 {len(photo_rows)} 个编号"
+                    f"{name}：定位 {len(boxes)} 个标签，识别 {_recognized_count(photo_rows)} 个编号"
                 )
                 continue
 
@@ -274,7 +295,7 @@ async def stream_image_recognition(
         else:
             rows.extend(photo_rows)
             summaries.append(
-                f"{name}：整图识别 {len(photo_rows)} 个图纸编号"
+                f"{name}：整图识别 {_recognized_count(photo_rows)} 个图纸编号"
             )
 
     outcome.failures.extend(failures)
@@ -320,14 +341,18 @@ async def stream_image_recognition(
 
     yield sse_packet("TEXT", {"content": outcome.summary})
     yield sse_packet("IMAGE_RESULT", outcome.to_json())
+    recognized_count = _recognized_count(outcome.rows)
+    unknown_count = len(outcome.rows) - recognized_count
+    done_detail = f"识别完成：{recognized_count} 个图纸编号"
+    if unknown_count:
+        done_detail += f"，{unknown_count} 处无法辨认"
+    if outcome.failures:
+        done_detail += f"，{len(outcome.failures)} 张照片需复核"
     yield sse_packet(
         "STATUS",
         {
             "stage": "done",
-            "detail": (
-                f"识别完成：{len(outcome.rows)} 个图纸编号"
-                + (f"，{len(outcome.failures)} 张照片需复核" if outcome.failures else "")
-            ),
+            "detail": done_detail,
         },
     )
 

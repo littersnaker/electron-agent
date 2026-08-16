@@ -231,7 +231,7 @@ def _assign_grid_with_boards(
                         y=box[1],
                         w=box[2],
                         h=box[3],
-                        row=len(bands) - band_index,
+                        row=band_index + 1,
                         col=position_index,
                         rank=rank,
                     )
@@ -294,7 +294,7 @@ def _assign_grid(
       接近标签尺寸，层板间/货位间的空隙显著更大，固定阈值即可稳定分割，
       不采用自适应中位数（稀疏布局下单个大空隙会污染中位数）。
     - 同一 (层,位) 桶内多个标签按 y 排序得到排位（垂直叠放，靠上为排 1）。
-    - 层号从下到上：照片最下面（y 最大）为第 1 层，符合货架惯例。
+    - 层号从上到下：照片最上面（y 最小）为第 1 层。
     """
 
     heights = sorted(box[3] for box in boxes)
@@ -346,7 +346,7 @@ def _assign_grid(
                         y=box[1],
                         w=box[2],
                         h=box[3],
-                        row=row_count - row_index,
+                        row=row_index + 1,
                         col=col_index,
                         rank=rank,
                     )
@@ -354,4 +354,53 @@ def _assign_grid(
     return tagged
 
 
-__all__ = ["TagBox", "locate_tags"]
+def absolutize_columns(boxes: list[TagBox]) -> list[TagBox]:
+    """把每层压缩的列号扩展为绝对货位号（启发式，仅估计可靠时生效）。
+
+    货架每层货位通常等距：用层内相邻标签中心距的中位数估计货位间距 pitch，
+    用所有层最左标签的中心估计货架左边缘；每层按 (cx - left)/pitch 取整得到
+    绝对列号。某层最左位空缺时（例如第1位是空货位），该层整体会向右偏移，
+    空位由上层 ``backfill_empty_slots`` 回填为"空"，位置不再被压缩。
+    """
+
+    if not boxes:
+        return boxes
+    by_row: dict[int, list[TagBox]] = {}
+    for box in boxes:
+        by_row.setdefault(box.row, []).append(box)
+    diffs: list[float] = []
+    for row_boxes in by_row.values():
+        sorted_boxes = sorted(row_boxes, key=lambda item: item.cx)
+        for prev, curr in zip(sorted_boxes, sorted_boxes[1:]):
+            diff = curr.cx - prev.cx
+            if diff > 0:
+                diffs.append(diff)
+    if not diffs:
+        return boxes
+    diffs.sort()
+    pitch = diffs[len(diffs) // 2]
+    if pitch <= 0:
+        return boxes
+    global_left = min(box.cx for box in boxes)
+    result: list[TagBox] = []
+    for row_boxes in by_row.values():
+        sorted_boxes = sorted(row_boxes, key=lambda item: item.cx)
+        layer_left = sorted_boxes[0].cx
+        shift = round((layer_left - global_left) / pitch)
+        for box in sorted_boxes:
+            col_abs = max(1, shift + round((box.cx - layer_left) / pitch) + 1)
+            result.append(
+                TagBox(
+                    x=box.x,
+                    y=box.y,
+                    w=box.w,
+                    h=box.h,
+                    row=box.row,
+                    col=col_abs,
+                    rank=box.rank,
+                )
+            )
+    return result
+
+
+__all__ = ["TagBox", "absolutize_columns", "locate_tags"]

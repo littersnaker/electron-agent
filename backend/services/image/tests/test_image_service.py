@@ -18,6 +18,7 @@ from backend.services.image.excel import (
 from backend.services.image.models import (
     ImageRecognitionFailure,
     SheetRecognition,
+    backfill_empty_slots,
 )
 from backend.services.image.preprocess import preprocess_image
 from backend.services.image.recognition import (
@@ -100,8 +101,98 @@ def test_preprocess_rejects_invalid_data() -> None:
 def test_build_recognition_prompt_contains_fixed_rules() -> None:
     prompt = build_recognition_prompt("shelf_a.jpg")
     assert "从上到下" in prompt
-    assert "只输出贴有图纸的货位" in prompt
+    assert "空位写“空”" in prompt
+    assert "编号无法辨认" in prompt
+    assert "叠放的每一张都要单独识别" in prompt
     assert "shelf_a.jpg" in prompt
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_parses_grid_with_empty_and_uncertain() -> None:
+    """整图路径：完整网格模板保留空位与无法辨认占位，位号不被压缩。"""
+
+    content = (
+        "第1层：第1位=325, 第2位=空, 第3位=编号无法辨认, 第4位=43, 第5位=268\n"
+        "第2层：第1位=224, 第2位=89\n"
+    )
+    client = FakeClient(content)
+    rows, summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_a.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert [(item.sheet_no, item.layer, item.position, item.note) for item in rows] == [
+        ("325", 1, 1, ""),
+        ("", 1, 2, "空货位"),
+        ("", 1, 3, "编号无法辨认"),
+        ("43", 1, 4, ""),
+        ("268", 1, 5, ""),
+        ("224", 2, 1, ""),
+        ("89", 2, 2, ""),
+    ]
+    assert "1 个空货位" in summary
+    assert "1 处无法辨认" in summary
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_parses_grid_stack_rows() -> None:
+    """整图路径：网格模板中的“第N层第M排”叠放行保留排号。"""
+
+    content = (
+        "第1层：第1位=003, 第2位=005\n"
+        "第1层第2排：第1位=004\n"
+    )
+    client = FakeClient(content)
+    rows, _summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_a.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert [(item.sheet_no, item.layer, item.stack, item.position) for item in rows] == [
+        ("003", 1, 1, 1),
+        ("005", 1, 1, 2),
+        ("004", 1, 2, 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_trims_hallucinated_layer_width() -> None:
+    """免费模型偶发“某层 16 位”虚构：明显超宽的层被截断到中位数宽度。"""
+
+    content = (
+        "第1层：第1位=1, 第2位=2, 第3位=3, 第4位=4, 第5位=5, 第6位=6, 第7位=7\n"
+        "第2层：第1位=8, 第2位=9, 第3位=10, 第4位=11, 第5位=12, 第6位=13, 第7位=14\n"
+        "第3层：第1位=15, 第2位=16, 第3位=17, 第4位=18, 第5位=19, 第6位=20, "
+        "第7位=21, 第8位=22, 第9位=23, 第10位=24, 第11位=25, 第12位=26, "
+        "第13位=27, 第14位=28, 第15位=29, 第16位=30\n"
+    )
+    client = FakeClient(content)
+    rows, _summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_a.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    third_layer = [item for item in rows if item.layer == 3]
+    assert max(item.position for item in third_layer) == 7
+
+
+def test_backfill_empty_slots_backfills_gaps() -> None:
+    """定位路径：绝对列号中间缺失的货位回填为“空货位”占位。"""
+
+    rows = backfill_empty_slots(
+        [
+            SheetRecognition("002", layer=1, position=2, stack=1, source_image="a.jpg"),
+            SheetRecognition("003", layer=1, position=3, stack=1, source_image="a.jpg"),
+        ]
+    )
+    assert [(item.position, item.sheet_no, item.note) for item in rows] == [
+        (2, "002", ""),
+        (3, "003", ""),
+        (1, "", "空货位"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -113,11 +204,15 @@ async def test_recognize_single_image_parses_pipe_rows() -> None:
         prompt="识别",
     )
     assert error is None
-    assert len(rows) == 1  # 005 标注无法辨认，不确定的编号不输出
+    assert len(rows) == 2  # 005 标注无法辨认 → 保留为占位行
     assert rows[0].sheet_no == "003"
     assert rows[0].layer == 1
     assert rows[0].position == 2
     assert rows[0].source_image == "shelf_a.jpg"
+    assert rows[1].sheet_no == ""
+    assert rows[1].note == "编号无法辨认"
+    assert rows[1].layer == 2
+    assert rows[1].position == 3
     assert "识别到 1 个图纸编号" in summary
 
 
@@ -144,8 +239,8 @@ async def test_recognize_single_image_parses_real_glm_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recognize_single_image_skips_uncertain_entries() -> None:
-    """整图路径：标注“编号无法辨认/不确定”的条目不输出编号。"""
+async def test_recognize_single_image_keeps_uncertain_placeholders() -> None:
+    """整图路径：标注“编号无法辨认/不确定”的条目保留坐标占位。"""
 
     content = "005|第2层|第3位|编号无法辨认\n[008]|[第2层|第4位|"
     client = FakeClient(content)
@@ -155,9 +250,57 @@ async def test_recognize_single_image_skips_uncertain_entries() -> None:
         prompt="识别",
     )
     assert error is None
-    assert len(rows) == 1  # 005 不确定被跳过
-    assert rows[0].sheet_no == "008"
-    assert rows[0].note == ""
+    assert len(rows) == 2
+    assert rows[0].sheet_no == ""  # 005 不确定 → 占位
+    assert rows[0].layer == 2
+    assert rows[0].position == 3
+    assert rows[0].note == "编号无法辨认"
+    assert rows[1].sheet_no == "008"
+    assert rows[1].note == ""
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_parses_stack_rows() -> None:
+    """整图路径：识别“第N排”叠放信息，叠放不再被拍平。"""
+
+    content = (
+        "003|第1层|第1排|第2位|\n"
+        "004|第1层|第2排|第2位|\n"
+        "005|第1层|第3位|"
+    )
+    client = FakeClient(content)
+    rows, summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_a.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert [(item.sheet_no, item.layer, item.stack, item.position) for item in rows] == [
+        ("003", 1, 1, 2),
+        ("004", 1, 2, 2),
+        ("005", 1, 1, 3),
+    ]
+    assert "识别到 3 个图纸编号" in summary
+
+
+@pytest.mark.asyncio
+async def test_recognize_single_image_keeps_uncertain_without_number() -> None:
+    """整图路径：只有“第N层|第M位|编号无法辨认”也要保留占位。"""
+
+    content = "第2层|第3位|编号无法辨认\n008|第1层|第4位|"
+    client = FakeClient(content)
+    rows, _summary, error = await recognize_single_image(
+        image=SimpleNamespace(name="shelf_b.jpg"),
+        client=client,
+        prompt="识别",
+    )
+    assert error is None
+    assert len(rows) == 2
+    assert rows[0].sheet_no == ""
+    assert rows[0].layer == 2
+    assert rows[0].position == 3
+    assert rows[0].note == "编号无法辨认"
+    assert rows[1].sheet_no == "008"
 
 
 @pytest.mark.asyncio
@@ -272,6 +415,79 @@ async def test_structure_rows_uses_llm_when_available(monkeypatch) -> None:
     assert rows[0].sheet_no == "003"
 
 
+@pytest.mark.asyncio
+async def test_structure_rows_keeps_uncertain_placeholders(monkeypatch) -> None:
+    """LLM 整理后，编号为空的占位行（备注无法辨认）不能被丢掉。"""
+
+    from backend.services.image import structuring
+
+    async def fake_complete(*, preferred_model_id, credentials, messages, **kwargs):
+        return (
+            '[{"sheetNo":"","layer":1,"position":2,"stack":1,"sourceImage":"a.jpg",'
+            '"note":"编号无法辨认"}]',
+            object(),
+            "fake-model",
+        )
+
+    monkeypatch.setattr(structuring.GATEWAY, "complete", fake_complete)
+    credentials = LlmCredentials(values={"qwen": "k"})
+    rows = await structure_rows(
+        credentials=credentials,
+        preferred_model_id="qwen-test",
+        raw_rows=[
+            SheetRecognition(
+                "",
+                layer=1,
+                position=2,
+                stack=1,
+                source_image="a.jpg",
+                note="编号无法辨认",
+            )
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0].sheet_no == ""
+    assert rows[0].note == "编号无法辨认"
+    assert rows[0].position == 2
+
+
+@pytest.mark.asyncio
+async def test_structure_rows_falls_back_when_llm_drops_coords(monkeypatch) -> None:
+    """LLM 整理结果丢失坐标（例如删掉空位行）时回退确定性排序，保证布局不丢。"""
+
+    from backend.services.image import structuring
+
+    async def fake_complete(*, preferred_model_id, credentials, messages, **kwargs):
+        return (
+            '[{"sheetNo":"003","layer":1,"position":1,"stack":1,'
+            '"sourceImage":"a.jpg","note":""}]',
+            object(),
+            "fake-model",
+        )
+
+    monkeypatch.setattr(structuring.GATEWAY, "complete", fake_complete)
+    credentials = LlmCredentials(values={"qwen": "k"})
+    rows = await structure_rows(
+        credentials=credentials,
+        preferred_model_id="qwen-test",
+        raw_rows=[
+            SheetRecognition("003", layer=1, position=1, stack=1, source_image="a.jpg"),
+            SheetRecognition(
+                "",
+                layer=1,
+                position=2,
+                stack=1,
+                source_image="a.jpg",
+                note="空货位",
+            ),
+        ],
+    )
+    assert [(item.sheet_no, item.position, item.note) for item in rows] == [
+        ("003", 1, ""),
+        ("", 2, "空货位"),
+    ]
+
+
 # ---------- excel ----------
 
 
@@ -346,6 +562,47 @@ def test_write_recognition_excel_no_rows_adds_notice(tmp_path: Path) -> None:
     assert workbook.sheetnames == ["识别结果", "识别失败清单", "识别总结"]
     notice = workbook["识别结果"]
     assert notice["A1"].value == "未识别到图纸编号。"
+
+
+def test_write_recognition_excel_marks_unknown_cells(tmp_path: Path) -> None:
+    """占位行（编号为空）在矩阵里写"空"，位置可见而不是凭空消失。"""
+
+    from openpyxl import load_workbook
+
+    target = write_recognition_excel(
+        directory=tmp_path,
+        rows=[
+            SheetRecognition("", layer=1, position=2, stack=1, source_image="shelf_a.jpg"),
+            SheetRecognition("003", layer=1, position=1, stack=1, source_image="shelf_a.jpg"),
+        ],
+        failures=[],
+        summary="识别到 1 个图纸编号，1 处无法辨认",
+    )
+    workbook = load_workbook(target)
+    sheet = workbook["图纸编号"]
+    assert sheet["B3"].value == "003"
+    assert sheet["C3"].value == "空"
+
+
+def test_rows_from_boxes_keeps_unknown_placeholder() -> None:
+    """标签路径：编号无法辨认的定位框保留为占位行，坐标不丢失。"""
+
+    from backend.services.image.locate import TagBox
+    from backend.services.image.service import _rows_from_boxes
+
+    rows, failures = _rows_from_boxes(
+        boxes=[TagBox(x=0, y=0, w=10, h=10, row=1, col=2, rank=2)],
+        numbers=[None],
+        source_image="a.jpg",
+    )
+    assert len(rows) == 1
+    assert rows[0].sheet_no == ""
+    assert rows[0].layer == 1
+    assert rows[0].position == 2
+    assert rows[0].stack == 2
+    assert rows[0].note == "编号无法辨认"
+    assert len(failures) == 1
+    assert failures[0].kind == "quality"
 
 
 def test_build_excel_filename_format() -> None:

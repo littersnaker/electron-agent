@@ -19,21 +19,47 @@ from backend.services.glm46v.client import (
     GLM46VError,
     ImageInput,
 )
-from backend.services.image.models import ImageRecognitionFailure, SheetRecognition
+from backend.services.image.models import (
+    UNCERTAIN_MARKERS,
+    ImageRecognitionFailure,
+    SheetRecognition,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 MAX_RECOGNITIONS_PER_IMAGE = 120
 # GLM-4.6V 单次请求最多 8 张图（client 常量），裁剪标签按此分批。
 TAG_BATCH_SIZE = 8
-
-# 不确定标记：GLM 表达“看不清/不确定”时不能输出编号，避免把猜错的数据写进 Excel。
-_TAG_UNCERTAIN_MARKERS = ("无法辨认", "不确定", "模糊", "看不清", "?", "？", "未知")
+# 网格解析后的幻觉抑制阈值：某层位宽超过中位数的 2 倍且差 ≥3 时截断到中位数。
+# 免费视觉模型偶发“第 N 层有 16 个货位”这类虚构，货架每层货位通常均匀，
+# 用中位数兜底把明显超出的虚构位裁掉，避免网格被撑爆。
+GRID_WIDTH_HALLUCINATION_FACTOR = 2.0
+GRID_WIDTH_MIN_DIFF = 3
 
 # 容忍 [编号]、[第N层]、全角｜、多余空白与缺失分隔符，从任意文本中提取三元组。
-_RECORD_PATTERN = re.compile(
+# 带叠放排：003|第1层|第2排|第5位|（编号在前，排位可选）
+_RECORD_WITH_STACK_PATTERN = re.compile(
+    r"\[?\s*(\d{1,4})\s*\]?\s*[|｜]\s*\[?\s*第\s*(\d+)\s*层"
+    r"\s*[|｜]\s*\[?\s*第\s*(\d+)\s*排\s*[|｜]\s*\[?\s*第\s*(\d+)\s*位"
+)
+# 无叠放排：003|第1层|第5位|
+_RECORD_BASE_PATTERN = re.compile(
     r"\[?\s*(\d{1,4})\s*\]?\s*[|｜]\s*\[?\s*第\s*(\d+)\s*层"
     r"\s*[|｜]?\s*\[?\s*第\s*(\d+)\s*位"
+)
+# 只有坐标 + 无法辨认：第1层|第3位|编号无法辨认（编号缺失也要保留占位）
+_RECORD_UNCERTAIN_PATTERN = re.compile(
+    r"\[?\s*第\s*(\d+)\s*层\s*[|｜]?\s*\[?\s*第\s*(\d+)\s*位"
+    r"[^0-9]{0,40}?(编号无法辨认|无法辨认|不确定|模糊|看不清|未知)"
+)
+
+# 完整网格模板：第1层：第1位=325, 第2位=空, 第3位=编号无法辨认, ...
+# 支持“第1层第2排：”形式的叠放排；位号是绝对物理货位号，空位也显式输出。
+_GRID_LINE_PATTERN = re.compile(
+    r"第\s*(\d+)\s*层(?:第\s*(\d+)\s*排)?\s*[:：]\s*([^\n]+)"
+)
+_GRID_CELL_PATTERN = re.compile(
+    r"第\s*(\d+)\s*位\s*[=＝:]?\s*([^,，;；、\n]+)"
 )
 
 _TAG_BATCH_PROMPT = """你是货架标签识别员。下面有若干张标签小图，每张图上有且只有一个编号。
@@ -51,18 +77,27 @@ def build_tag_batch_prompt(count: int) -> str:
 
     return f"{_TAG_BATCH_PROMPT}\n共 {count} 张图。请按顺序输出 {count} 行编号。"
 
-_RECOGNITION_PROMPT = """你是货架图纸识别员。请仔细查看这张货架照片，完成以下任务：
+_RECOGNITION_PROMPT = """你是货架图纸识别员。照片里的货架有若干层，每层从左到右有若干货位；
+**每个货位可能上下叠放多张图纸（2-3 层），叠放的每一张都要单独识别**。
 
-1. 货架可能有若干层，每层从左到右有若干货位；每个货位贴着唯一编号的图纸。
-2. 请按“从上到下”的层序（最上层为第 1 层）、“从左到右”的位序（最左为第 1 位）
-   识别每个货位上的图纸编号。
-3. 只输出贴有图纸的货位；空出的货位、看不清的货位不要输出编号。
-4. 编号看不清时，在备注写“编号无法辨认”，但仍给出它所在的层与位。
-5. 输出格式：每条记录独占一行，编号只写数字，不要加方括号、引号或其他符号。
-   行内用竖线分隔，例如：
-   003|第1层|第2位|
-   005|第2层|第3位|编号无法辨认
-6. 不要输出任何解释、前言或 Markdown 标记。
+坐标规则：
+1. 第1层 = 照片中最上面的一层，依次往下编号。
+2. 货位从左到右编号，第1位 = 最左边；位号是物理货位号，不能跳过空位。
+3. 同一货位叠放多张图纸时，从上到下依次为第1排、第2排、第3排。
+
+输出格式（严格按模板，不要解释或 Markdown）：
+第1层：第1位=325, 第2位=空, 第3位=43, ...
+第1层第2排：第1位=088, ...
+第1层第3排：第1位=122, ...
+
+规则：
+- 先逐货位数清楚叠放了几张图纸：只有1张就只写“第N层：”；有2张就写“第N层：”和“第N层第2排：”；
+  有3张就写“第N层：”“第N层第2排：”“第N层第3排：”，每张一行；
+- 每一排都从第1位开始连续列出该排所有货位，一个都不能漏，空位写“空”；
+- 有图纸但编号看不清的写“编号无法辨认”；
+- 编号只写数字本身，不要方括号、引号；
+- 不要虚构不存在的层、排或货位，数不清就写“数不清”；
+- 如果照片里没有货架或图纸，只输出“未检测到货架图纸”。
 """
 
 
@@ -104,35 +139,76 @@ async def recognize_single_image(
 
 
 def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRecognition], str]:
-    """从 GLM 输出中提取全部 ``编号|第N层|第M位`` 记录。
+    """从 GLM 输出中提取货位记录，并保留空位与看不清的占位位置。
 
-    使用正则 ``finditer`` 一次扫描整段文本（不依赖换行），编号去除方括号等杂质；
-    位号之后到下一条记录之间的文本作为备注，清洗掉方括号与分隔符。
+    优先解析“完整网格模板”（每层每排从第1位连续列出，空位写“空”，
+    看不清写“编号无法辨认”），网格解析不到任何行时回退旧的
+    ``编号|第N层|第M位`` 管道格式（向后兼容历史模型输出）。
+    空位与无法辨认都保留为占位行（sheet_no 为空），前端/Excel 渲染为"空"，
+    让用户知道该位置存在但没有编号，而不是凭空消失。
     """
 
-    parsed: list[SheetRecognition] = []
-    matches = list(_RECORD_PATTERN.finditer(content))
-    for index, match in enumerate(matches):
-        sheet_no = match.group(1)
-        row_number = int(match.group(2))
-        col_number = int(match.group(3))
-        note = ""
-        if index + 1 < len(matches):
-            between = content[match.end() : matches[index + 1].start()]
-        else:
-            between = content[match.end() :]
-        cleaned = re.sub(r"[\[\]|｜·\s]", "", between)
-        if cleaned and cleaned != sheet_no:
-            note = cleaned
-        # 不确定的编号不输出（整图路径：GLM 已标注无法辨认/不确定）。
-        if any(marker in note for marker in _TAG_UNCERTAIN_MARKERS):
+    grid_rows = _parse_grid_output(content, source_image=source_image)
+    if grid_rows:
+        grid_rows = _trim_hallucinated_widths(grid_rows)
+        return _summarize_rows(grid_rows, source_image, content)
+
+    candidates: list[tuple[int, int, re.Match[str]]] = []
+    for pattern in (
+        _RECORD_WITH_STACK_PATTERN,
+        _RECORD_BASE_PATTERN,
+        _RECORD_UNCERTAIN_PATTERN,
+    ):
+        for match in pattern.finditer(content):
+            candidates.append((match.start(), match.end(), match))
+    candidates.sort(key=lambda item: item[0])
+
+    # 三种模式可能命中同一段文本（如 base 与 uncertain 重叠），按跨度去重。
+    accepted: list[tuple[int, int, re.Match[str]]] = []
+    previous_end = -1
+    for start, end, match in candidates:
+        if start < previous_end:
             continue
+        previous_end = end
+        accepted.append((start, end, match))
+
+    parsed: list[SheetRecognition] = []
+    for index, (start, end, match) in enumerate(accepted):
+        if match.re is _RECORD_UNCERTAIN_PATTERN:
+            # 编号缺失：GLM 只给了坐标 + 无法辨认，保留占位。
+            layer = int(match.group(1))
+            position = int(match.group(2))
+            stack = 1
+            sheet_no = ""
+            note = "编号无法辨认"
+        else:
+            sheet_no = match.group(1)
+            layer = int(match.group(2))
+            if match.re is _RECORD_WITH_STACK_PATTERN:
+                stack = int(match.group(3))
+                position = int(match.group(4))
+            else:
+                stack = 1
+                position = int(match.group(3))
+            if index + 1 < len(accepted):
+                between = content[end : accepted[index + 1][0]]
+            else:
+                between = content[end:]
+            cleaned = re.sub(r"[\[\]|｜·\s]", "", between)
+            if cleaned and cleaned != sheet_no:
+                note = cleaned
+            else:
+                note = ""
+            if any(marker in note for marker in UNCERTAIN_MARKERS):
+                # 不确定：坐标保留为占位，编号置空，避免把猜错的数据写进 Excel。
+                sheet_no = ""
+                note = "编号无法辨认"
         parsed.append(
             SheetRecognition(
                 sheet_no=sheet_no,
-                layer=row_number,
-                position=col_number,
-                stack=1,
+                layer=layer,
+                position=position,
+                stack=stack,
                 source_image=source_image,
                 note=note,
             )
@@ -140,11 +216,110 @@ def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRec
         if len(parsed) >= MAX_RECOGNITIONS_PER_IMAGE:
             break
 
-    if not parsed:
-        summary = content
-    else:
-        summary = f"照片 {source_image} 识别到 {len(parsed)} 个图纸编号"
-    return parsed, summary
+    return _summarize_rows(parsed, source_image, content)
+
+
+def _parse_grid_output(
+    content: str, *, source_image: str
+) -> list[SheetRecognition]:
+    """解析“第N层：第1位=..., 第2位=空, ...”完整网格模板。
+
+    支持叠放排行（第N层第M排：...）；空位（空）与无法辨认都生成占位行，
+    位号保持 GLM 给出的绝对物理货位号，空位不会被压缩掉。
+    """
+
+    parsed: list[SheetRecognition] = []
+    seen: set[tuple[int, int, int]] = set()
+    for match in _GRID_LINE_PATTERN.finditer(content):
+        layer = int(match.group(1))
+        stack = int(match.group(2)) if match.group(2) else 1
+        payload = match.group(3)
+        for cell in _GRID_CELL_PATTERN.finditer(payload):
+            position = int(cell.group(1))
+            raw_value = cell.group(2).strip()
+            key = (layer, stack, position)
+            if key in seen:
+                continue
+            seen.add(key)
+            if any(marker in raw_value for marker in UNCERTAIN_MARKERS):
+                note = "编号无法辨认"
+            elif raw_value == "空" or "无" in raw_value[:3]:
+                note = "空货位"
+            else:
+                number = _extract_sheet_no(raw_value)
+                if not number:
+                    note = "编号无法辨认"
+                else:
+                    parsed.append(
+                        SheetRecognition(
+                            sheet_no=number,
+                            layer=layer,
+                            position=position,
+                            stack=stack,
+                            source_image=source_image,
+                            note="",
+                        )
+                    )
+                    continue
+            parsed.append(
+                SheetRecognition(
+                    sheet_no="",
+                    layer=layer,
+                    position=position,
+                    stack=stack,
+                    source_image=source_image,
+                    note=note,
+                )
+            )
+            if len(parsed) >= MAX_RECOGNITIONS_PER_IMAGE:
+                return parsed
+    return parsed
+
+
+def _trim_hallucinated_widths(rows: list[SheetRecognition]) -> list[SheetRecognition]:
+    """把明显虚构的超宽层截断到中位数宽度，抑制免费模型的位宽幻觉。"""
+
+    widths: dict[int, int] = {}
+    for item in rows:
+        widths[item.layer] = max(widths.get(item.layer, 0), item.position)
+    if len(widths) < 2:
+        return rows
+    sorted_widths = sorted(widths.values())
+    median = sorted_widths[len(sorted_widths) // 2]
+    if median < 2:
+        return rows
+    cap = int(median * GRID_WIDTH_HALLUCINATION_FACTOR)
+    trimmed: list[SheetRecognition] = []
+    for item in rows:
+        if (
+            widths[item.layer] > cap
+            and widths[item.layer] - median >= GRID_WIDTH_MIN_DIFF
+            and item.position > median
+        ):
+            continue
+        trimmed.append(item)
+    return trimmed
+
+
+def _summarize_rows(
+    rows: list[SheetRecognition], source_image: str, content: str
+) -> tuple[list[SheetRecognition], str]:
+    """生成统一的识别总结（含无法辨认与空货位计数）。"""
+
+    recognized = [item for item in rows if item.sheet_no]
+    if not rows:
+        return [], content
+    uncertain = sum(1 for item in rows if not item.sheet_no and item.note == "编号无法辨认")
+    empty_slots = sum(1 for item in rows if not item.sheet_no and item.note == "空货位")
+    summary = f"照片 {source_image} 识别到 {len(recognized)} 个图纸编号"
+    parts: list[str] = []
+    if uncertain:
+        parts.append(f"{uncertain} 处无法辨认")
+    if empty_slots:
+        parts.append(f"{empty_slots} 个空货位")
+    if parts:
+        summary += "，" + "、".join(parts)
+    return rows, summary
 
 
 async def recognize_tag_batches(
@@ -178,7 +353,7 @@ async def recognize_tag_batches(
         ]
         parsed: list[str | None] = []
         for line in lines:
-            if any(marker in line for marker in _TAG_UNCERTAIN_MARKERS):
+            if any(marker in line for marker in UNCERTAIN_MARKERS):
                 parsed.append(None)
             else:
                 parsed.append(_extract_sheet_no(line))
@@ -226,10 +401,13 @@ def merge_recognitions(
             )
             continue
         rows.extend(image_rows)
+        recognized = [item for item in image_rows if item.sheet_no]
         if image_rows:
-            summaries.append(
-                f"{image_name}：识别到 {len(image_rows)} 个图纸编号"
-            )
+            text = f"{image_name}：识别到 {len(recognized)} 个图纸编号"
+            unknown = len(image_rows) - len(recognized)
+            if unknown:
+                text += f"，{unknown} 处无法辨认"
+            summaries.append(text)
         else:
             summaries.append(f"{image_name}：未识别到图纸编号")
     return rows, failures, summaries

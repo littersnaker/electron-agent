@@ -7,7 +7,7 @@ import io
 import pytest
 from PIL import Image, ImageDraw
 
-from backend.services.image.locate import TagBox, locate_tags
+from backend.services.image.locate import TagBox, absolutize_columns, locate_tags
 
 
 def _make_image(
@@ -70,11 +70,11 @@ def test_locate_multicolor_tags() -> None:
     boxes = locate_tags(image_bytes=raw)
     assert boxes is not None
     assert len(boxes) == 5
-    # 层号从下到上：y=480（画面下方）应是最下面的层（row 最小），y=120 是上层。
+    # 层号从上到下：y=120（画面上方）应是第 1 层（row 最小），y=480 是下层。
     bottom = [box for box in boxes if box.y > 400]
     top = [box for box in boxes if box.y < 200]
     assert bottom and top
-    assert all(box.row < top_box.row for box in bottom for top_box in top)
+    assert all(top_box.row < box.row for box in bottom for top_box in top)
     # 同一层内列自左而右
     by_row = sorted({box.row for box in boxes})
     row1_boxes = sorted(
@@ -83,6 +83,26 @@ def test_locate_multicolor_tags() -> None:
     )
     assert [box.col for box in row1_boxes] == list(range(1, len(row1_boxes) + 1))
     assert all(isinstance(box, TagBox) for box in boxes)
+
+
+def test_absolutize_columns_preserves_left_gap() -> None:
+    """层内最左位空缺时，绝对列号整体右移，空位由上层回填为"空"。"""
+
+    boxes = [
+        # 第1层：x 从 100 起，说明物理第1位（x≈0）空缺
+        TagBox(x=100, y=100, w=60, h=60, row=1, col=1, rank=1),
+        TagBox(x=200, y=100, w=60, h=60, row=1, col=2, rank=1),
+        TagBox(x=300, y=100, w=60, h=60, row=1, col=3, rank=1),
+        TagBox(x=400, y=100, w=60, h=60, row=1, col=4, rank=1),
+        # 第2层：x 从 0 起（第1位存在）
+        TagBox(x=0, y=250, w=60, h=60, row=2, col=1, rank=1),
+        TagBox(x=100, y=250, w=60, h=60, row=2, col=2, rank=1),
+    ]
+    absolutized = absolutize_columns(boxes)
+    row1 = sorted((b for b in absolutized if b.row == 1), key=lambda b: b.col)
+    row2 = sorted((b for b in absolutized if b.row == 2), key=lambda b: b.col)
+    assert [b.col for b in row1] == [2, 3, 4, 5]
+    assert [b.col for b in row2] == [1, 2]
 
 
 def test_locate_stacked_tags_same_position(monkeypatch: pytest.MonkeyPatch) -> None:
