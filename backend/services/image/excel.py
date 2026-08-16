@@ -56,7 +56,7 @@ def write_recognition_excel(
 
     sheet = workbook.active
     sheet.title = "图纸编号"
-    headers = ["图纸编号", "所在层", "所在位", "来源照片", "备注"]
+    headers = ["图纸编号", "所在层", "所在位", "排位", "来源照片", "备注"]
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="4472C4")
     for column, header in enumerate(headers, start=1):
@@ -65,7 +65,14 @@ def write_recognition_excel(
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", vertical="center")
     for row_index, item in enumerate(rows, start=2):
-        values = [item.sheet_no, item.row, item.col, item.source_image, item.note]
+        values = [
+            item.sheet_no,
+            item.row,
+            item.col,
+            item.rank or "",
+            item.source_image,
+            item.note,
+        ]
         for column, value in enumerate(values, start=1):
             sheet.cell(row=row_index, column=column, value=value)
     for column in range(1, len(headers) + 1):

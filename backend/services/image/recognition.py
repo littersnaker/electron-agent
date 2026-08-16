@@ -24,12 +24,28 @@ from backend.services.image.models import ImageRecognitionFailure, SheetRecognit
 LOGGER = logging.getLogger(__name__)
 
 MAX_RECOGNITIONS_PER_IMAGE = 120
+# GLM-4.6V 单次请求最多 8 张图（client 常量），裁剪标签按此分批。
+TAG_BATCH_SIZE = 8
 
 # 容忍 [编号]、[第N层]、全角｜、多余空白与缺失分隔符，从任意文本中提取三元组。
 _RECORD_PATTERN = re.compile(
     r"\[?\s*(\d{1,4})\s*\]?\s*[|｜]\s*\[?\s*第\s*(\d+)\s*层"
     r"\s*[|｜]?\s*\[?\s*第\s*(\d+)\s*位"
 )
+
+_TAG_BATCH_PROMPT = """你是货架标签识别员。下面有若干张标签小图，每张图上有且只有一个编号。
+
+要求：
+1. 按图片顺序逐张读出编号，每行一个，直接输出数字本身。
+2. 看不清的编号写“无法辨认”，不要猜测。
+3. 不要输出任何解释、方括号、引号或 Markdown 标记。
+"""
+
+
+def build_tag_batch_prompt(count: int) -> str:
+    """生成按图顺序输出编号的批次提示词。"""
+
+    return f"{_TAG_BATCH_PROMPT}\n共 {count} 张图。请按顺序输出 {count} 行编号。"
 
 _RECOGNITION_PROMPT = """你是货架图纸识别员。请仔细查看这张货架照片，完成以下任务：
 
@@ -123,6 +139,58 @@ def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRec
     return parsed, summary
 
 
+async def recognize_tag_batches(
+    *,
+    crops: list[ImageInput],
+    client: GLM46VClient,
+) -> list[str | None]:
+    """分批识别裁剪出的标签小图，返回与输入同序的编号列表。
+
+    每批最多 8 张小图（GLM 单次上限）；单批调用失败或某张无法辨认时，
+    该标签置为 None（由上层记入失败清单），不中断后续批次。
+    """
+
+    results: list[str | None] = []
+    for start in range(0, len(crops), TAG_BATCH_SIZE):
+        batch = crops[start : start + TAG_BATCH_SIZE]
+        try:
+            result = await client.analyze_images(
+                batch,
+                prompt=build_tag_batch_prompt(len(batch)),
+            )
+        except Exception as exc:  # noqa: BLE001 - 单批失败降级，与整图路径一致。
+            LOGGER.warning("标签批次识别失败（%d 张）：%s", len(batch), exc)
+            results.extend([None] * len(batch))
+            continue
+
+        lines = [
+            line.strip().lstrip("-*· ")
+            for line in str(result.get("content") or "").splitlines()
+            if line.strip()
+        ]
+        parsed: list[str | None] = []
+        for line in lines:
+            if "无法辨认" in line:
+                parsed.append(None)
+            else:
+                parsed.append(_extract_sheet_no(line))
+            if len(parsed) >= len(batch):
+                break
+        while len(parsed) < len(batch):
+            parsed.append(None)
+        results.extend(parsed[: len(batch)])
+    return results[: len(crops)]
+
+
+def _extract_sheet_no(line: str) -> str | None:
+    """从一行文本中提取第一个数字编号（纯数字）。"""
+
+    match = re.search(r"\d{1,4}", line)
+    if not match:
+        return None
+    return match.group(0)
+
+
 def classify_failure_kind(reason: str) -> str:
     """按错误文本区分失败性质：429 限流 → rate_limited，其余 → other。"""
 
@@ -160,8 +228,11 @@ def merge_recognitions(
 
 
 __all__ = [
+    "TAG_BATCH_SIZE",
     "build_recognition_prompt",
+    "build_tag_batch_prompt",
     "classify_failure_kind",
     "merge_recognitions",
     "recognize_single_image",
+    "recognize_tag_batches",
 ]

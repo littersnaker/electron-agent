@@ -16,3 +16,5 @@ python-multipart>=0.0.9,<1.0
 # 图片识别 Agent：货架照片清晰度增强与放大；Excel 长表导出。
 Pillow>=10,<12
 openpyxl>=3.1,<4.0
+# 图片识别 Agent：颜色无关标签定位（S通道+灰度 Otsu + 轮廓），无 GUI 更小。
+opencv-python-headless>=4.9,<5.0

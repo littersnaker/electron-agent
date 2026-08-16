@@ -27,11 +27,19 @@ function indexOfChinesePosition(value: string): number {
 }
 
 /** 按层号、位号排序识别行，保证矩阵渲染与 Excel 顺序一致。 */
+/** 把“排1”/“排2”解析成排序用数字。 */
+function rankNumber(value: string | undefined): number {
+  const match = /^排\s*(\d+)/.exec(value || "");
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+/** 按层号、位号、排位排序识别行，保证矩阵渲染与 Excel 顺序一致。 */
 function sortedRows(rows: ImageRecognitionRow[]): ImageRecognitionRow[] {
   return [...rows].sort(
     (a, b) =>
       indexOfChinesePosition(a.row) - indexOfChinesePosition(b.row) ||
       indexOfChinesePosition(a.col) - indexOfChinesePosition(b.col) ||
+      rankNumber(a.rank) - rankNumber(b.rank) ||
       a.sheetNo.localeCompare(b.sheetNo, "zh-CN"),
   );
 }
@@ -46,12 +54,12 @@ function MatrixGrid({ rows }: { rows: ImageRecognitionRow[] }) {
     [rows],
   );
   const sorted = useMemo(() => sortedRows(rows), [rows]);
-  const matrix: Array<Array<ImageRecognitionRow | undefined>> = useMemo(() => {
-    const grid: Array<Array<ImageRecognitionRow | undefined>> = [];
+  const matrix: Array<Array<Array<ImageRecognitionRow>>> = useMemo(() => {
+    const grid: Array<Array<Array<ImageRecognitionRow>>> = [];
     for (let rowIndex = 1; rowIndex <= maxRow; rowIndex += 1) {
       grid[rowIndex] = [];
       for (let colIndex = 1; colIndex <= maxCol; colIndex += 1) {
-        grid[rowIndex][colIndex] = sorted.find(
+        grid[rowIndex][colIndex] = sorted.filter(
           (item) =>
             indexOfChinesePosition(item.row) === rowIndex &&
             indexOfChinesePosition(item.col) === colIndex,
@@ -95,8 +103,8 @@ function MatrixGrid({ rows }: { rows: ImageRecognitionRow[] }) {
                   第{rowNumber}层
                 </td>
                 {Array.from({ length: maxCol }, (_, colIndex) => {
-                  const cell = matrix[rowNumber]?.[colIndex + 1];
-                  if (!cell) {
+                  const cell = matrix[rowNumber]?.[colIndex + 1] ?? [];
+                  if (cell.length === 0) {
                     return (
                       <td
                         key={colIndex}
@@ -110,24 +118,44 @@ function MatrixGrid({ rows }: { rows: ImageRecognitionRow[] }) {
                       </td>
                     );
                   }
+                  const stacked = cell.length > 1;
                   return (
                     <td
                       key={colIndex}
-                      className="border px-2 py-2"
+                      className="border px-2 py-2 align-middle"
                       style={{
                         borderColor: COLORS.border,
                         background: "color-mix(in srgb, var(--accent-blue-soft) 55%, transparent)",
                       }}
-                      title={`${cell.sheetNo} · ${cell.sourceImage}${cell.note ? ` · ${cell.note}` : ""}`}
                     >
-                      <span className="block text-[13px] font-semibold tracking-[-0.01em]" style={{ color: COLORS.blue }}>
-                        {cell.sheetNo}
-                      </span>
-                      {cell.note && (
-                        <span className="mt-0.5 block text-[9px]" style={{ color: COLORS.amber }}>
-                          {cell.note}
+                      {cell.map((item, itemIndex) => (
+                        <span
+                          key={`${item.sheetNo}-${item.rank || itemIndex}`}
+                          className={`block ${stacked ? "my-0.5" : ""}`}
+                          title={`${item.sheetNo} · ${item.sourceImage}${item.note ? ` · ${item.note}` : ""}`}
+                        >
+                          <span
+                            className={`inline-flex items-baseline gap-1 rounded-[6px] border px-1.5 py-0.5 text-[13px] font-semibold tracking-[-0.01em]`}
+                            style={{
+                              color: COLORS.blue,
+                              borderColor: "color-mix(in srgb, var(--accent-blue) 30%, transparent)",
+                              background: "color-mix(in srgb, var(--accent-blue-soft-strong) 40%, transparent)",
+                            }}
+                          >
+                            {item.sheetNo}
+                            {stacked && item.rank && (
+                              <span className="text-[8px] font-normal" style={{ color: COLORS.textMuted }}>
+                                {item.rank}
+                              </span>
+                            )}
+                          </span>
+                          {item.note && (
+                            <span className="block text-[9px]" style={{ color: COLORS.amber }}>
+                              {item.note}
+                            </span>
+                          )}
                         </span>
-                      )}
+                      ))}
                     </td>
                   );
                 })}

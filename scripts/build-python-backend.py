@@ -104,6 +104,9 @@ def _pyinstaller_arguments() -> list[str]:
     # 流式 XML 库，不显式收集会漏进打包产物。PIL 已验证可被自动收集，无需显式处理。
     collect_optional("openpyxl")
     collect_optional("et_xmlfile")
+    # OpenCV 带原生 .pyd 扩展，PyInstaller 内置 hook 会收集，但显式收集与
+    # langgraph/openpyxl 惯例一致，避免 hook 版本差异导致漏包。
+    collect_optional("cv2")
     if importlib.util.find_spec("tzdata") is not None:
         arguments.extend(["--collect-data=tzdata", "--hidden-import=tzdata"])
     return arguments

@@ -104,10 +104,68 @@ def _decode_base64(data: str) -> bytes:
         return b""
 
 
+def crop_tag(
+    *,
+    image_bytes: bytes,
+    box: object,
+    upscale: int = 4,
+    name: str = "tag.jpg",
+) -> ImageInput:
+    """按定位框裁剪单个标签小图并放大，输出 GLM 可识别的 ImageInput。
+
+    定位框坐标来自 ``locate.py`` 的 TagBox（已带外边距）；裁剪后 LANCZOS
+    放大 ``upscale`` 倍并转 JPEG，让编号数字足够清晰。失败抛 GLM46VError，
+    由上层按降级策略处理。
+    """
+
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - 构建环境必带 Pillow
+        raise GLM46VError("图片识别依赖 Pillow 未安装，无法裁剪标签。") from exc
+
+    x = int(box.x)
+    y = int(box.y)
+    w = int(box.w)
+    h = int(box.h)
+    if w <= 0 or h <= 0:
+        raise GLM46VError("标签定位框尺寸无效，无法裁剪。")
+
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        image.load()
+    except Exception as exc:
+        raise GLM46VError(f"标签裁剪失败：{exc}") from exc
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    region = image.crop(
+        (
+            max(0, x),
+            max(0, y),
+            min(image.width, x + w),
+            min(image.height, y + h),
+        )
+    )
+    if region.width <= 0 or region.height <= 0:
+        raise GLM46VError("标签裁剪区域为空。")
+    region = region.resize(
+        (region.width * max(1, upscale), region.height * max(1, upscale)),
+        Image.Resampling.LANCZOS,
+    )
+    jpeg_bytes = _encode_jpeg(region)
+    encoded = base64.b64encode(jpeg_bytes).decode("ascii")
+    return ImageInput(
+        name=name.strip() or "tag.jpg",
+        mime_type="image/jpeg",
+        data=encoded,
+        size_bytes=len(jpeg_bytes),
+    )
+
+
 def _encode_jpeg(image, quality: int = 85) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=quality, optimize=True)
     return buffer.getvalue()
 
 
-__all__ = ["ENHANCE_STRENGTH", "UPSCALE_FACTOR", "preprocess_image"]
+__all__ = ["ENHANCE_STRENGTH", "UPSCALE_FACTOR", "crop_tag", "preprocess_image"]
