@@ -75,11 +75,22 @@ def write_recognition_excel(
 
     if failures:
         failure_sheet = workbook.create_sheet("识别失败清单")
-        failure_sheet.append(["来源照片", "失败原因"])
+        failure_sheet.append(["来源照片", "失败类型", "失败原因"])
         for item in failures:
-            failure_sheet.append([item.image_name, item.reason])
-        failure_sheet.column_dimensions["A"].width = 24
-        failure_sheet.column_dimensions["B"].width = 48
+            failure_sheet.append(
+                [
+                    item.image_name,
+                    {
+                        "rate_limited": "限流（稍后重试）",
+                        "other": "其他",
+                        "quality": "照片质量",
+                    }.get(item.kind, item.kind),
+                    item.reason,
+                ]
+            )
+        failure_sheet.column_dimensions["A"].width = 28
+        failure_sheet.column_dimensions["B"].width = 20
+        failure_sheet.column_dimensions["C"].width = 48
 
     if summary:
         summary_sheet = workbook.create_sheet("识别总结")

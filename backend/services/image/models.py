@@ -29,13 +29,24 @@ class SheetRecognition:
 
 @dataclass(frozen=True, slots=True)
 class ImageRecognitionFailure:
-    """单张照片识别失败记录（降级不中断，成功张结果全部保留）。"""
+    """单张照片识别失败记录（降级不中断，成功张结果全部保留）。
+
+    ``kind`` 区分失败性质，供前端展示正确引导：
+    - ``rate_limited``：免费模型 429 限流，属于临时状态，稍后重试即可；
+    - ``quality``：照片本身问题（预处理失败、无法辨认等），需要重拍；
+    - ``other``：其他运行时错误。
+    """
 
     image_name: str
     reason: str
+    kind: str = "quality"
 
     def to_json(self) -> dict[str, str]:
-        return {"imageName": self.image_name, "reason": self.reason}
+        return {
+            "imageName": self.image_name,
+            "reason": self.reason,
+            "kind": self.kind,
+        }
 
 
 @dataclass(slots=True)

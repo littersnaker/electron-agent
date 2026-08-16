@@ -109,7 +109,7 @@ async def test_zero_interval_does_not_block(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_429_uses_longer_exponential_backoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """429 限流应使用更长的指数退避（5s、10s…），等待免费档额度窗口恢复。"""
+    """429 限流应使用独立的、更长的指数退避（15s、30s…），等待免费档额度恢复。"""
 
     from backend.services.glm46v import client as client_module
 
@@ -121,14 +121,46 @@ async def test_429_uses_longer_exponential_backoff(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls["count"] += 1
-        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return httpx.Response(429, json={"error": {"message": "访问量过大"}})
 
-    client = _client(handler, retries=2)
+    client = _client(handler, retries=0)
     with pytest.raises(GLM46VError, match="429"):
         await client.analyze_images([_image()], prompt="分析")
 
-    assert calls["count"] == 3  # 1 次原始请求 + 2 次重试
-    assert sleeps == [5.0, 10.0]  # _backoff_delay(0, 429) / _backoff_delay(1, 429)
+    # 默认 429 重试预算 3 次（retries_429=3），不消耗常规 retries。
+    assert calls["count"] == 4
+    assert sleeps == [15.0, 30.0, 60.0]
+
+
+@pytest.mark.asyncio
+async def test_429_budget_is_separate_from_regular_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """429 有自己的重试预算；用尽 429 预算后不再消耗常规 retries。"""
+
+    from backend.services.glm46v import client as client_module
+
+    calls = {"count": 0}
+    sleeps: list[float] = []
+    monkeypatch.setattr(client_module, "asyncio", _FakeAsyncio(sleeps))
+    monkeypatch.setattr(rate_limit, "MIN_INTERVAL_SECONDS", 0.0)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(429, json={"error": {"message": "rate limited"}})
+
+    settings = GLM46VSettings(
+        api_key="secret",
+        endpoint="https://example.test/chat/completions",
+        retries=0,
+        retries_429=1,
+    )
+    client = GLM46VClient(settings, transport=httpx.MockTransport(handler))
+    with pytest.raises(GLM46VError, match="429"):
+        await client.analyze_images([_image()], prompt="分析")
+
+    assert calls["count"] == 2  # 原始请求 + 1 次 429 重试（retries=0 不参与）
+    assert sleeps == [15.0]
 
 
 @pytest.mark.asyncio
@@ -152,7 +184,13 @@ async def test_429_respects_retry_after_header(
             json={"error": {"message": "rate limited"}},
         )
 
-    client = _client(handler, retries=1)
+    settings = GLM46VSettings(
+        api_key="secret",
+        endpoint="https://example.test/chat/completions",
+        retries=0,
+        retries_429=1,
+    )
+    client = GLM46VClient(settings, transport=httpx.MockTransport(handler))
     with pytest.raises(GLM46VError, match="429"):
         await client.analyze_images([_image()], prompt="分析")
 

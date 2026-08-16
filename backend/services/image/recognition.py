@@ -123,6 +123,14 @@ def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRec
     return parsed, summary
 
 
+def classify_failure_kind(reason: str) -> str:
+    """按错误文本区分失败性质：429 限流 → rate_limited，其余 → other。"""
+
+    if "429" in reason or "访问量过大" in reason or "限流" in reason:
+        return "rate_limited"
+    return "other"
+
+
 def merge_recognitions(
     per_image: list[tuple[str, list[SheetRecognition], str | None]],
 ) -> tuple[list[SheetRecognition], list[ImageRecognitionFailure], list[str]]:
@@ -133,7 +141,13 @@ def merge_recognitions(
     summaries: list[str] = []
     for image_name, image_rows, error in per_image:
         if error is not None:
-            failures.append(ImageRecognitionFailure(image_name=image_name, reason=error))
+            failures.append(
+                ImageRecognitionFailure(
+                    image_name=image_name,
+                    reason=error,
+                    kind=classify_failure_kind(error),
+                )
+            )
             continue
         rows.extend(image_rows)
         if image_rows:
@@ -147,6 +161,7 @@ def merge_recognitions(
 
 __all__ = [
     "build_recognition_prompt",
+    "classify_failure_kind",
     "merge_recognitions",
     "recognize_single_image",
 ]

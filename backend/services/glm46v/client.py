@@ -63,6 +63,7 @@ class GLM46VSettings:
     model: str = DEFAULT_MODEL
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     retries: int = 2
+    retries_429: int = 3
     max_images: int = DEFAULT_MAX_IMAGES
     max_image_mb: float = DEFAULT_MAX_IMAGE_MB
     max_total_mb: float = DEFAULT_MAX_TOTAL_MB
@@ -95,6 +96,12 @@ class GLM46VSettings:
                 maximum=600.0,
             ),
             retries=_env_int("GLM46V_RETRIES", 2, minimum=0, maximum=6),
+            retries_429=_env_int(
+                "GLM46V_429_RETRIES",
+                3,
+                minimum=0,
+                maximum=8,
+            ),
             max_images=_env_int(
                 "GLM46V_MAX_IMAGES",
                 DEFAULT_MAX_IMAGES,
@@ -343,10 +350,17 @@ class GLM46VClient:
         payload: dict[str, Any],
         headers: dict[str, str],
     ) -> tuple[dict[str, Any], httpx.Headers]:
-        """发送请求并在可重试错误上指数退避；429 使用更长退避等待额度恢复。"""
+        """发送请求并重试可恢复错误。
+
+        429 限流使用独立的、更长的退避预算（默认 3 次，每次等 15/30/60 秒），
+        等待免费档额度窗口恢复；网络错误与 5xx/408/409 使用常规指数退避预算。
+        ``retry-after`` 响应头优先于本地退避。
+        """
 
         last_error: Exception | None = None
-        for attempt in range(self.settings.retries + 1):
+        other_step = 0
+        rate_step = 0
+        while True:
             try:
                 async with glm46v_request_slot():
                     response = await client.post(
@@ -356,9 +370,10 @@ class GLM46VClient:
                     )
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_error = exc
-                if attempt >= self.settings.retries:
+                if other_step >= self.settings.retries:
                     raise GLM46VError(f"连接智谱 API 失败：{exc}") from exc
-                await asyncio.sleep(min(2**attempt, 4))
+                await asyncio.sleep(min(2**other_step, 4))
+                other_step += 1
                 continue
 
             if response.status_code < 400:
@@ -370,18 +385,24 @@ class GLM46VClient:
                     ) from exc
 
             message = _error_message(response)
+            retry_after = response.headers.get("retry-after", "").strip()
+            if (
+                response.status_code == 429
+                and rate_step < self.settings.retries_429
+            ):
+                delay = _retry_after_seconds(retry_after, _backoff_delay(rate_step, 429))
+                await asyncio.sleep(max(0.0, min(delay, 120.0)))
+                rate_step += 1
+                continue
             if (
                 response.status_code in RETRYABLE_STATUS_CODES
-                and attempt < self.settings.retries
+                and other_step < self.settings.retries
             ):
-                retry_after = response.headers.get("retry-after", "").strip()
-                try:
-                    delay = float(retry_after) if retry_after else _backoff_delay(
-                        attempt, response.status_code
-                    )
-                except ValueError:
-                    delay = _backoff_delay(attempt, response.status_code)
+                delay = _retry_after_seconds(
+                    retry_after, _backoff_delay(other_step, response.status_code)
+                )
                 await asyncio.sleep(max(0.0, min(delay, 30.0)))
+                other_step += 1
                 continue
             raise GLM46VError(
                 f"智谱 API 请求失败（HTTP {response.status_code}）：{message}"
@@ -390,9 +411,18 @@ class GLM46VClient:
         raise GLM46VError(f"智谱 API 请求失败：{last_error or '未知错误'}")
 
 
+def _retry_after_seconds(retry_after: str, fallback: float) -> float:
+    """解析 retry-after 头；缺失或非法时使用本地退避。"""
+
+    try:
+        return float(retry_after) if retry_after else fallback
+    except ValueError:
+        return fallback
+
+
 def _backoff_delay(attempt: int, status_code: int) -> float:
-    """429 限流退避更长，等待免费档额度窗口恢复；5xx/408/409 用常规指数退避。"""
+    """429 限流退避更长（15/30/60…），等待免费档额度窗口恢复；其余用常规指数退避。"""
 
     if status_code == 429:
-        return min(2**attempt * 5, 30)
+        return min(2**attempt * 15, 120)
     return min(2**attempt, 4)

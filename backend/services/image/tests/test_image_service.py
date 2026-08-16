@@ -22,6 +22,7 @@ from backend.services.image.models import (
 from backend.services.image.preprocess import preprocess_image
 from backend.services.image.recognition import (
     build_recognition_prompt,
+    classify_failure_kind,
     merge_recognitions,
     recognize_single_image,
 )
@@ -197,13 +198,22 @@ def test_merge_recognitions_keeps_successes_and_failures() -> None:
                 None,
             ),
             ("b.jpg", [], "视觉识别失败：mock"),
+            ("c.jpg", [], "智谱 API 请求失败（HTTP 429）：访问量过大，请稍后再试"),
         ]
     )
     assert len(rows) == 1
-    assert len(failures) == 1
+    assert len(failures) == 2
     assert failures[0].image_name == "b.jpg"
+    assert failures[0].kind == "other"
     assert "mock" in failures[0].reason
+    assert failures[1].kind == "rate_limited"  # 429 限流单独分类
     assert len(summaries) == 1  # 失败张不计入总结
+
+
+def test_classify_failure_kind() -> None:
+    assert classify_failure_kind("HTTP 429 访问量过大") == "rate_limited"
+    assert classify_failure_kind("限流，请稍后再试") == "rate_limited"
+    assert classify_failure_kind("图片无法解码") == "other"
 
 
 # ---------- structuring ----------

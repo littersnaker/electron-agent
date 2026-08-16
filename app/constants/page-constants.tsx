@@ -41,6 +41,8 @@ export type ImageRecognitionRow = {
 export type ImageRecognitionFailure = {
   imageName: string;
   reason: string;
+  /** rate_limited：免费模型限流（稍后重试）；quality：照片质量问题（重拍）；other：其他。 */
+  kind: "rate_limited" | "quality" | "other";
 };
 
 /** 图片识别 Agent 的结构化结果。 */

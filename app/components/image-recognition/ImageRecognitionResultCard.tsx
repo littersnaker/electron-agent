@@ -142,13 +142,23 @@ function MatrixGrid({ rows }: { rows: ImageRecognitionRow[] }) {
 
 function FailureList({ failures }: { failures: ImageRecognitionFailure[] }) {
   if (failures.length === 0) return null;
+  const rateLimited = failures.some((failure) => failure.kind === "rate_limited");
   return (
     <div
       className="mt-3 rounded-[12px] border px-3 py-2.5"
-      style={{ borderColor: "color-mix(in srgb, var(--accent-red) 35%, var(--border))" }}
+      style={{
+        borderColor: rateLimited
+          ? "color-mix(in srgb, var(--accent-amber) 45%, var(--border))"
+          : "color-mix(in srgb, var(--accent-red) 35%, var(--border))",
+      }}
     >
-      <div className="text-[11px] font-semibold" style={{ color: COLORS.red }}>
-        ⚠️ {failures.length} 张照片识别失败（已跳过，未影响其他照片）
+      <div
+        className="text-[11px] font-semibold"
+        style={{ color: rateLimited ? "var(--accent-amber)" : "var(--accent-red)" }}
+      >
+        {rateLimited
+          ? "⚠️ 部分照片因模型限流未识别（免费模型访问量大，稍后重试即可）"
+          : `⚠️ ${failures.length} 张照片识别失败（已跳过，未影响其他照片）`}
       </div>
       <ul className="mt-1.5 space-y-1">
         {failures.map((failure) => (
@@ -161,7 +171,9 @@ function FailureList({ failures }: { failures: ImageRecognitionFailure[] }) {
         ))}
       </ul>
       <div className="mt-1.5 text-[10px]" style={{ color: COLORS.textSubtle }}>
-        建议：调整光线与角度重拍这些位置，再发起一次识别。
+        {rateLimited
+          ? "建议：等 1-2 分钟额度窗口恢复后，直接重新发送一次，无需重拍照片。"
+          : "建议：调整光线与角度重拍这些位置，再发起一次识别。"}
       </div>
     </div>
   );
