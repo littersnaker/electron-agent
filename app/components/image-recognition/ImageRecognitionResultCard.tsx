@@ -7,6 +7,7 @@ import type {
   ImageRecognitionLayer,
   ImageRecognitionResult,
 } from "../../constants/page-constants";
+import { buildApiUrl } from "../../lib/api-client";
 
 const COLORS = {
   text: "var(--text-primary)",
@@ -119,6 +120,24 @@ function LayerGrid({ layer }: { layer: ImageRecognitionLayer }) {
                       />
                     );
                   }
+                  if (!cell.sheetNo) {
+                    // 占位格：位置存在但编号无法辨认，用"空"标识让用户知道这里没读出来。
+                    return (
+                      <td
+                        key={positionIndex}
+                        className="border px-1.5 py-1.5"
+                        style={{
+                          borderColor: COLORS.border,
+                          background: "color-mix(in srgb, var(--app-bg) 70%, transparent)",
+                        }}
+                        title={`${cell.note || "编号无法辨认"} · ${cell.sourceImage}`}
+                      >
+                        <span className="text-[11px] italic" style={{ color: COLORS.textSubtle }}>
+                          空
+                        </span>
+                      </td>
+                    );
+                  }
                   return (
                     <td
                       key={positionIndex}
@@ -155,7 +174,9 @@ function ShelfGrid({ layers }: { layers: ImageRecognitionLayer[] }) {
         (sum, layer) =>
           sum +
           layer.cells.reduce(
-            (inner, row) => inner + row.filter((cell) => cell !== null).length,
+            (inner, row) =>
+              inner +
+              row.filter((cell) => cell !== null && Boolean(cell.sheetNo)).length,
             0,
           ),
         0,
@@ -184,7 +205,7 @@ function ShelfGrid({ layers }: { layers: ImageRecognitionLayer[] }) {
         </div>
       ))}
       <div className="text-[10px]" style={{ color: COLORS.textSubtle }}>
-        共 {totalSheets} 个编号；看不清/不确定的位置已留空。
+        共 {totalSheets} 个编号；看不清/不确定的位置以“空”标记。
       </div>
     </div>
   );
@@ -244,7 +265,9 @@ export default function ImageRecognitionResultCard({
         (sum, layer) =>
           sum +
           layer.cells.reduce(
-            (inner, row) => inner + row.filter((cell) => cell !== null).length,
+            (inner, row) =>
+              inner +
+              row.filter((cell) => cell !== null && Boolean(cell.sheetNo)).length,
             0,
           ),
         0,
@@ -273,7 +296,7 @@ export default function ImageRecognitionResultCard({
         </div>
         {safeResult.excelDownloadUrl && (
           <a
-            href={safeResult.excelDownloadUrl}
+            href={buildApiUrl(safeResult.excelDownloadUrl)}
             download={safeResult.excelFileName || undefined}
             className="inline-flex items-center gap-1.5 rounded-[10px] border px-3 py-1.5 text-[11px] font-semibold transition-all active:scale-[0.98]"
             style={{

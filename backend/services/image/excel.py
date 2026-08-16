@@ -1,8 +1,12 @@
-"""把识别结果导出为 openpyxl 生成的 Excel 货架矩阵。
+"""把识别结果导出为 xlsxwriter 生成的 Excel 货架矩阵。
 
 主工作表按货架网格布局：每个层一个区块，区块内每行是一个叠放排、每列是一个
 货位，格子为编号或留空（看不清/不确定的位置留空）。识别失败的图片单独记录在
 “识别失败清单”工作表。
+
+使用 xlsxwriter 而非 openpyxl：openpyxl 3.1+ 把字符串全部写成 inlineStr
+内联格式，WPS 打开这种文件会出现整表空白；xlsxwriter 使用经典 sharedStrings
+共享字符串格式，WPS/Excel 兼容性最好。
 
 所有写入单元格的文本都会先清洗 XML 非法控制字符（GLM 识别文本可能夹杂
 \\x00-\\x08 等字符，直接写入会让 xlsx 损坏、WPS/Excel 打不开）。
@@ -13,8 +17,6 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from pathlib import Path
-
-from openpyxl.utils import get_column_letter
 
 from backend.services.image.models import ImageRecognitionFailure, SheetRecognition
 
@@ -65,30 +67,57 @@ def write_recognition_excel(
     """
 
     try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill
-    except ImportError as exc:  # pragma: no cover - 构建环境必带 openpyxl
+        from xlsxwriter import Workbook
+    except ImportError as exc:  # pragma: no cover - 构建环境必带 xlsxwriter
         raise RuntimeError(
             "图片识别导出 Excel 依赖缺失（"
             f"{exc}）。开发环境请执行 pip install -r requirements.txt；"
-            "桌面版需要重新构建（pnpm electron:make:win）后才会包含 openpyxl。"
+            "桌面版需要重新构建（pnpm electron:make:win）后才会包含 xlsxwriter。"
         ) from exc
 
     directory.mkdir(parents=True, exist_ok=True)
     filename = build_excel_filename()
     target = directory / filename
-    workbook = Workbook()
+    workbook = Workbook(str(target))
 
     if rows:
         from backend.services.image.models import build_layers
 
-        sheet = workbook.active
-        sheet.title = "图纸编号"
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill("solid", fgColor="4472C4")
-        board_font = Font(bold=True, color="FFFFFF")
-        board_fill = PatternFill("solid", fgColor="70AD47")
-        cursor = 1
+        header_format = workbook.add_format(
+            {
+                "bold": True,
+                "font_color": "#FFFFFF",
+                "bg_color": "#4472C4",
+                "align": "center",
+            }
+        )
+        board_format = workbook.add_format(
+            {
+                "bold": True,
+                "font_color": "#FFFFFF",
+                "bg_color": "#70AD47",
+                "align": "center",
+            }
+        )
+        stack_format = workbook.add_format(
+            {
+                "bold": True,
+                "font_color": "#FFFFFF",
+                "bg_color": "#4472C4",
+                "align": "center",
+            }
+        )
+        value_format = workbook.add_format({"align": "center"})
+        unknown_format = workbook.add_format(
+            {
+                "font_color": "#999999",
+                "italic": True,
+                "bg_color": "#F2F2F2",
+                "align": "center",
+            }
+        )
+        sheet = workbook.add_worksheet("图纸编号")
+        cursor = 0
         for layer_block in build_layers(rows):
             layer = int(layer_block["layer"])
             max_stack = int(layer_block["maxStack"])
@@ -96,56 +125,56 @@ def write_recognition_excel(
             cells = layer_block["cells"]  # list[list[dict | None]]  [stack][position]
 
             # 层标题
-            board = sheet.cell(row=cursor, column=1, value=f"第{layer}层")
-            board.font = board_font
-            board.fill = board_fill
+            sheet.write_string(cursor, 0, f"第{layer}层", board_format)
             cursor += 1
 
             # 表头：货位
-            sheet.cell(row=cursor, column=1, value="货位")
+            sheet.write_string(cursor, 0, "货位", header_format)
             for position in range(1, max_position + 1):
-                header = sheet.cell(row=cursor, column=1 + position, value=f"第{position}位")
-                header.font = header_font
-                header.fill = header_fill
+                sheet.write_string(cursor, position, f"第{position}位", header_format)
             cursor += 1
 
             # 每排一行：格子为编号或留空（看不清/不确定）
             for stack_index in range(max_stack):
-                stack_label = sheet.cell(row=cursor, column=1, value=f"排{stack_index + 1}")
-                stack_label.font = header_font
-                stack_label.fill = header_fill
+                sheet.write_string(cursor, 0, f"排{stack_index + 1}", stack_format)
                 row_cells = cells[stack_index] if stack_index < len(cells) else []
                 for position in range(1, max_position + 1):
-                    value = None
-                    if position - 1 < len(row_cells):
-                        cell = row_cells[position - 1]
-                        if cell is not None:
-                            value = clean_cell_text(cell["sheetNo"])
-                    if value is not None:
-                        sheet.cell(row=cursor, column=1 + position, value=value)
+                    cell = (
+                        row_cells[position - 1]
+                        if position - 1 < len(row_cells)
+                        else None
+                    )
+                    if cell is None:
+                        continue
+                    sheet_no = clean_cell_text(cell["sheetNo"])
+                    if sheet_no:
+                        sheet.write_string(cursor, position, sheet_no, value_format)
+                    else:
+                        # 占位格：位置存在但编号无法辨认，灰色斜体标识。
+                        sheet.write_string(cursor, position, "空", unknown_format)
                 cursor += 1
             cursor += 1  # 层之间的空行分隔
 
-        for column in range(1, 40):
-            sheet.column_dimensions[get_column_letter(column)].width = 10
-        sheet.freeze_panes = "A2"
+        sheet.set_column(0, max(1, max_position), 10)
+        sheet.freeze_panes(1, 0)
     else:
         # 无识别结果时第一个工作表给明确说明，避免打开只见空表头。
-        notice = workbook.active
-        notice.title = "识别结果"
-        notice.cell(row=1, column=1, value="未识别到图纸编号。")
-        notice.cell(
-            row=2,
-            column=1,
-            value="请查看“识别失败清单”与“识别总结”；若为免费模型限流，稍等 1-2 分钟后重试。",
+        notice = workbook.add_worksheet("识别结果")
+        notice.write_string(0, 0, "未识别到图纸编号。")
+        notice.write_string(
+            1,
+            0,
+            "请查看“识别失败清单”与“识别总结”；若为免费模型限流，稍等 1-2 分钟后重试。",
         )
-        notice.column_dimensions["A"].width = 70
+        notice.set_column(0, 0, 70)
 
     if failures:
-        failure_sheet = workbook.create_sheet("识别失败清单")
-        failure_sheet.append(["来源照片", "失败类型", "失败原因"])
-        for item in failures:
-            failure_sheet.append(
+        failure_sheet = workbook.add_worksheet("识别失败清单")
+        failure_sheet.write_row(0, 0, ["来源照片", "失败类型", "失败原因"])
+        for index, item in enumerate(failures, start=1):
+            failure_sheet.write_row(
+                index,
+                0,
                 [
                     clean_cell_text(item.image_name),
                     {
@@ -154,18 +183,18 @@ def write_recognition_excel(
                         "quality": "照片质量",
                     }.get(item.kind, item.kind),
                     clean_cell_text(item.reason),
-                ]
+                ],
             )
-        failure_sheet.column_dimensions["A"].width = 28
-        failure_sheet.column_dimensions["B"].width = 20
-        failure_sheet.column_dimensions["C"].width = 48
+        failure_sheet.set_column(0, 0, 28)
+        failure_sheet.set_column(1, 1, 20)
+        failure_sheet.set_column(2, 2, 48)
 
     if summary:
-        summary_sheet = workbook.create_sheet("识别总结")
-        summary_sheet.cell(row=1, column=1, value=clean_cell_text(summary))
-        summary_sheet.column_dimensions["A"].width = 80
+        summary_sheet = workbook.add_worksheet("识别总结")
+        summary_sheet.write_string(0, 0, clean_cell_text(summary))
+        summary_sheet.set_column(0, 0, 80)
 
-    workbook.save(target)
+    workbook.close()
     return target
 
 

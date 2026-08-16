@@ -15,6 +15,10 @@ python-docx>=1.1,<2.0
 python-multipart>=0.0.9,<1.0
 # 图片识别 Agent：货架照片清晰度增强与放大；Excel 长表导出。
 Pillow>=10,<12
+# openpyxl 3.1+ 把字符串写成 inlineStr，WPS 打开会整表空白；导出改用
+# xlsxwriter（经典 sharedStrings 格式，WPS/Excel 兼容最稳）。openpyxl 仍保留
+# 给测试回读使用。
 openpyxl>=3.1,<4.0
+xlsxwriter>=3.1,<4.0
 # 图片识别 Agent：颜色无关标签定位（S通道+灰度 Otsu + 轮廓），无 GUI 更小。
 opencv-python-headless>=4.9,<5.0
