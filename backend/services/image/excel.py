@@ -19,8 +19,9 @@ EXCEL_FILENAME_PATTERN = r"^[\w.\-\u4e00-\u9fff]{1,160}$"
 EXCEL_SHEET_PREFIX = "货架图纸识别_"
 
 # XML 1.0 非法控制字符（xlsx 是 zip+XML，含这些字符文件会损坏）。
+# 范围外的 \ufffe/\uffff 也是 XML 非字符，一并剥离。
 _XML_ILLEGAL_RE = re.compile(
-    "[\x00-\x08\x0b\x0c\x0e-\x1f]",
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]",
 )
 
 
@@ -72,31 +73,42 @@ def write_recognition_excel(
     target = directory / filename
     workbook = Workbook()
 
-    sheet = workbook.active
-    sheet.title = "图纸编号"
-    headers = ["图纸编号", "所在层", "所在位", "排位", "来源照片", "备注"]
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="4472C4")
-    for column, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=1, column=column, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-    for row_index, item in enumerate(rows, start=2):
-        values = [
-            clean_cell_text(item.sheet_no),
-            clean_cell_text(item.row),
-            clean_cell_text(item.col),
-            clean_cell_text(item.rank),
-            clean_cell_text(item.source_image),
-            clean_cell_text(item.note),
-        ]
-        for column, value in enumerate(values, start=1):
-            sheet.cell(row=row_index, column=column, value=value)
-    for column in range(1, len(headers) + 1):
-        sheet.column_dimensions[get_column_letter(column)].width = 16
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+    if rows:
+        sheet = workbook.active
+        sheet.title = "图纸编号"
+        headers = ["图纸编号", "所在层", "所在排", "来源照片", "备注"]
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill("solid", fgColor="4472C4")
+        for column, header in enumerate(headers, start=1):
+            cell = sheet.cell(row=1, column=column, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        for row_index, item in enumerate(rows, start=2):
+            values = [
+                clean_cell_text(item.sheet_no),
+                clean_cell_text(item.row),
+                clean_cell_text(item.col),
+                clean_cell_text(item.source_image),
+                clean_cell_text(item.note),
+            ]
+            for column, value in enumerate(values, start=1):
+                sheet.cell(row=row_index, column=column, value=value)
+        for column in range(1, len(headers) + 1):
+            sheet.column_dimensions[get_column_letter(column)].width = 16
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+    else:
+        # 无识别结果时第一个工作表给明确说明，避免打开只见空表头。
+        notice = workbook.active
+        notice.title = "识别结果"
+        notice.cell(row=1, column=1, value="未识别到图纸编号。")
+        notice.cell(
+            row=2,
+            column=1,
+            value="请查看“识别失败清单”与“识别总结”；若为免费模型限流，稍等 1-2 分钟后重试。",
+        )
+        notice.column_dimensions["A"].width = 70
 
     if failures:
         failure_sheet = workbook.create_sheet("识别失败清单")

@@ -27,6 +27,9 @@ MAX_RECOGNITIONS_PER_IMAGE = 120
 # GLM-4.6V 单次请求最多 8 张图（client 常量），裁剪标签按此分批。
 TAG_BATCH_SIZE = 8
 
+# 不确定标记：GLM 表达“看不清/不确定”时不能输出编号，避免把猜错的数据写进 Excel。
+_TAG_UNCERTAIN_MARKERS = ("无法辨认", "不确定", "模糊", "看不清", "?", "？", "未知")
+
 # 容忍 [编号]、[第N层]、全角｜、多余空白与缺失分隔符，从任意文本中提取三元组。
 _RECORD_PATTERN = re.compile(
     r"\[?\s*(\d{1,4})\s*\]?\s*[|｜]\s*\[?\s*第\s*(\d+)\s*层"
@@ -37,7 +40,8 @@ _TAG_BATCH_PROMPT = """你是货架标签识别员。下面有若干张标签小
 
 要求：
 1. 按图片顺序逐张读出编号，每行一个，直接输出数字本身。
-2. 看不清的编号写“无法辨认”，不要猜测。
+2. 只有百分之百确定的编号才输出；有任何不确定、模糊、看不清的，
+   一律写“无法辨认”，绝对不要猜测或编造编号。
 3. 不要输出任何解释、方括号、引号或 Markdown 标记。
 """
 
@@ -120,6 +124,9 @@ def _parse_glm_output(content: str, *, source_image: str) -> tuple[list[SheetRec
         cleaned = re.sub(r"[\[\]|｜·\s]", "", between)
         if cleaned and cleaned != sheet_no:
             note = cleaned
+        # 不确定的编号不输出（整图路径：GLM 已标注无法辨认/不确定）。
+        if any(marker in note for marker in _TAG_UNCERTAIN_MARKERS):
+            continue
         parsed.append(
             SheetRecognition(
                 sheet_no=sheet_no,
@@ -170,7 +177,7 @@ async def recognize_tag_batches(
         ]
         parsed: list[str | None] = []
         for line in lines:
-            if "无法辨认" in line:
+            if any(marker in line for marker in _TAG_UNCERTAIN_MARKERS):
                 parsed.append(None)
             else:
                 parsed.append(_extract_sheet_no(line))

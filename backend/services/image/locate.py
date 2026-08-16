@@ -135,7 +135,98 @@ def locate_tags(*, image_bytes: bytes) -> list[TagBox] | None:
     if len(kept) < MIN_TAGS:
         return None
     padded = [_pad(box, height, width) for box in kept]
+    # 优先用货架层板分割层：层板是实体隔板，叠放货物不会跨层板，
+    # 同一层板条带内的叠放标签天然归同层，对“2-3 层叠放”最稳。
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    board_ys = _detect_board_ys(gray)
+    if board_ys:
+        tagged = _assign_grid_with_boards(padded, board_ys, height)
+        if len(tagged) >= MIN_TAGS:
+            return tagged
     return _assign_grid(padded)
+
+
+def _detect_board_ys(gray) -> list[float]:
+    """检测货架层板：长水平线边缘聚类出层板 y 位置。
+
+    货架层板是横贯图片的实体隔板，在边缘图上表现为长水平线段；
+    检测不到（合成图/无层板照片）返回空列表，由调用方回退坐标聚类。
+    """
+
+    import cv2
+
+    edges = cv2.Canny(gray, 40, 120)
+    height, width = gray.shape
+    if width < 40 or height < 40:
+        return []
+    lines = cv2.HoughLinesP(
+        edges,
+        1,
+        math.pi / 180,
+        threshold=max(20, int(width * 0.25)),
+        minLineLength=int(width * 0.5),
+        maxLineGap=12,
+    )
+    ys: list[float] = []
+    if lines is not None:
+        for x1, y1, x2, y2 in lines[:, 0]:
+            dx = abs(x2 - x1)
+            dy = abs(y2 - y1)
+            if dx < width * 0.4:
+                continue
+            if math.atan2(dy, dx) > 0.15:  # 斜率过大不算水平层板
+                continue
+            ys.append((y1 + y2) / 2)
+    if not ys:
+        return []
+    ys.sort()
+    clusters: list[list[float]] = [[ys[0]]]
+    for value in ys[1:]:
+        if value - clusters[-1][-1] <= 15:  # 层板厚度容差
+            clusters[-1].append(value)
+        else:
+            clusters.append([value])
+    return [sum(group) / len(group) for group in clusters]
+
+
+def _assign_grid_with_boards(
+    boxes: list[tuple[int, int, int, int]],
+    board_ys: list[float],
+    image_height: int,
+) -> list[TagBox]:
+    """用层板位置把图片分成若干条带，每条带为一层，层内连续编号排位。"""
+
+    boundaries = [0.0, *[float(value) for value in board_ys], float(image_height)]
+    bands: dict[int, list[tuple[int, int, int, int]]] = {}
+    for box in boxes:
+        cy = box[1] + box[3] / 2
+        band = _band_index(boundaries, cy)
+        bands.setdefault(band, []).append(box)
+
+    tagged: list[TagBox] = []
+    for band_index, band_boxes in sorted(bands.items()):
+        band_boxes = sorted(band_boxes, key=lambda box: (box[0] + box[2] / 2, box[1]))
+        # 条带自下而上编号，最下面为第 1 层；层内按 (x, y) 连续编号排位。
+        for position, box in enumerate(band_boxes, start=1):
+            tagged.append(
+                TagBox(
+                    x=box[0],
+                    y=box[1],
+                    w=box[2],
+                    h=box[3],
+                    row=len(bands) - band_index,
+                    col=position,
+                    rank=1,
+                )
+            )
+    return tagged
+
+
+def _band_index(boundaries: list[float], cy: float) -> int:
+    for index in range(len(boundaries) - 1):
+        if boundaries[index] <= cy < boundaries[index + 1]:
+            return index
+    return len(boundaries) - 2
 
 
 def _non_max_suppression(

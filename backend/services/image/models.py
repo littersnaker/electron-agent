@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 class SheetRecognition:
     """货架识别结果中的一行：某个图纸编号的位置。
 
-    ``rank`` 是同一货位内叠放商品的排位（排 1 靠前/靠上）；没有叠放时为空字符串。
+    ``row`` 为层（第N层，从下到上），``col`` 为排（第N排，层内连续编号；
+    同一货位叠放的货物按上→下顺序连续编号，即“第一层第一排/第二排/第三排”）。
     """
 
     sheet_no: str
@@ -17,7 +18,6 @@ class SheetRecognition:
     col: str
     source_image: str
     note: str = ""
-    rank: str = ""
 
     def to_json(self) -> dict[str, str]:
         """转换为前端可消费的 JSON。"""
@@ -28,7 +28,6 @@ class SheetRecognition:
             "col": self.col,
             "sourceImage": self.source_image,
             "note": self.note,
-            "rank": self.rank,
         }
 
 

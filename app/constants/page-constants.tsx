@@ -35,8 +35,6 @@ export type ImageRecognitionRow = {
   col: string;
   sourceImage: string;
   note: string;
-  /** 同一货位叠放多个商品时的排位（如“排2”），单独一个时为空字符串。 */
-  rank?: string;
 };
 
 /** 图片识别 Agent 的失败照片记录。 */

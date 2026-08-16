@@ -91,36 +91,39 @@ def _rows_from_boxes(
 ) -> tuple[list[SheetRecognition], list[ImageRecognitionFailure]]:
     """把定位框与识别编号组装成识别行；未识别编号记入失败清单。
 
-    同一 (层,位) 内叠放多个标签时（rank>1）带“排N”，单独一个标签不显示排位。
+    每层内按 (列, 排位) 排序后连续编号为“第N排”：同一货位叠放的货物
+    自然得到 第1排/第2排/第3排…（第一层第一排、第一层第二排…）。
     """
+
+    by_row: dict[int, list[tuple[TagBox, str | None]]] = {}
+    for box, number in zip(boxes, numbers, strict=False):
+        by_row.setdefault(box.row, []).append((box, number))
 
     rows: list[SheetRecognition] = []
     failures: list[ImageRecognitionFailure] = []
-    position_counts: dict[tuple[int, int], int] = {}
-    for box in boxes:
-        key = (box.row, box.col)
-        position_counts[key] = position_counts.get(key, 0) + 1
-
-    for box, number in zip(boxes, numbers, strict=False):
-        if number is None:
-            failures.append(
-                ImageRecognitionFailure(
-                    image_name=source_image,
-                    reason=f"标签（第{box.row}层 第{box.col}位）编号无法辨认",
-                    kind="quality",
+    for row_index in sorted(by_row):
+        entries = sorted(
+            by_row[row_index],
+            key=lambda pair: (pair[0].col, pair[0].rank),
+        )
+        for position, (_box, number) in enumerate(entries, start=1):
+            if number is None:
+                failures.append(
+                    ImageRecognitionFailure(
+                        image_name=source_image,
+                        reason=f"标签（第{row_index}层 第{position}排）编号无法辨认",
+                        kind="quality",
+                    )
+                )
+                continue
+            rows.append(
+                SheetRecognition(
+                    sheet_no=number,
+                    row=f"第{row_index}层",
+                    col=f"第{position}排",
+                    source_image=source_image,
                 )
             )
-            continue
-        rank = f"排{box.rank}" if position_counts.get((box.row, box.col), 0) > 1 else ""
-        rows.append(
-            SheetRecognition(
-                sheet_no=number,
-                row=f"第{box.row}层",
-                col=f"第{box.col}位",
-                rank=rank,
-                source_image=source_image,
-            )
-        )
     return rows, failures
 
 

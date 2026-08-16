@@ -113,13 +113,12 @@ async def test_recognize_single_image_parses_pipe_rows() -> None:
         prompt="识别",
     )
     assert error is None
-    assert len(rows) == 2
+    assert len(rows) == 1  # 005 标注无法辨认，不确定的编号不输出
     assert rows[0].sheet_no == "003"
     assert rows[0].row == "第1层"
     assert rows[0].col == "第2位"
-    assert rows[1].note == "编号无法辨认"
     assert rows[0].source_image == "shelf_a.jpg"
-    assert "识别到 2 个图纸编号" in summary
+    assert "识别到 1 个图纸编号" in summary
 
 
 @pytest.mark.asyncio
@@ -145,8 +144,8 @@ async def test_recognize_single_image_parses_real_glm_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recognize_single_image_parses_note_after_position() -> None:
-    """位号之后出现的“编号无法辨认”应进入备注而非编号。"""
+async def test_recognize_single_image_skips_uncertain_entries() -> None:
+    """整图路径：标注“编号无法辨认/不确定”的条目不输出编号。"""
 
     content = "005|第2层|第3位|编号无法辨认\n[008]|[第2层|第4位|"
     client = FakeClient(content)
@@ -156,11 +155,9 @@ async def test_recognize_single_image_parses_note_after_position() -> None:
         prompt="识别",
     )
     assert error is None
-    assert len(rows) == 2
-    assert rows[0].sheet_no == "005"
-    assert rows[0].note == "编号无法辨认"
-    assert rows[1].sheet_no == "008"
-    assert rows[1].note == ""
+    assert len(rows) == 1  # 005 不确定被跳过
+    assert rows[0].sheet_no == "008"
+    assert rows[0].note == ""
 
 
 @pytest.mark.asyncio
@@ -219,16 +216,19 @@ def test_classify_failure_kind() -> None:
 # ---------- structuring ----------
 
 
-def test_deterministic_rows_sorts_and_dedups() -> None:
+def test_deterministic_rows_sorts_by_layer_then_row() -> None:
     rows = _deterministic_rows(
         [
-            SheetRecognition("010", "第2层", "第1位", "a.jpg"),
-            SheetRecognition("002", "第1层", "第3位", "a.jpg"),
-            SheetRecognition("010", "第2层", "第1位", "b.jpg"),  # 重复
+            SheetRecognition("010", "第10层", "第1排", "a.jpg"),
+            SheetRecognition("002", "第2层", "第1排", "a.jpg"),
+            SheetRecognition("001", "第1层", "第1排", "a.jpg"),
+            SheetRecognition("010", "第2层", "第1排", "b.jpg"),  # 重复
         ]
     )
-    assert [item.sheet_no for item in rows] == ["002", "010"]
-    assert len(rows) == 2
+    # 数值排序：第10层排在第2层之后，而不是字典序排到前面；
+    # 第2层第1排的 010（b.jpg）与 a.jpg 重复被去重。
+    assert [item.sheet_no for item in rows] == ["001", "002", "010", "010"]
+    assert len(rows) == 4
 
 
 @pytest.mark.asyncio
@@ -237,8 +237,8 @@ async def test_structure_rows_falls_back_without_credentials() -> None:
         credentials=None,
         preferred_model_id="auto",
         raw_rows=[
-            SheetRecognition("002", "第1层", "第3位", "a.jpg"),
-            SheetRecognition("001", "第1层", "第1位", "a.jpg"),
+            SheetRecognition("002", "第1层", "第3排", "a.jpg"),
+            SheetRecognition("001", "第1层", "第1排", "a.jpg"),
         ],
     )
     assert [item.sheet_no for item in rows] == ["001", "002"]  # 确定性排序
@@ -264,7 +264,7 @@ async def test_structure_rows_uses_llm_when_available(monkeypatch) -> None:
         credentials=credentials,
         preferred_model_id="qwen-test",
         raw_rows=[
-            SheetRecognition("003", "第1层", "第2位", "a.jpg"),
+            SheetRecognition("003", "第1层", "第2排", "a.jpg"),
         ],
     )
     assert captured["model"] == "qwen-test"
@@ -300,8 +300,8 @@ def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
     target = write_recognition_excel(
         directory=tmp_path,
         rows=[
-            SheetRecognition("003\x00", "第1层", "第2位", "shelf_a.jpg", ""),
-            SheetRecognition("005", "第2层", "第3位", "shelf_a.jpg", "编号无法辨认", rank="排2"),
+            SheetRecognition("003\x00", "第1层", "第2排", "shelf_a.jpg", ""),
+            SheetRecognition("005", "第2层", "第3排", "shelf_a.jpg", "编号无法辨认"),
         ],
         failures=[ImageRecognitionFailure("shelf_b.jpg", "视觉识别失败：mock")],
         summary="共识别 2 个图纸编号",
@@ -312,12 +312,30 @@ def test_write_recognition_excel_roundtrip(tmp_path: Path) -> None:
     sheet = workbook["图纸编号"]
     assert sheet["A1"].value == "图纸编号"
     assert sheet["A2"].value == "003"  # 清洗掉控制字符
-    assert sheet["D2"].value in (None, "")  # 排位列：单标签无排位为空
-    assert sheet["E2"].value == "shelf_a.jpg"  # 来源照片列
-    assert sheet["D3"].value == "排2"  # 叠放排位
+    assert sheet["B2"].value == "第1层"
+    assert sheet["C2"].value == "第2排"
+    assert sheet["D2"].value == "shelf_a.jpg"  # 来源照片列
+    assert sheet["E3"].value == "编号无法辨认"  # 第二行数据（005）的备注
     failure_sheet = workbook["识别失败清单"]
     assert failure_sheet["A2"].value == "shelf_b.jpg"
     assert workbook["识别总结"]["A1"].value == "共识别 2 个图纸编号"
+
+
+def test_write_recognition_excel_no_rows_adds_notice(tmp_path: Path) -> None:
+    """无识别结果时第一个工作表给出说明，避免打开只见空表。"""
+
+    from openpyxl import load_workbook
+
+    target = write_recognition_excel(
+        directory=tmp_path,
+        rows=[],
+        failures=[ImageRecognitionFailure("shelf_b.jpg", "视觉识别失败：mock")],
+        summary="未识别到图纸编号",
+    )
+    workbook = load_workbook(target)
+    assert workbook.sheetnames == ["识别结果", "识别失败清单", "识别总结"]
+    notice = workbook["识别结果"]
+    assert notice["A1"].value == "未识别到图纸编号。"
 
 
 def test_build_excel_filename_format() -> None:

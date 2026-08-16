@@ -120,7 +120,7 @@ def _position_number(value: str) -> int:
 
 
 def _deterministic_rows(raw_rows: list[SheetRecognition]) -> list[SheetRecognition]:
-    """确定性兜底：按层/位/排位数值排序、去重（同编号同位置保留一条）。"""
+    """确定性兜底：按层/排数值排序、去重（同编号同位置保留一条）。"""
 
     seen: set[tuple[str, str, str]] = set()
     result: list[SheetRecognition] = []
@@ -129,7 +129,6 @@ def _deterministic_rows(raw_rows: list[SheetRecognition]) -> list[SheetRecogniti
         key=lambda entry: (
             _position_number(entry.row),
             _position_number(entry.col),
-            _position_number(entry.rank),
             entry.sheet_no,
         ),
     ):
