@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.background import spawn
 from backend.services.agent.evaluation.runner import (
+    ensure_sample_datasets,
     load_datasets,
     run_evaluation,
 )
@@ -31,9 +32,17 @@ class EvaluationRunRequest(BaseModel):
 
 @router.get("/api/agent/evaluation/datasets")
 async def get_evaluation_datasets() -> dict[str, object]:
-    """列出本地评测数据集。"""
+    """列出本地评测数据集（无数据集时自动生成示例）。"""
 
     return {"datasets": load_datasets()}
+
+
+@router.post("/api/agent/evaluation/datasets")
+async def post_evaluation_dataset_seed() -> dict[str, object]:
+    """主动生成示例数据集（空目录时兜底）。"""
+
+    ensure_sample_datasets()
+    return {"ok": True, "datasets": load_datasets()}
 
 
 @router.post("/api/agent/evaluation/runs")

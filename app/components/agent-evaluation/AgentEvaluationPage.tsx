@@ -57,6 +57,18 @@ export default function AgentEvaluationPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const reloadDatasets = async () => {
+    try {
+      const response = await apiFetch("/api/agent/evaluation/datasets");
+      const payload = await response.json();
+      const items = Array.isArray(payload?.datasets) ? payload.datasets : [];
+      setDatasets(items);
+      if (items.length > 0) setSelected(String(items[0].name));
+    } catch {
+      setError("加载评测数据集失败");
+    }
+  };
+
   useEffect(() => {
     void apiFetch("/api/agent/evaluation/datasets")
       .then((response) => response.json())
@@ -108,6 +120,19 @@ export default function AgentEvaluationPage({
     }
   };
 
+  const createSampleDataset = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch("/api/agent/evaluation/datasets", { method: "POST" });
+      await reloadDatasets();
+    } catch {
+      setError("生成示例数据集失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       className="mx-auto w-full max-w-3xl px-6 py-8"
@@ -127,29 +152,52 @@ export default function AgentEvaluationPage({
         </button>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={selected}
-          onChange={(event) => setSelected(event.target.value)}
-          className="rounded-[10px] border px-3 py-1.5 text-[12px]"
-          style={{ color: COLORS.text, borderColor: COLORS.border, background: "var(--glass)" }}
+      {datasets.length === 0 ? (
+        <div
+          className="mb-4 rounded-[12px] border px-4 py-3 text-[12px]"
+          style={{ borderColor: COLORS.border, color: COLORS.textMuted }}
         >
-          {datasets.map((item) => (
-            <option key={item.name} value={item.name}>
-              {item.name}（{item.agentId} · {item.caseCount} 例）
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={startRun}
-          disabled={busy || !selected}
-          className="rounded-[10px] px-4 py-1.5 text-[12px] font-semibold text-white transition-all disabled:opacity-50"
-          style={{ background: COLORS.blue }}
-        >
-          {busy ? "发起中…" : "开始评测"}
-        </button>
-      </div>
+          还没有评测数据集。请把 JSON 数据集放到本地 evaluations 目录，
+          或点下面的按钮生成一个示例数据集试用。
+          <button
+            type="button"
+            onClick={createSampleDataset}
+            disabled={busy}
+            className="ml-3 rounded-[10px] px-3 py-1 text-[12px] font-semibold text-white disabled:opacity-50"
+            style={{ background: COLORS.blue }}
+          >
+            生成示例数据集
+          </button>
+        </div>
+      ) : (
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <select
+            value={selected}
+            onChange={(event) => setSelected(event.target.value)}
+            className="rounded-[10px] border px-3 py-1.5 text-[12px]"
+            style={{
+              color: COLORS.text,
+              borderColor: COLORS.border,
+              background: "var(--glass)",
+            }}
+          >
+            {datasets.map((item) => (
+              <option key={item.name} value={item.name}>
+                {item.name}（{item.agentId} · {item.caseCount} 例）
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={startRun}
+            disabled={busy || !selected}
+            className="rounded-[10px] px-4 py-1.5 text-[12px] font-semibold text-white transition-all disabled:opacity-50"
+            style={{ background: COLORS.blue }}
+          >
+            {busy ? "发起中…" : "开始评测"}
+          </button>
+        </div>
+      )}
 
       {error ? (
         <div className="mb-4 rounded-[12px] border px-3 py-2 text-[12px]" style={{ borderColor: COLORS.red, color: COLORS.red }}>

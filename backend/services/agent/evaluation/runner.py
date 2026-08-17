@@ -28,9 +28,33 @@ def evaluations_directory() -> Path:
     return directory
 
 
+_SAMPLE_DATASET: dict[str, Any] = {
+    "name": "sample-qa",
+    "agentId": "qa",
+    "cases": [
+        {"input": "你好，请介绍一下你自己", "expected": "你好"},
+        {"input": "1 + 1 等于几？", "expected": "2"},
+    ],
+}
+
+
+def ensure_sample_datasets() -> None:
+    """评测目录没有任何数据集时生成一个示例数据集，避免页面空转。"""
+
+    directory = evaluations_directory()
+    if any(directory.glob("*.json")):
+        return
+    target = directory / "sample-qa.json"
+    target.write_text(
+        json.dumps(_SAMPLE_DATASET, ensure_ascii=False, indent=2),
+        "utf-8",
+    )
+
+
 def load_datasets() -> list[dict[str, Any]]:
     """读取全部评测数据集（按文件名字典序）。"""
 
+    ensure_sample_datasets()
     datasets: list[dict[str, Any]] = []
     for path in sorted(evaluations_directory().glob("*.json")):
         try:
@@ -228,6 +252,7 @@ async def run_evaluation(
 
 __all__ = [
     "default_case_runner",
+    "ensure_sample_datasets",
     "evaluations_directory",
     "judge_case",
     "judge_case_with_llm",
