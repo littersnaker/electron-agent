@@ -10,6 +10,12 @@ from collections.abc import AsyncIterator
 from backend.core import request_audit
 from backend.services.agent.reflection.eval import schedule_memory_eval
 from backend.services.agent.reflection.runner import schedule_runtime_review
+from backend.services.agent.loop.trace import (
+    TraceHandle,
+    add_trace_event,
+    finish_trace,
+    start_trace,
+)
 from backend.services.evaluation import RuntimeEvaluator
 from backend.services.glm46v import (
     builtin_skill_catalog,
@@ -98,6 +104,7 @@ class AgentRuntime:
         started_at = self._evaluator.begin()
         event_count = 0
         result_summary = ""
+        trace: TraceHandle | None = None
         audit_token = request_audit.push_audit_context(
             agent_id=request.agent_id,
             session_id=request.session_id,
@@ -159,6 +166,15 @@ class AgentRuntime:
                     "estimatedContextTokens": context.estimated_tokens,
                 },
             )
+            try:
+                trace = await start_trace(
+                    session_id=request.session_id,
+                    project_id=request.project_id,
+                    model=model.model_id,
+                    request_preview=request.user_text,
+                )
+            except Exception:  # noqa: BLE001 - trace 失败不影响主流程
+                trace = None
 
             async for event in self._executor.stream(
                 agent=registered.adapter,
@@ -176,6 +192,14 @@ class AgentRuntime:
                         continue
                     if isinstance(parsed, dict) and parsed.get("type") == "TEXT":
                         result_summary = str(parsed.get("content") or "")[:4_000]
+                    if trace is not None:
+                        await self._record_runtime_trace_event(trace, parsed)
+
+            if trace is not None:
+                try:
+                    await finish_trace(trace, status="completed")
+                except Exception:  # noqa: BLE001
+                    pass
 
             evaluation = self._evaluator.finish(
                 started_at=started_at,
@@ -207,6 +231,13 @@ class AgentRuntime:
                 memory_ids=list(context.memory_ids),
             )
         except Exception as exc:
+            if trace is not None:
+                try:
+                    await finish_trace(
+                        trace, status="failed", error_message=str(exc)[:1000]
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             evaluation = self._evaluator.finish(
                 started_at=started_at,
                 event_count=event_count,
@@ -398,3 +429,27 @@ class AgentRuntime:
         except KeyError:
             return False
         return bool((registered.config.metadata or {}).get(key))
+
+    async def _record_runtime_trace_event(
+        self, trace: TraceHandle, parsed: dict[str, object]
+    ) -> None:
+        """把统一 Runtime 的 SSE 事件落成 trace 事件（供执行图渲染）。
+
+        TOOL_STATUS 归为 ``tool`` 类别，其余（STATUS/AGENT_STATUS/TEXT 等）
+        归为 ``stage``；detail 截断到 200 字符，避免把大 payload 写入库。
+        """
+
+        event_type = str(parsed.get("type") or "STATUS")
+        category = "tool" if event_type == "TOOL_STATUS" else "stage"
+        content = parsed.get("content") or parsed.get("detail") or ""
+        detail = str(content)[:200]
+        try:
+            await add_trace_event(
+                trace,
+                category=category,
+                name=event_type,
+                status="running",
+                metadata={"detail": detail},
+            )
+        except Exception:  # noqa: BLE001 - trace 写入失败忽略
+            pass

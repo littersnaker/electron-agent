@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type AssistantMessageRowProps, COLORS, ToolActivityPanel, parseThinkingStream } from "./tool-activity-panel";
 import { ThinkingSkeleton } from "./thinking-skeleton";
+import { StepsTimeline } from "./steps-timeline";
 export function AssistantMessageRow({
   content,
   toolActivities = [],
@@ -57,6 +58,8 @@ export function AssistantMessageRow({
           isStreaming={isStreaming}
         />
       )}
+
+      <StepsTimeline steps={toolActivities} />
 
       {thinking && (
         <section

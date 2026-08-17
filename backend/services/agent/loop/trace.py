@@ -138,3 +138,44 @@ async def get_trace_events(trace_id: str) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def build_execution_graph(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """由 trace 事件序列生成可渲染的执行图（节点 + 顺序边）。
+
+    每个事件一个节点（label=事件名/类别，携带状态与耗时），事件之间按
+    sequence 顺序连边；前端可据此画 DAG 或线性时间轴。
+    """
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, str]] = []
+    previous_id: str | None = None
+    for event in events:
+        node_id = str(event.get("id") or f"ev-{event.get('sequence') or len(nodes)}")
+        metadata = event.get("metadata") or {}
+        label = str(event.get("name") or event.get("category") or "step")
+        nodes.append(
+            {
+                "id": node_id,
+                "label": label,
+                "category": str(event.get("category") or "stage"),
+                "status": event.get("status"),
+                "durationMs": event.get("durationMs"),
+                "detail": str(metadata.get("detail") or ""),
+            }
+        )
+        if previous_id is not None:
+            edges.append({"source": previous_id, "target": node_id})
+        previous_id = node_id
+    return {"nodes": nodes, "edges": edges}
+
+
+__all__ = [
+    "TraceHandle",
+    "add_trace_event",
+    "build_execution_graph",
+    "finish_trace",
+    "get_trace_events",
+    "list_recent_traces",
+    "start_trace",
+]

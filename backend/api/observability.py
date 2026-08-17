@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from backend.services.agent.loop.trace import get_trace_events, list_recent_traces
+from backend.services.agent.loop.trace import (
+    build_execution_graph,
+    get_trace_events,
+    list_recent_traces,
+)
 
 router = APIRouter(tags=["observability"])
 
@@ -30,9 +34,11 @@ async def get_observability(
     """返回最近 Trace 列表或单条 Trace 详情。"""
 
     if trace_id:
+        events = await get_trace_events(trace_id)
         return {
             "traceId": trace_id,
-            "events": await get_trace_events(trace_id),
+            "events": events,
+            "graph": build_execution_graph(events),
             "evaluation": None,
             "contextCache": _empty_cache_stats(),
         }

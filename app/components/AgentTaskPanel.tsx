@@ -11,6 +11,7 @@ import type {
 } from "../types/workspace";
 import AgentPanel, { type AgentInstance } from "./AgentPanel";
 import type { ToolActivity } from "./AssistantMessageRow";
+import ExecutionGraphPanel from "./execution-graph/ExecutionGraphPanel";
 import TaskPlanningPanel from "./TaskPlanningPanel";
 import type { TaskPlanningWorkflowMode } from "./task-planning/types";
 
@@ -51,6 +52,10 @@ export default function AgentTaskPanel({
         agentStatus={agentStatus}
         isStreaming={isStreaming}
         workflowMode={workflowMode}
+      />
+      <ExecutionGraphPanel
+        lifecycleEvents={lifecycleEvents}
+        toolActivities={toolActivities}
       />
       <AgentPanel
         agents={agents}
