@@ -373,7 +373,7 @@ class AgentRuntime:
     ) -> None:
         """跨境电商 Agent 任务结束后触发异步复盘（fire-and-forget）。"""
 
-        if request.agent_id != "commerce":
+        if not self._agent_metadata_flag(request.agent_id, "runtime_review"):
             return
         schedule_runtime_review(
             task_id=task_id,
@@ -389,3 +389,12 @@ class AgentRuntime:
             marketplace=str((request.metadata or {}).get("marketplace") or ""),
             credentials=request.credentials,
         )
+
+    def _agent_metadata_flag(self, agent_id: str, key: str) -> bool:
+        """读取 agent.yaml 中 metadata 的布尔开关（缺省 False，避免硬编码 agent_id）。"""
+
+        try:
+            registered = self._agents.get(agent_id)
+        except KeyError:
+            return False
+        return bool((registered.config.metadata or {}).get(key))

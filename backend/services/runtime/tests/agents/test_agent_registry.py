@@ -41,8 +41,8 @@ def test_agent_registry_loads_approved_adapter(tmp_path: Path) -> None:
     assert registered.adapter.agent_id == "coding"
 
 
-def test_agent_registry_rejects_unapproved_python_adapter(tmp_path: Path) -> None:
-    """配置文件不能通过任意导入路径实例化未批准代码。"""
+def test_agent_registry_rejects_unregistered_python_adapter(tmp_path: Path) -> None:
+    """配置文件不能通过任意导入路径实例化未注册代码。"""
 
     agent_root = tmp_path / "unsafe"
     agent_root.mkdir(parents=True)
@@ -58,5 +58,5 @@ def test_agent_registry_rejects_unapproved_python_adapter(tmp_path: Path) -> Non
     )
 
     registry = AgentRegistry(tmp_path)
-    with pytest.raises(ValueError, match="未批准适配器"):
+    with pytest.raises(ValueError, match="未注册适配器"):
         registry.load()

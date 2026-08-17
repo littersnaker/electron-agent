@@ -9,12 +9,12 @@ from typing import Any
 
 import yaml
 
+import backend.services.agent.adapters  # noqa: F401 - 导入即触发适配器注册
+from backend.services.agent.adapters.registry import (
+    get_adapter_class,
+    registered_adapter_names,
+)
 from backend.services.agent.adapters.base import BaseAgent
-from backend.services.agent.adapters.coding import CodeAgentAdapter
-from backend.services.agent.adapters.commerce import CommerceAgentAdapter
-from backend.services.agent.adapters.image import ImageAgentAdapter
-from backend.services.agent.adapters.media import MediaAgentAdapter
-from backend.services.agent.adapters.qa import QAAgentAdapter
 
 AgentFactory = Callable[[], BaseAgent]
 
@@ -51,15 +51,6 @@ class AgentRegistry:
         self._config_root = config_root.resolve()
         self._agents: dict[str, RegisteredAgent] = {}
 
-        # 配置文件不能直接导入任意 Python 路径，必须映射到代码中明确批准的工厂。
-        self._factories: dict[str, AgentFactory] = {
-            "legacy_code_agent": CodeAgentAdapter,
-            "qa_agent": QAAgentAdapter,
-            "commerce_agent": CommerceAgentAdapter,
-            "media_agent": MediaAgentAdapter,
-            "image_agent": ImageAgentAdapter,
-        }
-
     def load(self) -> None:
         """扫描全部 ``agent.yaml``，并用新结果原子替换旧注册表。"""
 
@@ -71,10 +62,13 @@ class AgentRegistry:
             config = self._load_config(path)
             if config.id in loaded:
                 raise ValueError(f"Agent ID 重复：{config.id}")
-            factory = self._factories.get(config.adapter)
-            if factory is None:
-                raise ValueError(f"Agent {config.id} 使用了未批准适配器：{config.adapter}")
-            loaded[config.id] = RegisteredAgent(config=config, adapter=factory())
+            adapter_class = get_adapter_class(config.adapter)
+            if adapter_class is None:
+                raise ValueError(
+                    f"Agent {config.id} 使用了未注册适配器：{config.adapter}；"
+                    f"当前可用：{', '.join(registered_adapter_names()) or '无'}"
+                )
+            loaded[config.id] = RegisteredAgent(config=config, adapter=adapter_class())
 
         if not loaded:
             raise ValueError("没有找到任何可用 Agent 配置")

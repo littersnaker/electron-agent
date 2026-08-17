@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from backend.schemas.chat import ChatRequest
+from backend.services.agent.adapters.registry import register_adapter
 from backend.services.image.service import stream_image_recognition
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.models.router import ModelSelection
 from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
+@register_adapter("image_agent")
 class ImageAgentAdapter:
     """按固定流水线执行图片识别，并保持现有 SSE 事件协议不变。"""
 

@@ -11,6 +11,7 @@ from backend.services.glm46v import (
     strip_image_attachments,
 )
 from backend.services.glm46v.client import GLM46VError
+from backend.services.agent.adapters.registry import register_adapter
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.models.router import ModelSelection
 from backend.services.qa import stream_qa_agent
@@ -18,6 +19,7 @@ from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.utils.sse import encode_sse
 
 
+@register_adapter("qa_agent")
 class QAAgentAdapter:
     """复用现有模型网关，同时接收统一 Context、Memory 和 Skill。"""
 

@@ -12,3 +12,4 @@ memory:
 output_schema: sse_stream
 metadata:
   migration: runtime_native
+  runtime_review: true

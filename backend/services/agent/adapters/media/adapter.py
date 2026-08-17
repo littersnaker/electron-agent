@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from backend.schemas.chat import ChatRequest
+from backend.services.agent.adapters.registry import register_adapter
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.media.agent_service import stream_media_agent
 from backend.services.models.router import ModelSelection
 from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
+@register_adapter("media_agent")
 class MediaAgentAdapter:
     """把媒体请求转发给 Media Agent 流式服务。"""
 

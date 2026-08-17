@@ -12,12 +12,14 @@ from backend.services.glm46v import (
     strip_image_attachments,
 )
 from backend.services.glm46v.client import GLM46VError
+from backend.services.agent.adapters.registry import register_adapter
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.models.router import ModelSelection
 from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 from backend.utils.sse import encode_sse
 
 
+@register_adapter("legacy_code_agent")
 class CodeAgentAdapter:
     """复用旧 Code Agent 工作流，同时接受 Runtime 提供的统一上下文。"""
 

@@ -9,11 +9,13 @@ from backend.schemas.commerce import CommerceRequest
 from backend.services.commerce.listing import stream_listing
 from backend.services.commerce.llm import LlmConfig
 from backend.services.commerce.service import stream_research
+from backend.services.agent.adapters.registry import register_adapter
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.models.router import ModelSelection
 from backend.services.runtime.contracts import RuntimeContext, RuntimeRequest
 
 
+@register_adapter("commerce_agent")
 class CommerceAgentAdapter:
     """根据 Runtime 元数据选择研究或 Listing 子工作流。"""
 
