@@ -42,11 +42,19 @@ export function useComposerContextMenu(
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
+  const copyFromTextarea = (): string => {
+    const element = textareaRef.current;
+    if (!element) return input;
+    const start = element.selectionStart ?? 0;
+    const end = element.selectionEnd ?? input.length;
+    const selected = input.slice(start, end);
+    return selected || input;
+  };
+
   const items: ContextMenuItem[] = [
     {
       label: "复制",
-      onSelect: () =>
-        void writeClipboard(window.getSelection()?.toString() || input),
+      onSelect: () => void writeClipboard(copyFromTextarea()),
     },
     { label: "粘贴", onSelect: () => void pasteFromClipboard() },
     { label: "全选", onSelect: () => textareaRef.current?.select() },

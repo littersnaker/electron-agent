@@ -23,19 +23,25 @@ export function ContextMenu({
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const close = () => onClose();
+    // 只在点击菜单外部时关闭；点击菜单内部必须留给 onClick 处理，
+    // 否则 mousedown 先卸载菜单会导致菜单项 click 永远不触发。
+    const handlePointerDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        onClose();
+      }
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", close);
+    document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
     return () => {
-      document.removeEventListener("mousedown", close);
+      document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
     };
   }, [onClose]);
 
