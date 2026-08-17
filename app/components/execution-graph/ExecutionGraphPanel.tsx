@@ -2,7 +2,7 @@
 // 由 lifecycle 事件 + 工具活动实时构建节点/边，节点状态着色，可缩放平移。
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -76,6 +76,7 @@ export default function ExecutionGraphPanel({
   lifecycleEvents: AgentLifecycleEventPayload[];
   toolActivities: ToolActivity[];
 }) {
+  const [collapsed, setCollapsed] = useState(true);
   const { nodes, edges } = useMemo(() => {
     const built: Node<GraphNodeData>[] = [];
     const links: Edge[] = [];
@@ -132,35 +133,46 @@ export default function ExecutionGraphPanel({
         className="rounded-[12px] border px-3 py-2 text-[11px]"
         style={{ borderColor: COLORS.border, color: COLORS.textSubtle }}
       >
-        暂无执行步骤，运行 Agent 后这里会展示执行图。
+        暂无执行步骤。
       </div>
     );
   }
 
   return (
     <div className="rounded-[12px] border" style={{ borderColor: COLORS.border }}>
-      <div
-        className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.1em]"
-        style={{ color: COLORS.textSubtle }}
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left transition-colors hover:bg-[var(--glass-soft)]"
       >
-        Agent 执行图
-      </div>
-      <div className="h-[260px]">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.25 }}
-          nodesDraggable
-          minZoom={0.4}
-          maxZoom={1.5}
-          proOptions={{ hideAttribution: true }}
+        <span
+          className="text-[10px] font-semibold uppercase tracking-[0.1em]"
+          style={{ color: COLORS.textSubtle }}
         >
-          <Background gap={16} />
-          <Controls showInteractive={false} />
-        </ReactFlow>
-      </div>
+          Agent 执行图（{nodes.length}）
+        </span>
+        <span className="text-[10px]" style={{ color: COLORS.textSubtle }}>
+          {collapsed ? "展开 ▾" : "收起 ▴"}
+        </span>
+      </button>
+      {!collapsed ? (
+        <div className="h-[220px] border-t" style={{ borderColor: COLORS.border }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.25 }}
+            nodesDraggable
+            minZoom={0.4}
+            maxZoom={1.5}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={16} />
+            <Controls showInteractive={false} />
+          </ReactFlow>
+        </div>
+      ) : null}
     </div>
   );
 }
