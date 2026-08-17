@@ -3,7 +3,7 @@
  * 模块职责：聊天输入器组件及附件交互。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import type { ChangeEvent, ClipboardEvent } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import {
@@ -16,6 +16,8 @@ import ModelSelector from "./ModelSelector";
 import CodeAgentModeSelector from "./CodeAgentModeSelector";
 import { CommerceControls } from "./chat-composer/commerce-controls";
 import { AttachmentList } from "./chat-composer/attachment-list";
+import { ContextMenu } from "./context-menu";
+import { useComposerContextMenu } from "../hooks/use-composer-context-menu";
 import {
   IMAGE_EDIT_FIDELITY_OPTIONS,
   MODE_TABS,
@@ -64,7 +66,13 @@ export function ChatComposer({
   onStop,
 }: ChatComposerProps) {
   const disabled = isStreaming || isParsingFile;
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const {
+    textareaRef,
+    menu: composerMenu,
+    items: composerMenuItems,
+    openMenu,
+    closeMenu,
+  } = useComposerContextMenu(input, onInputChange);
   const attachmentsEnabled = mode !== "commerce";
   const isMediaComposer = mode === "qa" && composerMode !== "chat";
   const submitDisabled =
@@ -347,6 +355,9 @@ export function ChatComposer({
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onPaste={(event) => void handlePaste(event)}
+          onContextMenu={(event) => {
+            openMenu(event);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -468,6 +479,14 @@ export function ChatComposer({
           </div>
         </div>
       </div>
+      {composerMenu ? (
+        <ContextMenu
+          x={composerMenu.x}
+          y={composerMenu.y}
+          onClose={closeMenu}
+          items={composerMenuItems}
+        />
+      ) : null}
     </>
   );
 }

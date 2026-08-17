@@ -18,6 +18,8 @@ export type MessageAttachment = {
 export type Message = {
   role: "user" | "assistant";
   content: string;
+  /** 消息发送时间（ISO），历史会话未存时为空。 */
+  createdAt?: string;
   /** 用户附件与 AI 生成结果使用同一种结构，UI 不需要写两套渲染逻辑。 */
   attachments?: MessageAttachment[];
   /** Cross-border Market Intelligence Agent 的结构化市场报告；普通 QA / Code / Media 消息不使用。 */

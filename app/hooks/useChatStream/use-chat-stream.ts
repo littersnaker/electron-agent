@@ -113,7 +113,11 @@ export function useChatStream({
         const content = result.ok
           ? `🖼️ 视觉验证：${result.content || "页面已渲染。"}`
           : `⚠️ 视觉验证失败：${result.error || "未知错误"}`;
-        const verifyMessage: Message = { role: "assistant", content };
+        const verifyMessage: Message = {
+          role: "assistant",
+          content,
+          createdAt: new Date().toISOString(),
+        };
         setMessages((current) => [...current, verifyMessage]);
         setSessions((current) =>
           current.map((session) =>
@@ -176,12 +180,17 @@ export function useChatStream({
                 role: "user",
                 content: visibleUserContent,
                 attachments: visibleAttachments,
+                createdAt: new Date().toISOString(),
               },
             ];
         const errorHistory: Message[] = [
           ...visibleBaseMessages,
           ...visibleErrorUserMessage,
-          { role: "assistant", content: `⚠️ ${workspaceError}` },
+          {
+            role: "assistant",
+            content: `⚠️ ${workspaceError}`,
+            createdAt: new Date().toISOString(),
+          },
         ];
         const title = suppressVisibleUserMessage
           ? activeSession.title
@@ -220,12 +229,13 @@ export function useChatStream({
                 role: "user",
                 content: visibleUserContent,
                 attachments: visibleAttachments,
+                createdAt: new Date().toISOString(),
               },
             ];
       const visibleHistory: Message[] = [
         ...visibleBaseMessages,
         ...visibleUserMessages,
-        { role: "assistant", content: "" },
+        { role: "assistant", content: "", createdAt: new Date().toISOString() },
       ];
       const requestMessages = resumeExistingRun
         ? visibleBaseMessages.map(({ role, content }) => ({ role, content }))

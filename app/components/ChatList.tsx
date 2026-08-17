@@ -11,6 +11,7 @@ import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
 import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
+import { ContextMenu } from "./context-menu";
 
 interface ChatListProps {
   messages: Message[];
@@ -68,6 +69,11 @@ function ChatList({
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    message: Message;
+  } | null>(null);
   const copyResetTimerRef = useRef<number | null>(null);
 
   // ChatList 会由父组件使用 activeSessionId 作为 key。切换会话时组件会重新挂载，
@@ -124,6 +130,29 @@ function ChatList({
     }
   };
 
+  const formatMessageTime = (iso?: string) => {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const openContextMenu = (event: React.MouseEvent, message: Message) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, message });
+  };
+
+  const copyMessage = async (message: Message) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+    } catch {
+      // 剪贴板不可用时静默失败
+    }
+  };
+
   useEffect(
     () => () => {
       if (copyResetTimerRef.current) {
@@ -174,7 +203,10 @@ function ChatList({
             const copied = copiedMessageIndex === index;
 
             return (
-              <div className="group mb-5 flex justify-end px-1 sm:px-3">
+              <div
+                className="group mb-5 flex justify-end px-1 sm:px-3"
+                onContextMenu={(event) => openContextMenu(event, message)}
+              >
                 <div className="flex max-w-[82%] flex-col items-end sm:max-w-[72%]">
                   <div
                     className="w-fit max-w-full rounded-[20px] rounded-br-[7px] px-4 py-3 text-[14px] font-normal leading-6 tracking-[-0.006em] text-white"
@@ -191,6 +223,12 @@ function ChatList({
                   </div>
 
                   <div className="mt-1 flex h-7 items-center justify-end pr-0.5">
+                    <span
+                      className="mr-2 text-[10px]"
+                      style={{ color: COLORS.textMuted }}
+                    >
+                      {formatMessageTime(message.createdAt)}
+                    </span>
                     <button
                       type="button"
                       onClick={() => void copyUserMessage(message.content, index)}
@@ -272,18 +310,26 @@ function ChatList({
           if (!shouldRenderAssistant) return <div className="h-1" />;
 
           return (
-            <div className="mb-6 flex items-start gap-3 px-1 sm:px-3">
+            <div
+              className="mb-6 flex items-start gap-3 px-1 sm:px-3"
+              onContextMenu={(event) => openContextMenu(event, message)}
+            >
               <AssistantBadge />
               <div className="min-w-0 max-w-[calc(100%-40px)] flex-1 pt-0.5">
                 <div
-                  className="mb-1.5 text-[11px] font-medium tracking-wide"
+                  className="mb-1.5 flex items-baseline gap-2 text-[11px] font-medium tracking-wide"
                   style={{ color: COLORS.textMuted }}
                 >
-                  {message.commerceListing
-                    ? "Amazon Listing Builder"
-                    : message.commerceReport
-                      ? "Market Intelligence Agent"
-                      : "Agent"}
+                  <span>
+                    {message.commerceListing
+                      ? "Amazon Listing Builder"
+                      : message.commerceReport
+                        ? "Market Intelligence Agent"
+                        : "Agent"}
+                  </span>
+                  <span className="text-[10px] font-normal" style={{ color: COLORS.textMuted }}>
+                    {formatMessageTime(message.createdAt)}
+                  </span>
                 </div>
                 {isLastMessage && knowledgeSearched && (
                   <div
@@ -391,6 +437,19 @@ function ChatList({
           }
         }
       `}</style>
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={[
+            {
+              label: "复制",
+              onSelect: () => void copyMessage(contextMenu.message),
+            },
+          ]}
+        />
+      ) : null}
     </div>
   );
 }
