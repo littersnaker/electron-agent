@@ -12,7 +12,7 @@ import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
 import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
 import { ContextMenu } from "./context-menu";
-import { writeClipboard } from "../lib/clipboard";
+import { stripMarkdown, writeClipboard } from "../lib/clipboard";
 
 interface ChatListProps {
   messages: Message[];
@@ -148,11 +148,14 @@ function ChatList({
 
   const copyMessage = async (message: Message) => {
     try {
-      await writeClipboard(message.content);
+      const selection = window.getSelection()?.toString().trim() ?? "";
+      await writeClipboard(selection || stripMarkdown(message.content));
     } catch {
       // 剪贴板不可用时静默失败
     }
   };
+
+  const hasSelection = () => Boolean(window.getSelection()?.toString().trim());
 
   useEffect(
     () => () => {
@@ -445,7 +448,7 @@ function ChatList({
           onClose={() => setContextMenu(null)}
           items={[
             {
-              label: "复制",
+              label: hasSelection() ? "复制选中内容" : "复制全文（纯文本）",
               onSelect: () => void copyMessage(contextMenu.message),
             },
           ]}
