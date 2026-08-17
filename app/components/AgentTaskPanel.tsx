@@ -60,7 +60,7 @@ export default function AgentTaskPanel({
       <AgentPanel
         agents={agents}
         isStreaming={isStreaming}
-        className="min-h-0 flex-1"
+        className="shrink-0"
       />
     </aside>
   );
