@@ -448,7 +448,7 @@ function ChatList({
           onClose={() => setContextMenu(null)}
           items={[
             {
-              label: hasSelection() ? "复制选中内容" : "复制全文（纯文本）",
+              label: hasSelection() ? "复制选中内容" : "复制全文",
               onSelect: () => void copyMessage(contextMenu.message),
             },
           ]}

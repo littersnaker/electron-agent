@@ -53,7 +53,7 @@ export function ContextMenu({
     <div
       ref={ref}
       role="menu"
-      className="fixed z-[99999] w-36 overflow-hidden rounded-[12px] border p-1 shadow-2xl"
+      className="fixed z-99999 w-auto min-w-20 overflow-hidden rounded-xl border p-1 shadow-2xl"
       style={{
         left,
         top,
@@ -75,8 +75,8 @@ export function ContextMenu({
             onClose();
             item.onSelect();
           }}
-          className="flex w-full cursor-pointer items-center rounded-[9px] px-2 py-1 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)] disabled:cursor-default disabled:opacity-40"
-          style={{ color: "var(--text-primary)", fontSize: "11px !important" }}
+          className="flex w-full text-[12px]! cursor-pointer items-center rounded-[9px] px-2 py-1 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)] disabled:cursor-default disabled:opacity-40"
+          style={{ color: "var(--text-primary)" }}
         >
           {item.label}
         </button>
