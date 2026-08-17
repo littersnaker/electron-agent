@@ -12,6 +12,7 @@ import ConfirmDialog from "./components/skills-manager/confirm-dialog";
 import ApiKeyModal from "./components/ApiKeyModal";
 import SkillsManagerPage from "./components/skills-manager/SkillsManagerPage";
 import KnowledgeBasePage from "./components/knowledge-base/KnowledgeBasePage";
+import AgentEvaluationPage from "./components/agent-evaluation/AgentEvaluationPage";
 import { ChatComposer } from "./components/ChatComposer";
 import CheckpointResumeBar from "./components/CheckpointResumeBar";
 import ChatList from "./components/ChatList";
@@ -69,7 +70,9 @@ export default function Home() {
   const [pendingProjectFolder, setPendingProjectFolder] = useState<string | null>(null);
   /** 待删除的项目 ID（弹确认框）。 */
   const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
-  const [activePage, setActivePage] = useState<"workspace" | "skills" | "knowledge">("workspace");
+  const [activePage, setActivePage] = useState<
+    "workspace" | "skills" | "knowledge" | "evaluation"
+  >("workspace");
   const { theme, toggleTheme } = useThemeMode();
   const apiKey = useApiKey();
   const composer = useComposer();
@@ -368,6 +371,7 @@ export default function Home() {
             deleteProject={(projectId: string) => setDeleteProjectId(projectId)}
             onOpenKnowledge={() => setActivePage("knowledge")}
             onOpenSkills={() => setActivePage("skills")}
+            onOpenEvaluation={() => setActivePage("evaluation")}
             onOpenApiKey={apiKey.openKeyModal}
           />
           <section className="relative flex min-w-0 flex-1 flex-col">
@@ -514,6 +518,10 @@ export default function Home() {
         onToggleTheme={toggleTheme}
         onBack={() => setActivePage("workspace")}
         hidden={activePage !== "knowledge"}
+      />
+      <AgentEvaluationPage
+        onBack={() => setActivePage("workspace")}
+        hidden={activePage !== "evaluation"}
       />
     </>
   );

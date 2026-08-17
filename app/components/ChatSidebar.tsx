@@ -25,6 +25,7 @@ interface ChatSidebarProps {
   deleteSession: (id: string, event: MouseEvent) => void;
   onOpenKnowledge: () => void;
   onOpenSkills: () => void;
+  onOpenEvaluation: () => void;
   onOpenApiKey: () => void;
 }
 const COLORS = {
@@ -661,6 +662,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
         <SidebarSettingsMenu
           onOpenKnowledge={props.onOpenKnowledge}
           onOpenSkills={props.onOpenSkills}
+          onOpenEvaluation={props.onOpenEvaluation}
           onOpenApiKey={props.onOpenApiKey}
         />
       </div>

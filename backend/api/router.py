@@ -14,6 +14,7 @@ from backend.api.knowledge import router as knowledge_router
 from backend.api.legacy import router as legacy_router
 from backend.api.mcp import router as mcp_router
 from backend.api.media import router as media_router
+from backend.api.evaluation import router as evaluation_router
 from backend.api.models import router as models_router
 from backend.api.observability import router as observability_router
 from backend.api.preferences import router as preferences_router
@@ -41,6 +42,7 @@ def register_routes() -> None:
         media_router,
         commerce_router,
         image_router,
+        evaluation_router,
         observability_router,
         review_router,
         skills_router,

@@ -9,6 +9,8 @@ interface SidebarSettingsMenuProps {
   onOpenKnowledge: () => void;
   /** 打开 Skills 管理页的回调 */
   onOpenSkills: () => void;
+  /** 打开 Agent 评测页的回调 */
+  onOpenEvaluation: () => void;
   /** 打开密钥设置弹窗的回调 */
   onOpenApiKey: () => void;
 }
@@ -17,6 +19,7 @@ interface SidebarSettingsMenuProps {
 export default function SidebarSettingsMenu({
   onOpenKnowledge,
   onOpenSkills,
+  onOpenEvaluation,
   onOpenApiKey,
 }: SidebarSettingsMenuProps) {
   const [open, setOpen] = useState(false);
@@ -125,6 +128,28 @@ export default function SidebarSettingsMenu({
               <path d="M10 5.2v11.2" stroke="currentColor" strokeWidth="1.45" />
             </svg>
             知识库管理
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onOpenEvaluation();
+            }}
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)]"
+            style={{ color: "var(--text-primary)" }}
+          >
+            <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="none">
+              <path
+                d="M4 14.5 8.2 7.8l3.2 2.6L16 4.5"
+                stroke="currentColor"
+                strokeWidth="1.45"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path d="M13 4.5h3v3" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+            </svg>
+            Agent 评测
           </button>
           <button
             type="button"
