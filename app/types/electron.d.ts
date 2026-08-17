@@ -44,6 +44,10 @@ declare global {
         payload: CommercePdfPayload,
       ) => Promise<{ canceled: boolean; filePath?: string }>;
       capturePage: (url: string) => Promise<{ base64: string }>;
+      clipboard: {
+        readText: () => Promise<string>;
+        writeText: (text: string) => Promise<void>;
+      };
       setTheme: (theme: ElectronAppTheme) => Promise<ElectronAppTheme>;
       credentials: ElectronCredentialApi;
       preferences: ElectronPreferenceApi;

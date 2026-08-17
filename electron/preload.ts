@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke("commerce:exportPdf", payload),
   capturePage: (url: string): Promise<{ base64: string }> =>
     ipcRenderer.invoke("visual:capturePage", url),
+  clipboard: {
+    readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
+    writeText: (text: string): Promise<void> =>
+      ipcRenderer.invoke("clipboard:writeText", text),
+  },
   setTheme: (theme: AppTheme) => ipcRenderer.invoke("window:setTheme", theme),
   credentials: {
     read: (): Promise<CredentialStore> => ipcRenderer.invoke("credentials:read"),

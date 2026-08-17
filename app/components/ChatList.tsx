@@ -12,6 +12,7 @@ import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
 import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
 import { ContextMenu } from "./context-menu";
+import { writeClipboard } from "../lib/clipboard";
 
 interface ChatListProps {
   messages: Message[];
@@ -147,7 +148,7 @@ function ChatList({
 
   const copyMessage = async (message: Message) => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await writeClipboard(message.content);
     } catch {
       // 剪贴板不可用时静默失败
     }

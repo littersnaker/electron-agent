@@ -3,6 +3,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ContextMenuItem } from "../components/context-menu";
+import { readClipboard, writeClipboard } from "../lib/clipboard";
 
 export function useComposerContextMenu(
   input: string,
@@ -27,7 +28,7 @@ export function useComposerContextMenu(
 
   const pasteFromClipboard = async () => {
     try {
-      const text = await navigator.clipboard.readText();
+      const text = await readClipboard();
       if (text) insertTextAtCursor(text);
     } catch {
       // 剪贴板不可读时静默失败
@@ -45,9 +46,7 @@ export function useComposerContextMenu(
     {
       label: "复制",
       onSelect: () =>
-        void navigator.clipboard.writeText(
-          window.getSelection()?.toString() || input,
-        ),
+        void writeClipboard(window.getSelection()?.toString() || input),
     },
     { label: "粘贴", onSelect: () => void pasteFromClipboard() },
     { label: "全选", onSelect: () => textareaRef.current?.select() },

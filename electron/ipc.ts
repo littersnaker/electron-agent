@@ -3,6 +3,7 @@
  */
 import {
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   nativeTheme,
@@ -172,6 +173,10 @@ export function registerApplicationIpc(): void {
   ipcMain.handle("preferences:write", (_event, input: unknown) =>
     writeUiPreferences(input),
   );
+  ipcMain.handle("clipboard:readText", () => clipboard.readText());
+  ipcMain.handle("clipboard:writeText", (_event, text: unknown) => {
+    clipboard.writeText(String(text ?? ""));
+  });
 
   ipcMain.handle(
     "window:isMaximized",

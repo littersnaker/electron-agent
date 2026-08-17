@@ -40,19 +40,20 @@ export function ContextMenu({
   }, [onClose]);
 
   // 限制在视口内，避免菜单被裁掉
-  const left = Math.min(x, Math.max(8, window.innerWidth - 180));
+  const left = Math.min(x, Math.max(8, window.innerWidth - 150));
   const top = Math.min(y, Math.max(8, window.innerHeight - items.length * 34 - 16));
 
   return (
     <div
       ref={ref}
       role="menu"
-      className="fixed z-[99999] w-44 overflow-hidden rounded-[14px] border p-1 shadow-2xl"
+      className="fixed z-[99999] w-36 overflow-hidden rounded-[12px] border p-1 shadow-2xl"
       style={{
         left,
         top,
         background: "var(--glass-solid)",
         borderColor: "var(--border)",
+        fontSize: "11px !important",
         backdropFilter: "blur(24px) saturate(130%)",
         WebkitBackdropFilter: "blur(24px) saturate(130%)",
       }}
@@ -68,8 +69,8 @@ export function ContextMenu({
             onClose();
             item.onSelect();
           }}
-          className="flex w-full cursor-pointer items-center rounded-[10px] px-2.5 py-1.5 text-left text-[12px] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)] disabled:cursor-default disabled:opacity-40"
-          style={{ color: "var(--text-primary)" }}
+          className="flex w-full cursor-pointer items-center rounded-[9px] px-2 py-1 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)] disabled:cursor-default disabled:opacity-40"
+          style={{ color: "var(--text-primary)", fontSize: "11px !important" }}
         >
           {item.label}
         </button>
