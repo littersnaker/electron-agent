@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 from dataclasses import dataclass
@@ -16,7 +17,10 @@ from backend.services.embeddings.chunking import (
 from backend.services.embeddings.code_chunking import build_code_chunks
 from backend.services.embeddings.jina_client import JinaClient, JinaError
 from backend.services.embeddings.pipeline import embed_and_store
-from backend.services.embeddings.store import ChunkRecord
+from backend.services.embeddings.store import (
+    ChunkRecord,
+    delete_source_chunks,
+)
 from backend.services.workspace.database import open_database
 from backend.services.workspace.repository import (
     resolve_project_root,
@@ -209,9 +213,24 @@ async def _vectorize_project_files(project_id: str, records: list[IndexedFile]) 
         LOGGER.warning("跳过项目向量索引（%s）", exc)
         return
 
+    existing: dict[str, str] = {}
+    async with open_database() as connection:
+        cursor = await connection.execute(
+            "SELECT source_path, content_hash FROM rag_documents WHERE scope = ?",
+            (project_id,),
+        )
+        for row in await cursor.fetchall():
+            existing[str(row["source_path"])] = str(row["content_hash"])
+
     grouped: list[tuple[str, str, str, ChunkRecord]] = []
+    document_info: dict[tuple[str, str, str], dict[str, object]] = {}
+    current_paths: set[str] = set()
     for record in records:
         if not record.content.strip():
+            continue
+        current_paths.add(record.relative_path)
+        digest = hashlib.sha256(record.content.encode("utf-8")).hexdigest()
+        if existing.get(record.relative_path) == digest:
             continue
         chunks = build_code_chunks(
             scope=project_id,
@@ -222,9 +241,21 @@ async def _vectorize_project_files(project_id: str, records: list[IndexedFile]) 
             max_chars=PROJECT_CHUNK_CHARS,
             overlap=PROJECT_CHUNK_OVERLAP,
         )
+        document_info[(project_id, "file", record.relative_path)] = {
+            "fullText": record.content,
+            "metadata": {
+                "relativePath": record.relative_path,
+                "sourceType": "file",
+            },
+            "contentHash": digest,
+        }
         for chunk in chunks:
             grouped.append((project_id, "file", record.relative_path, chunk))
-    await embed_and_store(client, grouped)
+    for path in existing:
+        if path not in current_paths:
+            await delete_source_chunks(project_id, path)
+    if grouped:
+        await embed_and_store(client, grouped, document_info=document_info)
 
 
 def _query_terms(query: str) -> list[str]:

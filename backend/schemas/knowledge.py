@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -18,6 +18,7 @@ class KnowledgeDocument(FlexibleModel):
     status: Literal["pending", "ready", "error"]
     chunk_count: int = 0
     error_message: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: str
 
@@ -33,5 +34,16 @@ class KnowledgeEvalRequest(FlexibleModel):
     """检索效果评估请求体。"""
 
     cases: list[KnowledgeEvalCase]
+    recall_k: int | None = Field(default=None, alias="recallK")
+    top_k: int | None = Field(default=None, alias="topK")
+
+
+class KnowledgeSearchRequest(FlexibleModel):
+    """知识库向量检索请求：query + 可选 metadata 过滤与候选数。"""
+
+    query: str
+    metadata_filter: dict[str, Any] | None = Field(
+        default=None, alias="metadataFilter"
+    )
     recall_k: int | None = Field(default=None, alias="recallK")
     top_k: int | None = Field(default=None, alias="topK")

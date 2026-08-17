@@ -17,11 +17,16 @@ from backend.services.embeddings.store import (
 async def embed_and_store(
     client: JinaClient,
     grouped: list[tuple[str, str, str, ChunkRecord]],
+    *,
+    document_info: dict[tuple[str, str, str], dict[str, object]] | None = None,
 ) -> None:
     """批量向量化并按来源分组写入向量库。
 
     ``grouped`` 每项为 ``(scope, source_type, source_path, chunk)``；
     向量数量与块数量不一致时抛出 ``JinaError``，由调用方决定降级策略。
+    ``document_info`` 可选：按 ``(scope, source_type, source_path)`` 提供
+    ``{"fullText", "metadata", "contentHash"}``，用于 Document 归一化与增量比对；
+    未提供时由存储层按 chunk 文本推导。
     """
 
     if not grouped:
@@ -38,12 +43,16 @@ async def embed_and_store(
         key = (scope, source_type, source_path)
         by_source.setdefault(key, []).append(chunk)
     for (scope, source_type, source_path), chunks in by_source.items():
+        info = (document_info or {}).get((scope, source_type, source_path), {})
         await upsert_chunks(
             scope=scope,
             source_type=source_type,
             source_path=source_path,
             chunks=chunks,
             model=client.embedding_model,
+            full_text=str(info.get("fullText") or ""),
+            metadata=info.get("metadata"),  # type: ignore[arg-type]
+            content_hash=str(info.get("contentHash") or ""),
         )
     await record_usage(
         model=usage.model,

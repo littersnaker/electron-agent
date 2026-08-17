@@ -283,11 +283,13 @@ async def search_knowledge(
     api_key: str = "",
     recall_k: int | None = None,
     top_k: int | None = None,
+    metadata_filter: dict[str, Any] | None = None,
 ) -> KnowledgeSearchResult:
     """知识库检索：向量召回 → 重排 →（可选）父子替换 → Top-K。
 
-    返回 ``KnowledgeSearchResult``，包含来源列表与检索质量指标；
-    未开启 Jina 时来源为空列表（QA 降级为无知识库上下文）。
+    ``metadata_filter`` 为 ``{key: value}`` 等值条件，在召回前按文档 metadata
+    过滤（例如只看某类型/标签的文档）。返回 ``KnowledgeSearchResult``，
+    包含来源列表与检索质量指标；未开启 Jina 时来源为空列表。
     """
 
     settings = get_settings()
@@ -304,7 +306,12 @@ async def search_knowledge(
         return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
     if not vectors:
         return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
-    hits = await search_vectors(scope="knowledge", query_vector=vectors[0], limit=recall_k)
+    hits = await search_vectors(
+        scope="knowledge",
+        query_vector=vectors[0],
+        limit=recall_k,
+        metadata_filter=metadata_filter,
+    )
     if not hits:
         return KnowledgeSearchResult([], recall_k, 0, top_k, False, 0.0)
 

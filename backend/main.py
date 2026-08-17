@@ -26,6 +26,7 @@ from backend.core.request_audit import RequestAuditMiddleware
 from backend.core.timezones import PACIFIC_TIMEZONE, timezone_source
 from backend.services.llm.custom_models import initialize_custom_models
 from backend.services.llm.gateway import GATEWAY
+from backend.services.embeddings.index_watcher import WATCHER
 from backend.services.runtime.bootstrap import RUNTIME
 from backend.services.workspace.database import initialize_database
 
@@ -40,6 +41,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await initialize_database()
     await initialize_custom_models()
     await RUNTIME.initialize()
+    WATCHER.start()
     LOGGER.info("FastAPI 后端已完成数据库、自定义模型和 Agent Runtime 初始化")
     LOGGER.info("时区支持来源：%s", timezone_source(PACIFIC_TIMEZONE))
     try:
@@ -47,6 +49,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     finally:
         # 先排空仍在运行的后台复盘/索引任务，再关闭共享连接池，避免
         # shutdown 期间的任务撞上已关闭的 httpx 连接（Event loop is closed）。
+        await WATCHER.stop()
         await drain_background_tasks()
         await GATEWAY.close()
         LOGGER.info("FastAPI 后端已安全关闭")

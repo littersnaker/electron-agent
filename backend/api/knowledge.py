@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+import json
+
+from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 
 from backend.core.background import spawn
-from backend.schemas.knowledge import KnowledgeEvalRequest
+from backend.schemas.knowledge import (
+    KnowledgeEvalRequest,
+    KnowledgeSearchRequest,
+)
 from backend.services.embeddings.knowledge import (
     add_knowledge_document,
     delete_knowledge_document,
@@ -14,7 +19,10 @@ from backend.services.embeddings.knowledge import (
     index_knowledge_document,
     list_knowledge_documents,
 )
-from backend.services.embeddings.retrieval import evaluate_knowledge_recall
+from backend.services.embeddings.retrieval import (
+    evaluate_knowledge_recall,
+    search_knowledge,
+)
 
 router = APIRouter(tags=["knowledge"])
 
@@ -26,16 +34,55 @@ def _jina_api_key(request: Request) -> str:
 
 
 @router.post("/api/knowledge/documents")
-async def post_knowledge_document(request: Request, file: UploadFile) -> dict[str, object]:
-    """上传知识库文档并立即触发单文档索引。"""
+async def post_knowledge_document(
+    request: Request,
+    file: UploadFile,
+    metadata: str = Form(default="{}"),
+) -> dict[str, object]:
+    """上传知识库文档（可带 metadata JSON）并立即触发单文档索引。"""
 
     try:
+        metadata_dict: dict[str, object] = {}
+        if metadata and metadata.strip():
+            parsed = json.loads(metadata)
+            if not isinstance(parsed, dict):
+                raise ValueError("metadata 必须是 JSON 对象")
+            metadata_dict = parsed
         content = await file.read()
-        document = await add_knowledge_document(filename=file.filename or "", content=content)
-    except ValueError as exc:
+        document = await add_knowledge_document(
+            filename=file.filename or "",
+            content=content,
+            metadata=metadata_dict,
+        )
+    except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = await index_knowledge_document(str(document["id"]), api_key=_jina_api_key(request))
     return {"document": document, "index": result}
+
+
+@router.post("/api/knowledge/search")
+async def post_knowledge_search(
+    body: KnowledgeSearchRequest, request: Request
+) -> dict[str, object]:
+    """按 query 检索知识库，支持 metadata 等值过滤与候选数调整。"""
+
+    result = await search_knowledge(
+        body.query,
+        api_key=_jina_api_key(request),
+        recall_k=body.recall_k,
+        top_k=body.top_k,
+        metadata_filter=body.metadata_filter,
+    )
+    return {
+        "sources": result.sources,
+        "recallK": result.recall_k,
+        "candidateCount": result.candidate_count,
+        "topK": result.top_k,
+        "reranked": result.reranked,
+        "avgScore": result.avg_score,
+        "hitRate": result.hit_rate,
+        "topScore": result.top_score,
+    }
 
 
 @router.get("/api/knowledge/documents")

@@ -20,7 +20,9 @@ from backend.services.embeddings.retrieval import (
 )
 from backend.services.embeddings.store import (
     ChunkRecord,
+    get_document_by_source,
     get_usage_totals,
+    list_document_sources,
     record_usage,
     search_vectors,
     upsert_chunks,
@@ -137,6 +139,56 @@ async def test_upsert_and_search_vectors(monkeypatch, tmp_path: Path) -> None:
     )
     hits_after = await search_vectors(scope="knowledge", query_vector=[1, 0, 0], limit=5)
     assert len(hits_after) == 1
+
+
+@pytest.mark.asyncio
+async def test_document_metadata_filter_and_helpers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Document 归一化：metadata 随文档存储，检索支持等值过滤。"""
+
+    _isolated_db(monkeypatch, tmp_path)
+    await initialize_database()
+    chunks = [
+        ChunkRecord(
+            chunk_id=f"m{index}",
+            chunk_index=index,
+            chunk_text=f"手册内容 {index}",
+            embedding=vector,
+        )
+        for index, vector in enumerate(([1, 0, 0], [0, 1, 0]))
+    ]
+    await upsert_chunks(
+        scope="knowledge",
+        source_type="doc",
+        source_path="manual.md",
+        chunks=chunks,
+        full_text="手册内容 0\n手册内容 1",
+        metadata={"type": "manual", "department": "ops"},
+        content_hash="abc123",
+    )
+    doc = await get_document_by_source("knowledge", "manual.md")
+    assert doc is not None
+    assert doc["metadata"]["type"] == "manual"
+    assert doc["contentHash"] == "abc123"
+    assert "manual.md" in await list_document_sources("knowledge")
+
+    hits = await search_vectors(
+        scope="knowledge",
+        query_vector=[1, 0, 0],
+        limit=5,
+        metadata_filter={"type": "manual"},
+    )
+    assert len(hits) == 2
+    assert hits[0]["metadata"]["department"] == "ops"
+
+    empty = await search_vectors(
+        scope="knowledge",
+        query_vector=[1, 0, 0],
+        limit=5,
+        metadata_filter={"type": "other"},
+    )
+    assert empty == []
 
 
 @pytest.mark.asyncio
