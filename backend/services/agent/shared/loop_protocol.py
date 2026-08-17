@@ -35,6 +35,7 @@ ActionKind = Literal[
     "edit",
     "run",
     "run_code",
+    "mcp",
     "complete_work",
     "finish",
 ]
@@ -61,6 +62,7 @@ _ACTION_KEYS = frozenset(
         "edit",
         "run",
         "run_code",
+        "mcp",
         "complete_work",
         "finish",
     }
@@ -131,6 +133,8 @@ class AgentAction:
     operations: list[EditOperation] = field(default_factory=list)
     command: str = ""
     code: str = ""
+    tool: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
     factory_mode: str = ""
     factory_domain_id: str = field(default_factory=default_factory_domain_id)
     factory_output_root: str = ""
@@ -261,6 +265,14 @@ class ActionRequestModel(BaseModel):
     )
     command: str = ""
     code: str = ""
+    tool: str = Field(
+        "",
+        validation_alias=AliasChoices("tool", "toolName", "tool_name", "name"),
+    )
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("arguments", "args", "params", "parameters"),
+    )
     mode: str = ""
     output_root: str = Field(
         "",
@@ -396,6 +408,7 @@ class ActionRequestModel(BaseModel):
             "edit",
             "run",
             "run_code",
+            "mcp",
             "complete_work",
             "finish",
         }:
@@ -421,6 +434,8 @@ class ActionRequestModel(BaseModel):
             raise ValueError("run 动作缺少 command")
         if action == "run_code" and not self.code:
             raise ValueError("run_code 动作缺少 code")
+        if action == "mcp" and not self.tool:
+            raise ValueError("mcp 动作缺少 tool（例如 mcp__server__tool）")
         if action == "complete_work" and not self.work_id:
             raise ValueError("complete_work 动作缺少 workId")
         return self
@@ -780,6 +795,14 @@ def parse_agent_action(text: str) -> AgentAction:
             action="run_code",
             work_id=request.work_id,
             code=request.code[:200_000],
+        )
+
+    if action == "mcp":
+        return AgentAction(
+            action="mcp",
+            work_id=request.work_id,
+            tool=request.tool.strip()[:300],
+            arguments=dict(request.arguments or {}),
         )
 
     if action == "complete_work":

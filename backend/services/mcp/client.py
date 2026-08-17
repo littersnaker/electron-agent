@@ -210,3 +210,50 @@ async def resolve_tools(working_dir: Path) -> tuple[list[dict[str, Any]], list[s
             errors.append(f"{server['name']}：{exc}")
     unique = {tool["llmName"]: tool for tool in tools}
     return list(unique.values()), errors
+
+
+async def call_tool(
+    server: dict[str, Any],
+    *,
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """调用单个 MCP 工具（JSON-RPC ``tools/call``）。
+
+    每次调用新建会话（initialize → initialized → tools/call），避免跨请求
+    复用会话带来的状态与重复执行风险；返回 MCP 的 ``content`` 结构化结果，
+    失败抛 ``RuntimeError``（错误信息已提取为可读文本）。
+    """
+
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        _, session_id = await _post_rpc(
+            client,
+            server,
+            1,
+            "initialize",
+            {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "multi-agent-workspace", "version": "1.0.0"},
+            },
+        )
+        await _post_notification(
+            client,
+            server,
+            "notifications/initialized",
+            session_id=session_id,
+        )
+        result, _ = await _post_rpc(
+            client,
+            server,
+            2,
+            "tools/call",
+            {
+                "name": tool_name,
+                "arguments": arguments or {},
+            },
+            session_id=session_id,
+        )
+    if not isinstance(result, dict):
+        return {"content": [], "isError": False, "result": result}
+    return result

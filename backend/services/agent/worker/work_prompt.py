@@ -69,6 +69,7 @@ def _worker_prompt(
     harness: ProjectHarness,
     execution_mode: ExecutionMode,
     state: WorkWorkerState | None = None,
+    mcp_tools: list[dict[str, object]] | None = None,
 ) -> str:
     """生成聚焦当前 Work 的短系统提示词，避免每轮重复完整用户需求。"""
 
@@ -117,11 +118,24 @@ def _worker_prompt(
         from backend.services.agent.code_mode import SDK_BLOCK
 
         sdk_block = SDK_BLOCK.strip()
+    mcp_block = ""
+    if mcp_tools:
+        lines = [
+            f"- {tool.get('llmName')}：{tool.get('description') or ''}"
+            for tool in mcp_tools
+        ]
+        mcp_block = (
+            "可用 MCP 工具（对外部系统有副作用）：\n"
+            + "\n".join(lines)
+            + "\n需要审批的工具调用会返回提示，不会自动执行。"
+            '调用格式：{"action":"mcp","tool":"mcp__server__tool","arguments":{...}}。\n'
+        )
     return f"""你是 Code Agent 的并行 Worker，只处理 CURRENT WORK。
 工具：
 {render_tool_catalog(compact=True, execution_mode=execution_mode)}
 
 {sdk_block}
+{mcp_block}
 协议：每轮只返回一个 JSON 对象，不得附加 Markdown。  - 已知文件必须一次 read 批量读取；Harness 已预读的内容不得再次搜索。
   - 动手 edit 前先核对目标文件是否已满足 CURRENT WORK 的验收标准；已满足则直接
     complete_work，不要重复修改；只修改确实缺失的部分。

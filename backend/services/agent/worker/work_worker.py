@@ -138,6 +138,17 @@ async def execute_work(
         )
     )
 
+    # MCP 工具：每个 Work 只解析一次（.agent-mcp.json 存在才调用远程发现），
+    # 避免每轮提示词重复请求远程服务器。
+    mcp_tools: list[dict[str, object]] = []
+    if (root / ".agent-mcp.json").is_file():
+        try:
+            from backend.services.mcp.client import resolve_tools
+
+            mcp_tools, _errors = await resolve_tools(root)
+        except Exception:  # noqa: BLE001 - MCP 发现失败不影响主流程
+            mcp_tools = []
+
     if work.execution_type in {"coding", "agent"}:
         batch_result, batch_reason = await _try_batch_write(
             root=root,
@@ -279,7 +290,13 @@ async def execute_work(
                 messages=[
                     LlmMessage(
                         "system",
-                        _worker_prompt(work, harness, execution_mode, state),
+                        _worker_prompt(
+                            work,
+                            harness,
+                            execution_mode,
+                            state,
+                            mcp_tools=mcp_tools,
+                        ),
                     ),
                     LlmMessage(
                         "user",

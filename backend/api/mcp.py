@@ -5,11 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
+from backend.services.mcp.executor import execute_mcp_tool
 from backend.services.mcp.client import load_server_configs, resolve_tools
 from backend.services.workspace.repository import get_project
 
 router = APIRouter(tags=["mcp"])
+
+
+class McpToolCallRequest(BaseModel):
+    """手动调用 MCP 工具的请求体。"""
+
+    project_id: str | None = Field(default=None, alias="projectId")
+    tool_name: str = Field(alias="toolName")
+    arguments: dict[str, object] = Field(default_factory=dict)
 
 
 @router.get("/api/mcp/status")
@@ -53,3 +63,25 @@ async def get_mcp_status(project_id: str | None = Query(default=None, alias="pro
         ],
         "errors": errors,
     }
+
+
+@router.post("/api/mcp/tools/call")
+async def post_mcp_tool_call(body: McpToolCallRequest) -> dict[str, object]:
+    """手动调用一个已发现的 MCP 工具（用户显式操作，视为已审批）。"""
+
+    if not body.project_id:
+        raise HTTPException(status_code=400, detail="缺少 projectId")
+    try:
+        project = await get_project(body.project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = await execute_mcp_tool(
+        Path(project.root_path),
+        body.tool_name,
+        body.arguments,
+        approved=True,
+    )
+    if not result.get("ok"):
+        status_code = 403 if result.get("approvalNeeded") else 502
+        raise HTTPException(status_code=status_code, detail=str(result.get("message") or result.get("error")))
+    return result

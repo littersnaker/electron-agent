@@ -109,6 +109,7 @@ class WorkActionHandler:
             "edit": self._edit,
             "run": self._run,
             "run_code": self._run_code,
+            "mcp": self._mcp,
             "complete_work": self._complete,
         }
         handler = handlers.get(action.action)
@@ -118,6 +119,41 @@ class WorkActionHandler:
                 error=f"Worker 不支持动作：{action.action}",
             )
         return await handler(action)
+
+    async def _mcp(self, action: AgentAction) -> WorkActionOutcome:
+        """调用一个已发现的 MCP 工具；需要审批的工具在 Agent 内拒绝。
+
+        MCP 工具可能对外部系统产生副作用，需要审批的工具不在此处自动执行，
+        结果返回"需要用户审批"提示，由用户通过 MCP 面板确认后调用。
+        """
+
+        from backend.services.mcp.executor import execute_mcp_tool
+
+        await self._lifecycle(
+            role="modify_worker",
+            detail=f"{self._env.work.id} · MCP 工具 {action.tool}",
+            tool_name=action.tool,
+        )
+        result = await execute_mcp_tool(
+            self._env.root,
+            action.tool,
+            dict(action.arguments or {}),
+            approved=False,
+        )
+        if result.get("approvalNeeded"):
+            self._env.state.append_transcript(
+                f"ACTION mcp {action.tool} 需要用户审批，已跳过；"
+                "请用户通过 MCP 面板确认后重试。"
+            )
+        else:
+            text = str(
+                result.get("content") or result.get("error") or "（工具无返回）"
+            )
+            self._env.state.append_transcript(
+                f"ACTION mcp {action.tool}\nOBSERVATION:\n{text}"
+            )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue")
 
     async def _search(self, action: AgentAction) -> WorkActionOutcome:
         """执行工作区全文搜索并记录观察。"""
