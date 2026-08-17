@@ -520,6 +520,8 @@ export default function Home() {
         hidden={activePage !== "knowledge"}
       />
       <AgentEvaluationPage
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onBack={() => setActivePage("workspace")}
         hidden={activePage !== "evaluation"}
       />
