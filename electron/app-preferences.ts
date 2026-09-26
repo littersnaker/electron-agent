@@ -15,6 +15,10 @@ export interface AppUiPreferences {
   selectedMediaModel?: string;
   builtinPlugins?: Record<string, boolean>;
   codeAgentMode?: CodeAgentMode;
+  /** 允许视觉 Review：截图会发送给云端视觉模型，默认允许，可随时关闭。 */
+  visualReviewEnabled?: boolean;
+  /** Code Agent 完成后自动触发视觉 Review；总开关关闭时不生效。 */
+  visualReviewAutoEnabled?: boolean;
 }
 
 interface PreferenceFile extends AppUiPreferences {
@@ -99,6 +103,12 @@ function normalizeUiPreferences(input: unknown): AppUiPreferences {
         ([key, value]) => key.length <= 80 && typeof value === "boolean",
       ),
     ) as Record<string, boolean>;
+  }
+  if (typeof source.visualReviewEnabled === "boolean") {
+    result.visualReviewEnabled = source.visualReviewEnabled;
+  }
+  if (typeof source.visualReviewAutoEnabled === "boolean") {
+    result.visualReviewAutoEnabled = source.visualReviewAutoEnabled;
   }
   return result;
 }

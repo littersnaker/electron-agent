@@ -36,7 +36,9 @@ export default function PreviewPanel({
   const [selectedModel, setSelectedModel] = useState("");
   const [zoomed, setZoomed] = useState<VisualReviewFrame | null>(null);
   const busy = review.isBusy;
-  const statusLabel = STATUS_LABELS[review.status] ?? review.status;
+  const statusLabel = !review.settingsEnabled
+    ? "已在设置中关闭"
+    : (STATUS_LABELS[review.status] ?? review.status);
 
   // 视觉模型选项：自动路由 + 用户勾选了 supportsVision 的自定义模型。
   const modelOptions = useMemo(
@@ -132,8 +134,14 @@ export default function PreviewPanel({
             <button
               type="button"
               onClick={handleStart}
-              disabled={busy || !rootPath || !review.canCapture}
-              title={review.canCapture ? "" : "截图需要桌面应用环境"}
+              disabled={busy || !rootPath || !review.canCapture || !review.settingsEnabled}
+              title={
+                !review.settingsEnabled
+                  ? "视觉 Review 已在设置中关闭"
+                  : review.canCapture
+                    ? ""
+                    : "截图需要桌面应用环境"
+              }
               className="cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 background: "rgba(10,132,255,0.16)",

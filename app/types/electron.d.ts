@@ -33,6 +33,10 @@ declare global {
     selectedMediaModel?: string;
     builtinPlugins?: Record<string, boolean>;
     codeAgentMode?: "suggest" | "auto_edit" | "full_auto";
+    /** 允许视觉 Review（截图发送给云端视觉模型）；缺省视为允许。 */
+    visualReviewEnabled?: boolean;
+    /** Code Agent 完成后自动视觉 Review；缺省视为开启。 */
+    visualReviewAutoEnabled?: boolean;
   }
 
   interface Window {

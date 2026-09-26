@@ -33,6 +33,7 @@ export function ApiKeyModal({
   initialKeys,
   initialEndpoints,
   initialServiceKeys,
+  visualReview,
   onSave,
   onClose,
 }: Props) {
@@ -390,6 +391,44 @@ export function ApiKeyModal({
                 }}
               />
             </label>
+          </section>
+
+          <section>
+            <div className="mb-3">
+              <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+                视觉 Review（内置浏览器截图）
+              </div>
+              <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                自动滚动截图项目预览页面并发送给云端视觉模型（如 DeepSeek
+                视觉模型）分析。截图内容会离开本机，属于隐私敏感操作，随时可以关闭。
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={visualReview.settingsEnabled}
+                onChange={(event) =>
+                  visualReview.updateSettings({ settingsEnabled: event.target.checked })
+                }
+              />
+              允许视觉 Review（截图发送给视觉模型）
+            </label>
+            <label className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={visualReview.autoEnabled}
+                disabled={!visualReview.settingsEnabled}
+                onChange={(event) =>
+                  visualReview.updateSettings({ autoEnabled: event.target.checked })
+                }
+              />
+              Code Agent 完成后自动截图 Review
+            </label>
+            <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              {visualReview.settingsEnabled
+                ? "开启时：右侧「页面预览」面板可手动截图 Review，自动开关控制 Code Agent 是否在任务结束后自动执行。"
+                : "已关闭：预览面板仅显示页面，不会截图，也不会把任何内容发送给视觉模型。"}
+            </div>
           </section>
 
           <section>

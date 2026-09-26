@@ -129,11 +129,16 @@ export function useChatStream({
   });
   /**
    * Code Agent review 阶段请求视觉验证：复用与手动触发相同的滚动截图链路。
+   * 设置里关闭「自动视觉验证」时跳过；总开关关闭时 startReview 内部也会拦截。
    */
   const runVisualVerification = useCallback(
     async (payload: VisualVerifyPayload) => {
       const rootPath = activeProject?.rootPath;
       if (!rootPath || !activeSession) return;
+      if (!visualReview.settingsLoaded || !visualReview.autoEnabled) {
+        console.info("[useChatStream] 自动视觉验证已在设置中关闭，跳过");
+        return;
+      }
       setAgentStatus("正在自动滚动截图并做视觉 Review…");
       try {
         await visualReview.startReview({

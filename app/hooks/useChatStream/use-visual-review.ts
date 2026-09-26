@@ -1,7 +1,7 @@
 // 模块说明：视觉 Review 编排——启动预览 → 自动滚动截图 → 降采样 → 视觉模型审查 → 卡片回调。
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api-client";
 import { buildLlmRequestHeaders } from "../../lib/llm/client-request";
 import { AUTO_MODEL_ID } from "../../lib/llm/registry/models";
@@ -46,6 +46,14 @@ export interface VisualReviewController {
   /** Electron 环境才具备截图能力；纯浏览器模式只能看 iframe 预览。 */
   canCapture: boolean;
   isBusy: boolean;
+  /** 允许视觉 Review（截图发送给云端视觉模型）；设置弹窗可关。 */
+  settingsEnabled: boolean;
+  /** Code Agent 完成后自动触发视觉 Review；仅总开关开启时生效。 */
+  autoEnabled: boolean;
+  /** 设置加载完成后为 true，避免初始默认值造成开关闪动。 */
+  settingsLoaded: boolean;
+  /** 设置弹窗直接写穿的开关更新；同时持久化到 Electron 偏好/localStorage。 */
+  updateSettings: (patch: { settingsEnabled?: boolean; autoEnabled?: boolean }) => void;
   startReview: (options: VisualReviewStartOptions) => Promise<void>;
   stopPreview: () => Promise<void>;
   reset: () => void;
@@ -87,6 +95,48 @@ function downscaleBase64(base64: string, targetWidth: number, quality: number): 
   });
 }
 
+/** 视觉 Review 设置的 localStorage 兜底键（纯浏览器开发模式无 Electron 偏好）。 */
+const SETTINGS_STORAGE_KEY = "VISUAL_REVIEW_SETTINGS";
+
+interface VisualReviewSettings {
+  settingsEnabled: boolean;
+  autoEnabled: boolean;
+}
+
+const DEFAULT_SETTINGS: VisualReviewSettings = { settingsEnabled: true, autoEnabled: true };
+
+/** 从 Electron 偏好读取设置；浏览器模式回退 localStorage，异常时用默认值。 */
+async function loadSettings(): Promise<VisualReviewSettings> {
+  let fallbackRaw: string | null = null;
+  try {
+    fallbackRaw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+  } catch {
+    // localStorage 不可用时直接用默认值。
+  }
+  const preferences = await window.electronAPI?.preferences?.read().catch(() => undefined);
+  const enabled =
+    preferences?.visualReviewEnabled ?? parseStoredFlag(fallbackRaw, "settingsEnabled");
+  const auto = preferences?.visualReviewAutoEnabled ?? parseStoredFlag(fallbackRaw, "autoEnabled");
+  return {
+    settingsEnabled: enabled ?? DEFAULT_SETTINGS.settingsEnabled,
+    autoEnabled: auto ?? DEFAULT_SETTINGS.autoEnabled,
+  };
+}
+
+/** 从 localStorage JSON 里读单个布尔字段。 */
+function parseStoredFlag(
+  raw: string | null,
+  field: "settingsEnabled" | "autoEnabled",
+): boolean | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed[field] === "boolean" ? (parsed[field] as boolean) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** 视觉 Review 全流程编排；由 useChatStream 组合并对外透出。 */
 export function useVisualReview({
   apiKeys,
@@ -99,12 +149,56 @@ export function useVisualReview({
   const [reviewModel, setReviewModel] = useState("");
   const [status, setStatus] = useState<VisualReviewStatus>("idle");
   const [error, setError] = useState("");
+  const [settings, setSettings] = useState<VisualReviewSettings>(DEFAULT_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   // 串行保护：上一轮 Review 未结束时忽略新的触发，避免 dev server 与截图互相踩踏。
   const runningRef = useRef(false);
+  // startReview 闭包内读最新开关，避免设置刚改完仍走旧值。
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    // 在 effect 中同步 ref，避免 render 期写 ref（react-hooks purity）。
+    settingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadSettings().then((loaded) => {
+      if (cancelled) return;
+      setSettings(loaded);
+      setSettingsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateSettings = useCallback((patch: Partial<VisualReviewSettings>) => {
+    setSettings((current) => {
+      const next = { ...current, ...patch };
+      // 写穿：Electron 偏好为主（字段名与偏好文件对齐），localStorage 兜底。
+      void window.electronAPI?.preferences
+        ?.write({
+          visualReviewEnabled: next.settingsEnabled,
+          visualReviewAutoEnabled: next.autoEnabled,
+        })
+        .catch(() => undefined);
+      try {
+        window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // 忽略持久化失败。
+      }
+      return next;
+    });
+  }, []);
 
   const startReview = useCallback(
     async ({ rootPath, taskSummary = "", modelId = "" }: VisualReviewStartOptions) => {
       if (runningRef.current) return;
+      if (!settingsRef.current.settingsEnabled) {
+        setStatus("error");
+        setError("视觉 Review 已在设置中关闭");
+        return;
+      }
       if (!rootPath) {
         setStatus("error");
         setError("没有打开的项目，无法启动预览");
@@ -215,6 +309,10 @@ export function useVisualReview({
     error,
     canCapture: Boolean(window.electronAPI?.capturePageScroll),
     isBusy: status === "previewStarting" || status === "capturing" || status === "reviewing",
+    settingsEnabled: settings.settingsEnabled,
+    autoEnabled: settings.autoEnabled,
+    settingsLoaded,
+    updateSettings,
     startReview,
     stopPreview,
     reset,

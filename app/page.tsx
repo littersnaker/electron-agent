@@ -300,6 +300,7 @@ export default function Home() {
             initialKeys={apiKey.apiKeys}
             initialEndpoints={apiKey.endpointOverrides}
             initialServiceKeys={apiKey.serviceKeys}
+            visualReview={chat.visualReview}
             onSave={apiKey.handleSaveKeys}
             onClose={apiKey.closeKeyModal}
           />

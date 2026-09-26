@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +17,12 @@ router = APIRouter(tags=["visual"])
 
 # 模块级保存 dev server 进程句柄：视觉验证期间存活，验证完/超时回收。
 _DEV_SERVER_HANDLE: dict[str, Any] = {}
+
+
+def _visual_review_enabled() -> bool:
+    """后端级总闸：截图内容会发送给云端视觉模型，允许部署方硬性关闭。"""
+
+    return os.getenv("VISUAL_REVIEW_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class ReviewFrameBody(FlexibleModel):
@@ -75,6 +82,11 @@ async def post_visual_preview_stop() -> dict[str, bool]:
 async def post_visual_review(body: VisualReviewBody, request: Request) -> dict[str, Any]:
     """把多帧滚动截图交给视觉模型审查，返回结论文本。"""
 
+    if not _visual_review_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="视觉 Review 已被服务端关闭（VISUAL_REVIEW_ENABLED=0），截图不会发送给视觉模型。",
+        )
     credentials = resolve_credentials(request)
     result = await review_screenshots(
         frames=[

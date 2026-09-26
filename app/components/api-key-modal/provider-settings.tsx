@@ -5,10 +5,13 @@
  */
 import type { LlmCredentials, LlmEndpointOverrides } from "../../lib/llm/types";
 import { type AuxiliaryServiceCredentials } from "../../lib/service-credentials";
+import type { VisualReviewController } from "../../hooks/useChatStream/use-visual-review";
 export interface Props {
   initialKeys: LlmCredentials;
   initialEndpoints: LlmEndpointOverrides;
   initialServiceKeys: AuxiliaryServiceCredentials;
+  /** 视觉 Review 编排器：开关状态与写穿更新都从这里读写。 */
+  visualReview: VisualReviewController;
   onSave: (
     keys: LlmCredentials,
     endpoints: LlmEndpointOverrides,
