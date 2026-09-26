@@ -503,6 +503,11 @@ export default function Home() {
                         ? "media"
                         : effectiveComposerMode
                   }
+                  visualReview={chat.visualReview}
+                  projectRootPath={workspace.activeProject?.rootPath || ""}
+                  visionModels={customModels.models
+                    .filter((model) => model.supportsVision)
+                    .map((model) => ({ id: model.id, name: model.name }))}
                 />
               </div>
             </div>

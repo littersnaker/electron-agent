@@ -28,6 +28,23 @@ export type Message = {
   commerceListing?: AmazonListingDemoReport;
   /** Image Recognition Agent 的货架图纸识别结果（矩阵 + Excel 下载）。 */
   imageResult?: ImageRecognitionResult;
+  /** 内置浏览器滚动截图视觉 Review 的留档卡片（缩略图 + 结论）。 */
+  visualReview?: VisualReviewCardData;
+};
+
+/** 一次视觉 Review 的留档数据；缩略图为降采样 JPEG Data URL 前缀。 */
+export type VisualReviewCardData = {
+  /** 被审查的预览页地址（localhost dev server）。 */
+  url: string;
+  /** 实际送审的截图帧数。 */
+  frameCount: number;
+  /** 缩略图数组（data:image/jpeg;base64,...），按页面从上到下排列。 */
+  thumbnails: string[];
+  /** 视觉模型结论文本。 */
+  content: string;
+  /** 实际使用的视觉模型 ID。 */
+  model: string;
+  createdAt: string;
 };
 
 /** 图片识别 Agent 的失败照片记录。 */

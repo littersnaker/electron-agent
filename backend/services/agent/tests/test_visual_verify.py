@@ -1,4 +1,4 @@
-"""视觉验证：GLM 截图分析、dev server 白名单、review 前端标记测试。"""
+"""视觉验证：截图 Review 网关调用、dev server 白名单、review 前端标记测试。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import pytest
 
 from backend.services.agent.loop.final_quality import _task_summary
 from backend.services.agent.shared.work_state import WorkWorkerState
+from backend.services.llm.credentials import LlmCredentials
 from backend.services.visual.dev_server import resolve_dev_command
-from backend.services.visual.verify import analyze_screenshot, build_verify_prompt
+from backend.services.visual.verify import ReviewFrame, build_review_prompt, review_screenshots
 
 
 def _sample_base64() -> str:
@@ -46,26 +47,22 @@ def test_resolve_dev_command_allows_only_dev(tmp_path: Path) -> None:
         resolve_dev_command(chained)
 
 
-def test_build_verify_prompt_contains_task_and_acceptance() -> None:
-    """验证 prompt 应包含任务目标与验收标准。"""
+def test_build_review_prompt_contains_task_and_frames() -> None:
+    """Review prompt 应包含任务目标与帧数说明。"""
 
-    prompt = build_verify_prompt("实现购物车", ["展示商品", "支持删除"])
+    prompt = build_review_prompt("实现购物车", 3)
     assert "实现购物车" in prompt
-    assert "展示商品" in prompt
-    assert "支持删除" in prompt
+    assert "3" in prompt
 
 
 @pytest.mark.asyncio
-async def test_analyze_screenshot_returns_error_without_key(monkeypatch) -> None:
-    """未配置 GLM Key 时应返回结构化错误，不抛异常。"""
+async def test_review_screenshots_returns_error_without_any_key() -> None:
+    """未配置任何供应商 Key 时应返回结构化错误，不抛异常。"""
 
-    monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
-    monkeypatch.delenv("GLM_API_KEY", raising=False)
-
-    result = await analyze_screenshot(
-        image_base64=_sample_base64(),
-        mime_type="image/png",
-        prompt="核对页面",
+    result = await review_screenshots(
+        frames=[ReviewFrame(data=_sample_base64(), mime_type="image/png")],
+        task_summary="核对页面",
+        credentials=LlmCredentials(values={}),
     )
 
     assert result.get("ok") is False

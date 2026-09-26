@@ -5,7 +5,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toMessageAttachments } from "../../constants/page-constants";
-import type { AttachedFile, Message } from "../../constants/page-constants";
+import type { AttachedFile, Message, VisualReviewCardData } from "../../constants/page-constants";
+import { useVisualReview } from "./use-visual-review";
 import { buildRetrievedAttachment } from "../../lib/rag/attachment-rag";
 import { buildImageAttachmentsPayload, buildLlmRequestHeaders } from "../../lib/llm/client-request";
 import { apiFetch } from "../../lib/api-client";
@@ -99,62 +100,51 @@ export function useChatStream({
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
   /**
-   * 视觉验证：启动项目预览 → Electron 截图 → GLM-4.6V 核对 → 结果追加为消息。
-   * 由 VISUAL_VERIFY_REQUESTED 事件触发，fire-and-forget 不阻塞主流程。
+   * 视觉 Review 留档：完成后把缩略图 + 结论组装成卡片消息写进会话流。
+   * 截图与模型调用在 useVisualReview 内完成，这里只负责持久化表现层。
+   */
+  const appendVisualReviewCard = useCallback(
+    (card: VisualReviewCardData) => {
+      const cardMessage: Message = {
+        role: "assistant",
+        content: `🖼️ 视觉 Review（${card.frameCount} 帧，${card.model || "自动路由"}）：`,
+        createdAt: card.createdAt,
+        visualReview: card,
+      };
+      setMessages((current) => [...current, cardMessage]);
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === activeSession?.id
+            ? { ...session, messages: [...session.messages, cardMessage] }
+            : session,
+        ),
+      );
+    },
+    [activeSession?.id, setMessages, setSessions],
+  );
+  const visualReview = useVisualReview({
+    apiKeys,
+    endpointOverrides,
+    onReviewComplete: appendVisualReviewCard,
+  });
+  /**
+   * Code Agent review 阶段请求视觉验证：复用与手动触发相同的滚动截图链路。
    */
   const runVisualVerification = useCallback(
     async (payload: VisualVerifyPayload) => {
       const rootPath = activeProject?.rootPath;
-      if (!rootPath || !activeSession || !window.electronAPI?.capturePage) return;
-      setAgentStatus("正在启动预览并截图验证页面渲染…");
+      if (!rootPath || !activeSession) return;
+      setAgentStatus("正在自动滚动截图并做视觉 Review…");
       try {
-        const previewResponse = await apiFetch("/api/visual/preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rootPath }),
+        await visualReview.startReview({
+          rootPath,
+          taskSummary: payload.taskSummary || "",
         });
-        if (!previewResponse.ok) return;
-        const { url } = (await previewResponse.json()) as { url?: string };
-        if (!url) return;
-        const { base64 } = await window.electronAPI.capturePage(url);
-        const verifyResponse = await apiFetch("/api/visual/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageBase64: base64,
-            mimeType: "image/png",
-            taskSummary: payload.taskSummary || "",
-            acceptance: [],
-          }),
-        });
-        const result = (await verifyResponse.json()) as {
-          ok?: boolean;
-          content?: string;
-          error?: string;
-        };
-        const content = result.ok
-          ? `🖼️ 视觉验证：${result.content || "页面已渲染。"}`
-          : `⚠️ 视觉验证失败：${result.error || "未知错误"}`;
-        const verifyMessage: Message = {
-          role: "assistant",
-          content,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((current) => [...current, verifyMessage]);
-        setSessions((current) =>
-          current.map((session) =>
-            session.id === activeSession.id
-              ? { ...session, messages: [...session.messages, verifyMessage] }
-              : session,
-          ),
-        );
-      } catch (error) {
-        console.warn("[useChatStream] 视觉验证失败", error);
       } finally {
         setAgentStatus("");
       }
     },
-    [activeProject?.rootPath, activeSession?.id, setMessages, setSessions],
+    [activeProject?.rootPath, activeSession, setAgentStatus, visualReview],
   );
   const resetTransient = useCallback(() => {
     setToolActivities([]);
@@ -651,6 +641,7 @@ export function useChatStream({
     handleInteractiveReply,
     stop,
     resetTransient,
+    visualReview,
   };
 }
 export type ChatStreamController = ReturnType<typeof useChatStream>;
