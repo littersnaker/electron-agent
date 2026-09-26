@@ -44,7 +44,14 @@ declare global {
       exportCommerceReportPdf: (
         payload: CommercePdfPayload,
       ) => Promise<{ canceled: boolean; filePath?: string }>;
-      capturePage: (url: string) => Promise<{ base64: string }>;
+      capturePageScroll: (
+        url: string,
+        maxFrames?: number,
+      ) => Promise<{
+        frames: Array<{ base64: string; offsetTop: number }>;
+        pageHeight: number;
+        viewportHeight: number;
+      }>;
       clipboard: {
         readText: () => Promise<string>;
         writeText: (text: string) => Promise<void>;

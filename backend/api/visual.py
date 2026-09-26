@@ -1,4 +1,4 @@
-"""视觉验证接口：接收内存截图 Base64，交给 GLM-4.6V 分析。"""
+"""视觉 Review 接口：dev server 受控通道 + 滚动截图多帧交给视觉模型分析。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pydantic import Field
 from backend.schemas.common import FlexibleModel
 from backend.services.llm.credentials import resolve_credentials
 from backend.services.visual.dev_server import start_dev_server, stop_dev_server
-from backend.services.visual.verify import analyze_screenshot, build_verify_prompt
+from backend.services.visual.verify import ReviewFrame, review_screenshots
 
 router = APIRouter(tags=["visual"])
 
@@ -18,13 +18,20 @@ router = APIRouter(tags=["visual"])
 _DEV_SERVER_HANDLE: dict[str, Any] = {}
 
 
-class VisualVerifyBody(FlexibleModel):
-    """视觉验证请求体（截图全程内存传递，不落盘）。"""
+class ReviewFrameBody(FlexibleModel):
+    """单帧滚动截图（内存 Base64，不落盘）。"""
 
     image_base64: str = Field(alias="imageBase64", min_length=1)
     mime_type: str = Field(default="image/png", alias="mimeType")
+
+
+class VisualReviewBody(FlexibleModel):
+    """视觉 Review 请求体：多帧截图 + 任务摘要 + 可选模型指定。"""
+
+    frames: list[ReviewFrameBody] = Field(min_length=1, max_length=12)
     task_summary: str = Field(default="", alias="taskSummary", max_length=4000)
-    acceptance: list[str] = Field(default_factory=list, max_length=16)
+    # 不传时由网关在带图请求下自动挑选 supportsVision 的候选模型。
+    model_id: str = Field(default="", alias="modelId", max_length=200)
 
 
 class VisualPreviewBody(FlexibleModel):
@@ -64,23 +71,26 @@ async def post_visual_preview_stop() -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.post("/api/visual/verify")
-async def post_visual_verify(body: VisualVerifyBody, request: Request) -> dict[str, Any]:
-    """分析一张截图并返回 GLM 视觉结论。"""
+@router.post("/api/visual/review")
+async def post_visual_review(body: VisualReviewBody, request: Request) -> dict[str, Any]:
+    """把多帧滚动截图交给视觉模型审查，返回结论文本。"""
 
-    prompt = build_verify_prompt(body.task_summary, body.acceptance)
     credentials = resolve_credentials(request)
-    result = await analyze_screenshot(
-        image_base64=body.image_base64,
-        mime_type=body.mime_type,
-        prompt=prompt,
+    result = await review_screenshots(
+        frames=[
+            ReviewFrame(data=frame.image_base64, mime_type=frame.mime_type)
+            for frame in body.frames
+        ],
+        task_summary=body.task_summary,
         credentials=credentials,
+        model_id=body.model_id,
     )
     if not result.get("ok"):
-        return {"ok": False, "error": result.get("error") or "视觉验证失败"}
+        return {"ok": False, "error": result.get("error") or "视觉 Review 失败"}
     return {
         "ok": True,
         "model": result.get("model") or "",
         "content": result.get("content") or "",
+        "frameCount": result.get("frameCount") or 0,
         "usage": result.get("usage") or {},
     }

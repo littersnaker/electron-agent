@@ -30,8 +30,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectFolder: () => ipcRenderer.invoke("dialog:openDirectory"),
   exportCommerceReportPdf: (payload: { html: string; suggestedFileName: string }) =>
     ipcRenderer.invoke("commerce:exportPdf", payload),
-  capturePage: (url: string): Promise<{ base64: string }> =>
-    ipcRenderer.invoke("visual:capturePage", url),
+  capturePageScroll: (
+    url: string,
+    maxFrames?: number,
+  ): Promise<{
+    frames: Array<{ base64: string; offsetTop: number }>;
+    pageHeight: number;
+    viewportHeight: number;
+  }> => ipcRenderer.invoke("visual:capturePageScroll", url, maxFrames),
   clipboard: {
     readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
     writeText: (text: string): Promise<void> => ipcRenderer.invoke("clipboard:writeText", text),

@@ -122,11 +122,36 @@ function isLocalPreviewUrl(value: unknown): value is string {
   }
 }
 
+/** 单次滚动截图的默认帧数上限（与视觉模型单请求图片上限保持余量）。 */
+const MAX_SCROLL_FRAMES = 6;
+/** 每帧滚动后等待双 rAF 之外的固定余量，让懒加载图片和字体完成渲染。 */
+const SCROLL_SETTLE_MS = 250;
+/** 首屏加载后的稳定等待，沿用原单帧截图的经验值。 */
+const LOAD_SETTLE_MS = 800;
+
+/** 一帧滚动截图：PNG Base64 与该帧顶部的页面纵偏移。 */
+interface ScrollFrame {
+  base64: string;
+  offsetTop: number;
+}
+
+/** 在页面内滚动到指定纵偏移，并等浏览器完成两帧绘制（懒加载触发后再稳定）。 */
+async function scrollToOffset(webContents: Electron.WebContents, offsetTop: number): Promise<void> {
+  await webContents.executeJavaScript(`window.scrollTo(0, ${Math.max(0, Math.floor(offsetTop))})`);
+  await webContents.executeJavaScript(
+    "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+  );
+  await new Promise((resolve) => setTimeout(resolve, SCROLL_SETTLE_MS));
+}
+
 /**
- * 用隐藏窗口加载本地 URL，等页面渲染完成后截图，返回 PNG Base64（不落盘）。
- * 仅允许 localhost 地址，避免渲染任意外部页面。
+ * 用隐藏窗口加载本地 URL，按视口高度自动滚动逐帧截图，返回全部 PNG Base64（不落盘）。
+ * 仅允许 localhost 地址，避免渲染任意外部页面；页面不足一屏时只返回一帧。
  */
-async function captureLocalPage(url: string): Promise<{ base64: string }> {
+async function captureLocalPageScroll(
+  url: string,
+  maxFrames: number,
+): Promise<{ frames: ScrollFrame[]; pageHeight: number; viewportHeight: number }> {
   const captureWindow = new BrowserWindow({
     show: false,
     width: 1440,
@@ -134,13 +159,32 @@ async function captureLocalPage(url: string): Promise<{ base64: string }> {
     webPreferences: { sandbox: true },
   });
   try {
+    const webContents = captureWindow.webContents;
     await captureWindow.loadURL(url);
     // 等首屏渲染完成后再等稳定帧，避免截到加载中状态。
-    await captureWindow.webContents.executeJavaScript("document.readyState === 'complete' || true");
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    const image = await captureWindow.webContents.capturePage();
-    const buffer = image.toPNG();
-    return { base64: buffer.toString("base64") };
+    await webContents.executeJavaScript("document.readyState === 'complete' || true");
+    await new Promise((resolve) => setTimeout(resolve, LOAD_SETTLE_MS));
+
+    const pageHeight = Number(
+      await webContents.executeJavaScript(
+        "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+      ),
+    );
+    const viewportHeight = Number(await webContents.executeJavaScript("window.innerHeight"));
+    const frameHeight = Math.max(1, Math.min(viewportHeight || 900, pageHeight || 900));
+    const totalFrames = Math.max(1, Math.min(maxFrames, Math.ceil(pageHeight / frameHeight)));
+
+    const frames: ScrollFrame[] = [];
+    for (let index = 0; index < totalFrames; index += 1) {
+      const offsetTop = Math.min(index * frameHeight, Math.max(0, pageHeight - frameHeight));
+      // 相邻帧偏移不足半屏说明已无法继续下滚，避免重复截同一屏。
+      if (index > 0 && offsetTop - frames[index - 1].offsetTop < frameHeight / 2) break;
+      await scrollToOffset(webContents, offsetTop);
+      const image = await webContents.capturePage();
+      frames.push({ base64: image.toPNG().toString("base64"), offsetTop });
+    }
+    await scrollToOffset(webContents, 0);
+    return { frames, pageHeight, viewportHeight: frameHeight };
   } finally {
     if (!captureWindow.isDestroyed()) captureWindow.destroy();
   }
@@ -188,8 +232,12 @@ export function registerApplicationIpc(): void {
     return exportCommercePdf(senderWindow(event), payload);
   });
 
-  ipcMain.handle("visual:capturePage", async (_event, url: unknown) => {
+  ipcMain.handle("visual:capturePageScroll", async (_event, url: unknown, maxFrames: unknown) => {
     if (!isLocalPreviewUrl(url)) throw new Error("只允许截取 localhost 页面");
-    return captureLocalPage(url);
+    const limit =
+      typeof maxFrames === "number" && Number.isFinite(maxFrames)
+        ? Math.max(1, Math.min(Math.floor(maxFrames), 12))
+        : MAX_SCROLL_FRAMES;
+    return captureLocalPageScroll(url, limit);
   });
 }
