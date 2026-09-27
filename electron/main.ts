@@ -15,6 +15,7 @@ import {
   type NativeImage,
 } from "electron";
 import { readCachedTheme, synchronizeThemeWithBackend, type AppTheme } from "./app-preferences";
+import { startAutomationServer, stopAutomationServer } from "./automation-server";
 import { startBackend, stopBackend } from "./backend-process";
 import { migrateLegacyApplicationData } from "./data-paths";
 import { clearDevelopmentRendererCache, configureDevelopmentProcess } from "./development-runtime";
@@ -140,6 +141,10 @@ async function bootstrap(): Promise<void> {
   nativeTheme.themeSource = activeTheme;
   startupWindow = await createStartupWindow(activeTheme);
 
+  // 自动化控制服务要在 startBackend 之前启动：spawn 模式下它的端口/token 会随
+  // buildBackendEnvironment 注入 Python；dev 模式则通过端点文件传递。
+  startAutomationServer();
+
   try {
     const backend = await startBackend((progress) => {
       updateStartupWindow(startupWindow, progress);
@@ -225,6 +230,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   closeStartupWindow(startupWindow);
   startupWindow = null;
+
+  stopAutomationServer();
 
   if (tray && !tray.isDestroyed()) {
     tray.destroy();

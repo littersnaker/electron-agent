@@ -36,6 +36,7 @@ ActionKind = Literal[
     "run",
     "run_code",
     "mcp",
+    "browser",
     "complete_work",
     "finish",
 ]
@@ -63,6 +64,7 @@ _ACTION_KEYS = frozenset(
         "run",
         "run_code",
         "mcp",
+        "browser",
         "complete_work",
         "finish",
     }
@@ -413,6 +415,7 @@ class ActionRequestModel(BaseModel):
             "run",
             "run_code",
             "mcp",
+            "browser",
             "complete_work",
             "finish",
         }:
@@ -646,6 +649,16 @@ def _normalize_action_name(value: str) -> str:
         "run_code": "run_code",
         "run_python": "run_code",
         "execute_code": "run_code",
+        "browser.navigate": "browser",
+        "browser_navigate": "browser",
+        "browser.extract": "browser",
+        "browser_extract": "browser",
+        "browser.click": "browser",
+        "browser_click": "browser",
+        "browser.fill": "browser",
+        "browser_fill": "browser",
+        "browser.screenshot": "browser",
+        "browser_screenshot": "browser",
         "software_factory.plan": "factory",
         "software_factory.generate": "factory",
         "software_factory.validate": "factory",
@@ -798,6 +811,14 @@ def parse_agent_action(text: str) -> AgentAction:
             action="mcp",
             work_id=request.work_id,
             tool=request.tool.strip()[:300],
+            arguments=dict(request.arguments or {}),
+        )
+
+    if action == "browser":
+        return AgentAction(
+            action="browser",
+            work_id=request.work_id,
+            tool=request.tool.strip()[:60],
             arguments=dict(request.arguments or {}),
         )
 

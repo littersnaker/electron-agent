@@ -35,6 +35,10 @@ from backend.services.agent.worker.pending import (
     save_pending_command,
 )
 from backend.services.agent.worker.work_batch_writer import _env_int
+from backend.services.tools.browser_tools import (
+    browser_tool_approval_enabled,
+    browser_tools_enabled,
+)
 from backend.services.tools.code_tools import execute_code_tool
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -110,6 +114,7 @@ class WorkActionHandler:
             "run": self._run,
             "run_code": self._run_code,
             "mcp": self._mcp,
+            "browser": self._browser,
             "complete_work": self._complete,
         }
         handler = handlers.get(action.action)
@@ -119,6 +124,104 @@ class WorkActionHandler:
                 error=f"Worker 不支持动作：{action.action}",
             )
         return await handler(action)
+
+    async def _browser(self, action: AgentAction) -> WorkActionOutcome:
+        """调用内置浏览器自动化；任务内首次使用需用户审批（复用命令审批通道）。"""
+
+        if not browser_tools_enabled():
+            self._env.state.append_transcript(
+                "ACTION browser 已被 BROWSER_TOOLS_ENABLED=0 关闭，无法执行。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("failure", error="浏览器自动化已关闭")
+
+        browser_action = str(action.tool or "").strip() or "navigate"
+        approval_command = "browser-automation"
+        if browser_tool_approval_enabled():
+            record = await find_pending_command(self._env.work.id)
+            if record is None or record["command"] != approval_command:
+                # 本任务首次使用浏览器：落库 + 审批卡片 + 暂停（与安装命令审批同构）。
+                request_id = f"approval_{uuid4().hex}"
+                await save_pending_command(
+                    request_id=request_id,
+                    session_id=self._env.session_id,
+                    work_id=self._env.work.id,
+                    command=approval_command,
+                    checkpoint_id=self._env.checkpoint_id,
+                )
+                await self._env.emit(
+                    "interactive",
+                    {
+                        "id": request_id,
+                        "source": "risk_approval",
+                        "command": "browser_automation",
+                        "prompt": "Agent 准备使用内置浏览器自动化操作页面",
+                        "description": (
+                            "浏览器工具会打开并操作真实页面（导航、点击、输入），"
+                            "可能触发页面上的实际副作用。批准后本任务内后续浏览器"
+                            "动作将不再重复询问。"
+                        ),
+                        "mode": "normal",
+                        "suggestedMode": "user",
+                        "kind": "confirm",
+                        "allowMultiple": False,
+                        "options": [
+                            {"label": "允许本任务使用", "value": "approve"},
+                            {"label": "拒绝", "value": "reject"},
+                        ],
+                        "promptRound": 1,
+                        "recentOutput": f"browser.{browser_action}",
+                        "title": "浏览器自动化需要审批",
+                        "approvalKind": "browser_run",
+                        "riskLevel": "medium",
+                        "toolName": f"browser_{browser_action}",
+                        "toolArguments": dict(action.arguments or {}),
+                    },
+                )
+                self._env.state.append_transcript(
+                    f"ACTION browser 等待用户审批：browser.{browser_action}\n"
+                    f"审批请求：{request_id}"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("pause")
+            if record["status"] == "pending":
+                # 恢复后用户仍未答复：继续暂停等待。
+                self._env.state.append_transcript(
+                    f"ACTION browser 仍在等待用户审批：{record['requestId']}"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("pause")
+            if record["status"] == "rejected":
+                self._env.state.append_transcript(
+                    "ACTION browser 用户已拒绝本任务使用浏览器自动化，请改用其他方式。"
+                )
+                await self._env.checkpoint()
+                return WorkActionOutcome("failure", error="用户拒绝本任务使用浏览器自动化")
+            # status == approved：本任务内后续动作免批，直接执行。
+
+        await self._lifecycle(
+            role="modify_worker",
+            detail=f"{self._env.work.id} · 内置浏览器 {browser_action}",
+            tool_name=f"browser_{browser_action}",
+        )
+        result = await execute_code_tool(
+            f"browser.{browser_action}",
+            root=self._env.root,
+            arguments=dict(action.arguments or {}),
+            permissions={"control"},
+            agent_id=self._env.agent_id,
+            task_id=self._env.work.id,
+        )
+        observation = (
+            json.dumps(result, ensure_ascii=False)[:6000]
+            if isinstance(result, dict)
+            else str(result)
+        )
+        self._env.state.append_transcript(
+            f"ACTION browser {browser_action}\nOBSERVATION:\n{observation}"
+        )
+        await self._env.checkpoint()
+        return WorkActionOutcome("continue")
 
     async def _mcp(self, action: AgentAction) -> WorkActionOutcome:
         """调用一个已发现的 MCP 工具；需要审批的工具在 Agent 内拒绝。

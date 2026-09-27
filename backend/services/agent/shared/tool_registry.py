@@ -100,6 +100,48 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
         description="全部 Work 成功或明确跳过后生成最终交付摘要。",
         example='{"action":"finish","summary":"任务完成","tests":[]}',
     ),
+    AgentToolDefinition(
+        name="browser_navigate",
+        scope="control",
+        description=(
+            "在内置浏览器中打开网页（localhost 预览或任意 http/https 页面），"
+            "返回标题与正文文本预览。首次使用会请求用户审批。"
+        ),
+        example=(
+            '{"action":"browser_navigate","workId":"W001","tool":"navigate",'
+            '"arguments":{"url":"http://127.0.0.1:5173"}}'
+        ),
+    ),
+    AgentToolDefinition(
+        name="browser_extract",
+        scope="control",
+        description="抽取内置浏览器当前页面或指定 CSS 元素的可见文本。",
+        example='{"action":"browser_extract","workId":"W001","tool":"extract","arguments":{}}',
+    ),
+    AgentToolDefinition(
+        name="browser_click",
+        scope="control",
+        description=("点击内置浏览器页面元素：优先 CSS 选择器，也可用可见文本匹配按钮/链接。"),
+        example=(
+            '{"action":"browser_click","workId":"W001","tool":"click",'
+            '"arguments":{"text":"登录"}}'
+        ),
+    ),
+    AgentToolDefinition(
+        name="browser_fill",
+        scope="control",
+        description="向内置浏览器页面的输入框写入文本（兼容 React 受控组件）。",
+        example=(
+            '{"action":"browser_fill","workId":"W001","tool":"fill",'
+            '"arguments":{"selector":"#username","value":"demo"}}'
+        ),
+    ),
+    AgentToolDefinition(
+        name="browser_screenshot",
+        scope="control",
+        description="截取内置浏览器当前页面，返回降采样 JPEG（base64）与尺寸信息。",
+        example='{"action":"browser_screenshot","workId":"W001","tool":"screenshot","arguments":{}}',
+    ),
 )
 
 
@@ -114,6 +156,21 @@ AUTO_EDIT_TOOL_NAMES = (
     "finish",
 )
 FULL_AUTO_TOOL_NAMES = (*AUTO_EDIT_TOOL_NAMES[:-2], "run", *AUTO_EDIT_TOOL_NAMES[-2:])
+
+
+def browser_tools_enabled() -> bool:
+    """浏览器自动化工具开关（默认开，BROWSER_TOOLS_ENABLED=0 关闭）。"""
+
+    return os.getenv("BROWSER_TOOLS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+BROWSER_TOOL_NAMES = (
+    "browser_navigate",
+    "browser_extract",
+    "browser_click",
+    "browser_fill",
+    "browser_screenshot",
+)
 
 
 def code_mode_enabled() -> bool:
@@ -139,6 +196,9 @@ def tool_names_for_mode(
     # 其余命令仍由 _run 按“自动编辑模式”跳过，不执行终端命令）。
     if command_approval_enabled() and execution_mode == "auto_edit" and "run" not in names:
         names = (*names, "run")
+    # 浏览器自动化工具：仅全自动模式暴露（动作有真实页面副作用，且首次使用需审批）。
+    if browser_tools_enabled() and execution_mode == "full_auto":
+        names = (*names, *(name for name in BROWSER_TOOL_NAMES if name not in names))
     return names
 
 
@@ -297,6 +357,47 @@ def build_openai_tools(
             "required": ["action", "summary"],
         },
     }
+    # 浏览器自动化：动作统一走 "browser"，tool 字段区分子动作；openai 工具名
+    # 与 CODE_AGENT_TOOLS 的 browser_* 一一对应，arguments 结构随动作不同。
+    browser_argument_schemas: dict[str, dict[str, Any]] = {
+        "navigate": {
+            "url": {"type": "string", "description": "要打开的 http/https 地址"},
+        },
+        "extract": {
+            "selector": {
+                "type": "string",
+                "description": "可选 CSS 选择器；缺省时返回整页可见文本",
+            },
+        },
+        "click": {
+            "selector": {"type": "string", "description": "可选 CSS 选择器"},
+            "text": {"type": "string", "description": "可选可见文本匹配（按钮/链接）"},
+        },
+        "fill": {
+            "selector": {"type": "string", "description": "输入框 CSS 选择器"},
+            "value": {"type": "string", "description": "要写入的文本"},
+        },
+        "screenshot": {},
+    }
+    for browser_tool, argument_schema in browser_argument_schemas.items():
+        schemas[f"browser_{browser_tool}"] = {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "browser"},
+                "workId": {"type": "string"},
+                "tool": {"type": "string", "const": browser_tool},
+                "arguments": {
+                    "type": "object",
+                    "properties": argument_schema,
+                    **(
+                        {"required": list(argument_schema)}
+                        if browser_tool in {"navigate", "fill"}
+                        else {}
+                    ),
+                },
+            },
+            "required": ["action", "tool", "arguments"],
+        }
     tools: list[dict[str, Any]] = []
     for tool in CODE_AGENT_TOOLS:
         if tool.name not in allowed or tool.name not in schemas:

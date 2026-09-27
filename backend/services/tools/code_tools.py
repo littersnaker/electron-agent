@@ -10,6 +10,7 @@ from backend.services.agent.shared.proposal import apply_proposal
 from backend.services.agent.shared.workspace_tools import file_version
 from backend.services.code_intelligence.service import CodeIntelligenceService
 from backend.services.sandbox import SANDBOX
+from backend.services.tools.browser_tools import register_browser_tools
 from backend.services.tools.contracts import (
     ToolDefinition,
     ToolExecutionContext,
@@ -176,6 +177,7 @@ def register_code_tools() -> None:
 
     # Software Factory 与基础文件工具共享同一 Gateway，避免高层生成器绕过权限审计。
     register_software_factory_tools()
+    register_browser_tools()
     _REGISTERED = True
 
 

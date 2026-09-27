@@ -16,6 +16,11 @@ tools:
   - software_factory.plan
   - software_factory.generate
   - software_factory.validate
+  - browser.navigate
+  - browser.extract
+  - browser.click
+  - browser.fill
+  - browser.screenshot
 memory:
   - episodic
   - semantic

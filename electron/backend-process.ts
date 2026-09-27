@@ -9,6 +9,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { getAutomationEnvironment } from "./automation-server";
 import { getStableDataPath } from "./data-paths";
 import { findAvailableServerPort, SERVER_HOST } from "./server-port";
 
@@ -124,6 +125,9 @@ function buildBackendEnvironment(port: number): NodeJS.ProcessEnv {
     BACKEND_PORT: String(port),
     AGENT_DATA_DIR: getStableDataPath("python-data"),
     FRONTEND_DIR: frontendDirectory,
+    // 浏览器自动化控制通道：端口与 token 由 automation-server 注入，Python 的
+    // browser.* 工具经它驱动隐藏浏览器窗口；服务未启动时为空对象。
+    ...getAutomationEnvironment(),
     // run_code 批量执行通道：把随安装包分发的独立 Python 运行时注入后端，
     // 开发模式用系统 Python（后端 sys.executable 兜底），这里只在打包时指定。
     ...(development
