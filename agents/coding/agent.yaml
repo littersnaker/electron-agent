@@ -21,6 +21,7 @@ tools:
   - browser.click
   - browser.fill
   - browser.screenshot
+  - browser.look
 memory:
   - episodic
   - semantic

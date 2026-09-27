@@ -131,6 +131,7 @@ async def execute_work(
             agent_id=agent_id,
             session_id=session_id,
             checkpoint_id=checkpoint_id,
+            credentials=credentials,
         )
     )
 

@@ -189,8 +189,13 @@ async def execute_code_tool(
     permissions: set[ToolPermission],
     agent_id: str,
     task_id: str = "",
+    metadata: dict[str, Any] | None = None,
 ) -> Any:
-    """为旧 Code Agent 提供最小兼容调用，并强制经过 Tool Gateway。"""
+    """为旧 Code Agent 提供最小兼容调用，并强制经过 Tool Gateway。
+
+    ``metadata`` 用于传递模型不可见的调用方上下文（如 LLM 凭证），
+    模型无法通过 action 参数注入。
+    """
 
     register_code_tools()
     result = await TOOL_GATEWAY.execute(
@@ -200,6 +205,7 @@ async def execute_code_tool(
             workspace_root=root,
             allowed_permissions=frozenset(permissions),
             task_id=task_id,
+            metadata=metadata or {},
         ),
     )
     return result.raw

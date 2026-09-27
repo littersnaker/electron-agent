@@ -35,6 +35,7 @@ from backend.services.agent.worker.pending import (
     save_pending_command,
 )
 from backend.services.agent.worker.work_batch_writer import _env_int
+from backend.services.llm.credentials import LlmCredentials
 from backend.services.tools.browser_tools import (
     browser_tool_approval_enabled,
     browser_tools_enabled,
@@ -80,6 +81,8 @@ class WorkActionEnvironment:
     agent_id: str
     session_id: str = ""
     checkpoint_id: str = ""
+    # LLM 凭证：browser.look 需要经视觉模型观察页面；模型参数不可注入。
+    credentials: LlmCredentials | None = None
 
 
 class WorkActionHandler:
@@ -211,6 +214,7 @@ class WorkActionHandler:
             permissions={"control"},
             agent_id=self._env.agent_id,
             task_id=self._env.work.id,
+            metadata={"credentials": self._env.credentials} if browser_action == "look" else None,
         )
         observation = (
             json.dumps(result, ensure_ascii=False)[:6000]

@@ -344,3 +344,131 @@ async def test_browser_disabled_by_env(monkeypatch, tmp_path: Path) -> None:
     assert outcome.kind == "failure"
     assert all(kind != "interactive" for kind, _payload in captured)
     get_settings.cache_clear()
+
+
+# ---------------------------- browser.look（视觉观察） ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_look_sends_screenshot_to_gateway(monkeypatch, tmp_path: Path) -> None:
+    """look 截图后把图像交给视觉模型，返回文字结论；凭证来自 metadata。"""
+
+    from backend.services.llm.credentials import LlmCredentials
+    from backend.services.llm.types import LlmUsage
+
+    fake = _FakeAutomationServer()
+    fake.response = {
+        "ok": True,
+        "imageBase64": "aW1hZ2VfZGF0YQ==",
+        "mimeType": "image/jpeg",
+        "width": 1280,
+        "height": 800,
+    }
+    monkeypatch.setenv("AUTOMATION_HTTP_PORT", str(fake.port))
+    monkeypatch.setenv("AUTOMATION_HTTP_TOKEN", "tok")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+    from backend.core.config import get_settings
+
+    get_settings.cache_clear()
+    register_browser_tools()
+
+    calls: list[dict[str, object]] = []
+
+    class _StubGateway:
+        async def complete(self, **kwargs: object):
+            calls.append(dict(kwargs))
+            return (
+                "页面显示登录表单",
+                LlmUsage(prompt=500, completion=30, total=530),
+                type("M", (), {"model": "deepseek-v4-flash-vision-exp"})(),
+            )
+
+    monkeypatch.setattr("backend.services.llm.gateway.GATEWAY", _StubGateway())
+
+    credentials = LlmCredentials(values={})
+    try:
+        result = await execute_code_tool(
+            "browser.look",
+            root=tmp_path,
+            arguments={"goal": "确认登录表单状态"},
+            permissions={"control"},
+            agent_id="test-worker",
+            metadata={"credentials": credentials},
+        )
+    finally:
+        fake.stop()
+        get_settings.cache_clear()
+
+    assert result["ok"] is True
+    assert "登录表单" in result["content"]
+    call = calls[0]
+    message = call["messages"][0]
+    assert "确认登录表单状态" in message.content
+    assert message.images[0].data == "aW1hZ2VfZGF0YQ=="
+    assert message.images[0].mime_type == "image/jpeg"
+    # 截图请求发往自动化端点（一次 screenshot 调用）。
+    assert fake.requests[0][0] == "/screenshot"
+
+
+@pytest.mark.asyncio
+async def test_look_requires_credentials_metadata(monkeypatch, tmp_path: Path) -> None:
+    """metadata 缺凭证（模型不可注入）时 look 返回结构化错误。"""
+
+    monkeypatch.setenv("AUTOMATION_HTTP_PORT", "45678")
+    monkeypatch.setenv("AUTOMATION_HTTP_TOKEN", "tok")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+    from backend.core.config import get_settings
+
+    get_settings.cache_clear()
+    register_browser_tools()
+    try:
+        result = await execute_code_tool(
+            "browser.look",
+            root=tmp_path,
+            arguments={},
+            permissions={"control"},
+            agent_id="test-worker",
+        )
+    finally:
+        get_settings.cache_clear()
+    assert result["ok"] is False
+    assert "凭证" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_look_appends_vision_model_hint(monkeypatch, tmp_path: Path) -> None:
+    """视觉模型缺失的报错应附加配置引导。"""
+
+    fake = _FakeAutomationServer()
+    fake.response = {"ok": True, "imageBase64": "aW1hZ2U=", "mimeType": "image/jpeg"}
+    monkeypatch.setenv("AUTOMATION_HTTP_PORT", str(fake.port))
+    monkeypatch.setenv("AUTOMATION_HTTP_TOKEN", "tok")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+    from backend.core.config import get_settings
+    from backend.services.llm.credentials import LlmCredentials
+
+    get_settings.cache_clear()
+    register_browser_tools()
+
+    class _NoVisionGateway:
+        async def complete(self, **kwargs: object):
+            raise ValueError("已配置的模型均不支持图像输入，请配置或选择支持 Vision 的模型。")
+
+    monkeypatch.setattr("backend.services.llm.gateway.GATEWAY", _NoVisionGateway())
+
+    credentials = LlmCredentials(values={})
+    try:
+        result = await execute_code_tool(
+            "browser.look",
+            root=tmp_path,
+            arguments={},
+            permissions={"control"},
+            agent_id="test-worker",
+            metadata={"credentials": credentials},
+        )
+    finally:
+        fake.stop()
+        get_settings.cache_clear()
+
+    assert result["ok"] is False
+    assert "deepseek-v4-flash-vision-exp" in result["error"]

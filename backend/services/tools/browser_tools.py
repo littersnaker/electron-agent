@@ -230,6 +230,77 @@ async def _screenshot(context: ToolExecutionContext, arguments: dict[str, Any]) 
     return await _post_action("screenshot", {}, timeout=ACTION_TIMEOUT_SECONDS)
 
 
+LOOK_PROMPT_TEMPLATE = (
+    "这是内置浏览器当前页面的截图。Agent 的观察目标：{goal}\n"
+    "请用中文描述页面当前状态，重点输出与目标直接相关的信息：\n"
+    "1. 页面类型与主要内容（一两句）\n"
+    "2. 与目标相关的关键元素（按钮/表单/链接/报错信息，含可见文字）\n"
+    "3. 可执行的下一步建议（如：点击某按钮、填写某输入框、页面未就绪需等待）\n"
+    "输出为要点清单，不要输出 Markdown 围栏。"
+)
+
+
+async def _look(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """截图并交给视觉模型观察，把文字结论返回给 Agent（操作→看→决策闭环）。"""
+
+    disabled = _require_enabled()
+    if disabled:
+        return {"ok": False, "error": disabled}
+    credentials = context.metadata.get("credentials")
+    if credentials is None:
+        return {"ok": False, "error": "视觉模型凭证不可用（look 需要在 Agent 循环内运行）"}
+
+    shot = await _post_action("screenshot", {}, timeout=ACTION_TIMEOUT_SECONDS)
+    if not shot.get("ok"):
+        return {"ok": False, "error": str(shot.get("error") or "截图失败")}
+    image_base64 = str(shot.get("imageBase64") or "")
+    if not image_base64:
+        return {"ok": False, "error": "截图内容为空"}
+
+    from backend.services.llm.catalog import AUTO_MODEL_ID
+    from backend.services.llm.gateway import GATEWAY
+    from backend.services.llm.types import ImagePart, LlmMessage
+
+    goal = str(arguments.get("goal") or "").strip() or "了解页面当前状态并找出可执行的下一步"
+    prompt = LOOK_PROMPT_TEMPLATE.format(goal=goal[:600])
+    message = LlmMessage(
+        role="user",
+        content=prompt,
+        images=[
+            ImagePart(
+                mime_type=str(shot.get("mimeType") or "image/jpeg"),
+                data=image_base64,
+                name="browser-look.jpg",
+            )
+        ],
+    )
+    try:
+        content, usage, model = await GATEWAY.complete(
+            preferred_model_id=AUTO_MODEL_ID,
+            credentials=credentials,
+            messages=[message],
+            temperature=0.2,
+            timeout_seconds=180,
+        )
+    except Exception as exc:  # noqa: BLE001 - 观察失败不阻断 Agent，结构化返回。
+        LOGGER.warning("browser.look 视觉模型调用失败：%s", exc)
+        error = str(exc)[:300]
+        if "图像输入" in error or "ision" in error:
+            error += (
+                "（browser.look 需要支持视觉的模型：请在设置 → 自定义模型中添加勾选"
+                "「支持视觉」的模型，如 DeepSeek deepseek-v4-flash-vision-exp，"
+                "并勾选加入自动路由）"
+            )
+        return {"ok": False, "error": error}
+    return {
+        "ok": True,
+        "model": model.model,
+        "content": content,
+        "usage": {"prompt": usage.prompt, "completion": usage.completion, "total": usage.total},
+        "screenshot": {"width": shot.get("width"), "height": shot.get("height")},
+    }
+
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
         "browser.navigate",
@@ -269,6 +340,14 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         "control",
         _screenshot,
         45.0,
+        1,
+    ),
+    ToolDefinition(
+        "browser.look",
+        "截图当前页面并交给视觉模型观察，返回页面状态文字结论（操作→看→决策）",
+        "control",
+        _look,
+        200.0,
         1,
     ),
 )

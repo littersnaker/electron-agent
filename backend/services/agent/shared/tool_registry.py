@@ -142,6 +142,18 @@ CODE_AGENT_TOOLS: tuple[AgentToolDefinition, ...] = (
         description="截取内置浏览器当前页面，返回降采样 JPEG（base64）与尺寸信息。",
         example='{"action":"browser_screenshot","workId":"W001","tool":"screenshot","arguments":{}}',
     ),
+    AgentToolDefinition(
+        name="browser_look",
+        scope="control",
+        description=(
+            "截图当前页面并交给视觉模型观察，返回页面状态的文字结论——"
+            "操作后看一眼页面再决定下一步。需要已配置支持视觉的模型。"
+        ),
+        example=(
+            '{"action":"browser_look","workId":"W001","tool":"look",'
+            '"arguments":{"goal":"确认登录表单是否已填写完整"}}'
+        ),
+    ),
 )
 
 
@@ -170,6 +182,7 @@ BROWSER_TOOL_NAMES = (
     "browser_click",
     "browser_fill",
     "browser_screenshot",
+    "browser_look",
 )
 
 
@@ -378,6 +391,9 @@ def build_openai_tools(
             "value": {"type": "string", "description": "要写入的文本"},
         },
         "screenshot": {},
+        "look": {
+            "goal": {"type": "string", "description": "观察目标（想让视觉模型确认什么）"},
+        },
     }
     for browser_tool, argument_schema in browser_argument_schemas.items():
         schemas[f"browser_{browser_tool}"] = {

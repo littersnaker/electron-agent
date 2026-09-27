@@ -659,6 +659,8 @@ def _normalize_action_name(value: str) -> str:
         "browser_fill": "browser",
         "browser.screenshot": "browser",
         "browser_screenshot": "browser",
+        "browser.look": "browser",
+        "browser_look": "browser",
         "software_factory.plan": "factory",
         "software_factory.generate": "factory",
         "software_factory.validate": "factory",
