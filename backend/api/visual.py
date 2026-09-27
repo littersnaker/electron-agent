@@ -90,8 +90,7 @@ async def post_visual_review(body: VisualReviewBody, request: Request) -> dict[s
     credentials = resolve_credentials(request)
     result = await review_screenshots(
         frames=[
-            ReviewFrame(data=frame.image_base64, mime_type=frame.mime_type)
-            for frame in body.frames
+            ReviewFrame(data=frame.image_base64, mime_type=frame.mime_type) for frame in body.frames
         ],
         task_summary=body.task_summary,
         credentials=credentials,
