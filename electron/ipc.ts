@@ -124,15 +124,31 @@ function isLocalPreviewUrl(value: unknown): value is string {
 
 /** 单次滚动截图的默认帧数上限（与视觉模型单请求图片上限保持余量）。 */
 const MAX_SCROLL_FRAMES = 6;
+/** 全站巡检默认覆盖的页面数上限。 */
+const MAX_AUDIT_PAGES = 6;
 /** 每帧滚动后等待双 rAF 之外的固定余量，让懒加载图片和字体完成渲染。 */
 const SCROLL_SETTLE_MS = 250;
 /** 首屏加载后的稳定等待，沿用原单帧截图的经验值。 */
 const LOAD_SETTLE_MS = 800;
+/** 每页最多提取的同源链接数，防止导航爆炸式增长。 */
+const MAX_LINKS_PER_PAGE = 50;
+/** 视为静态资产的扩展名，巡检不访问。 */
+const ASSET_URL_PATTERN =
+  /\.(png|jpe?g|gif|svg|webp|avif|css|js|mjs|json|xml|ico|pdf|zip|gz|mp4|webm|mp3|wav|woff2?|ttf|otf|eot)(\?|$)/i;
 
 /** 一帧滚动截图：PNG Base64 与该帧顶部的页面纵偏移。 */
 interface ScrollFrame {
   base64: string;
   offsetTop: number;
+}
+
+/** 全站巡检中的单页结果。 */
+interface AuditPage {
+  url: string;
+  frames: ScrollFrame[];
+  pageHeight: number;
+  /** 页面加载或截图失败时的原因；正常页为空。 */
+  error: string;
 }
 
 /** 在页面内滚动到指定纵偏移，并等浏览器完成两帧绘制（懒加载触发后再稳定）。 */
@@ -142,6 +158,82 @@ async function scrollToOffset(webContents: Electron.WebContents, offsetTop: numb
     "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
   );
   await new Promise((resolve) => setTimeout(resolve, SCROLL_SETTLE_MS));
+}
+
+/** 等页面渲染完成并留出懒加载稳定时间。 */
+async function settleAfterLoad(webContents: Electron.WebContents): Promise<void> {
+  await webContents.executeJavaScript("document.readyState === 'complete' || true");
+  await new Promise((resolve) => setTimeout(resolve, LOAD_SETTLE_MS));
+}
+
+/** 对 webContents 当前页面做滚动分帧截图（不负责加载 URL）。 */
+async function scrollCaptureCurrentPage(
+  webContents: Electron.WebContents,
+  maxFrames: number,
+): Promise<{ frames: ScrollFrame[]; pageHeight: number; viewportHeight: number }> {
+  const pageHeight = Number(
+    await webContents.executeJavaScript(
+      "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
+    ),
+  );
+  const viewportHeight = Number(await webContents.executeJavaScript("window.innerHeight"));
+  const frameHeight = Math.max(1, Math.min(viewportHeight || 900, pageHeight || 900));
+  const totalFrames = Math.max(1, Math.min(maxFrames, Math.ceil(pageHeight / frameHeight)));
+
+  const frames: ScrollFrame[] = [];
+  for (let index = 0; index < totalFrames; index += 1) {
+    const offsetTop = Math.min(index * frameHeight, Math.max(0, pageHeight - frameHeight));
+    // 相邻帧偏移不足半屏说明已无法继续下滚，避免重复截同一屏。
+    if (index > 0 && offsetTop - frames[index - 1].offsetTop < frameHeight / 2) break;
+    await scrollToOffset(webContents, offsetTop);
+    const image = await webContents.capturePage();
+    frames.push({ base64: image.toPNG().toString("base64"), offsetTop });
+  }
+  await scrollToOffset(webContents, 0);
+  return { frames, pageHeight, viewportHeight: frameHeight };
+}
+
+/** 抽取页面内同源链接（含 hash 路由），返回去重后的待访问候选。 */
+async function extractSameOriginLinks(
+  webContents: Electron.WebContents,
+  rootOrigin: string,
+  visited: Set<string>,
+): Promise<string[]> {
+  let hrefs: unknown;
+  try {
+    // 读 DOM 属性 href（而非 getAttribute）让浏览器先把相对地址解析成绝对地址。
+    hrefs = await webContents.executeJavaScript(
+      "Array.from(document.querySelectorAll('a[href]')).map((a) => a.href)",
+    );
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(hrefs)) return [];
+  const candidates: string[] = [];
+  for (const raw of hrefs.slice(0, 200)) {
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    let resolved: URL;
+    try {
+      resolved = new URL(raw);
+    } catch {
+      continue;
+    }
+    // 只跟同源页面：协议 http 且 origin 与根页面一致（端口不同视为异源）。
+    if (resolved.protocol !== "http:" || resolved.origin !== rootOrigin) continue;
+    if (ASSET_URL_PATTERN.test(resolved.pathname)) continue;
+    // 纯锚点（#section）跳过；hash 路由（#/xxx）是 SPA 页面身份，保留。
+    if (resolved.hash && !resolved.hash.startsWith("#/")) continue;
+    const key = normalizeAuditUrl(resolved.toString());
+    if (visited.has(key) || candidates.includes(key)) continue;
+    candidates.push(key);
+    if (candidates.length >= MAX_LINKS_PER_PAGE) break;
+  }
+  return candidates;
+}
+
+/** 巡检去重键：折叠尾斜杠，其余（含 hash 路由与查询参数）保持原样。 */
+function normalizeAuditUrl(value: string): string {
+  return value.length > 1 && value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
 /**
@@ -159,32 +251,66 @@ async function captureLocalPageScroll(
     webPreferences: { sandbox: true },
   });
   try {
-    const webContents = captureWindow.webContents;
     await captureWindow.loadURL(url);
     // 等首屏渲染完成后再等稳定帧，避免截到加载中状态。
-    await webContents.executeJavaScript("document.readyState === 'complete' || true");
-    await new Promise((resolve) => setTimeout(resolve, LOAD_SETTLE_MS));
+    await settleAfterLoad(captureWindow.webContents);
+    return await scrollCaptureCurrentPage(captureWindow.webContents, maxFrames);
+  } finally {
+    if (!captureWindow.isDestroyed()) captureWindow.destroy();
+  }
+}
 
-    const pageHeight = Number(
-      await webContents.executeJavaScript(
-        "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)",
-      ),
-    );
-    const viewportHeight = Number(await webContents.executeJavaScript("window.innerHeight"));
-    const frameHeight = Math.max(1, Math.min(viewportHeight || 900, pageHeight || 900));
-    const totalFrames = Math.max(1, Math.min(maxFrames, Math.ceil(pageHeight / frameHeight)));
+/**
+ * 全站巡检：从根页面出发，BFS 访问同源链接并逐页滚动截图。
+ * 单窗口复用（避免每页一个窗口的创建销毁开销），单页失败记录原因后继续。
+ */
+async function auditLocalSite(
+  rootUrl: string,
+  maxPages: number,
+  maxFramesPerPage: number,
+): Promise<{ pages: AuditPage[] }> {
+  const captureWindow = new BrowserWindow({
+    show: false,
+    width: 1440,
+    height: 900,
+    webPreferences: { sandbox: true },
+  });
+  try {
+    const webContents = captureWindow.webContents;
+    const rootOrigin = new URL(rootUrl).origin;
+    const visited = new Set<string>();
+    const queue: string[] = [];
+    const pages: AuditPage[] = [];
 
-    const frames: ScrollFrame[] = [];
-    for (let index = 0; index < totalFrames; index += 1) {
-      const offsetTop = Math.min(index * frameHeight, Math.max(0, pageHeight - frameHeight));
-      // 相邻帧偏移不足半屏说明已无法继续下滚，避免重复截同一屏。
-      if (index > 0 && offsetTop - frames[index - 1].offsetTop < frameHeight / 2) break;
-      await scrollToOffset(webContents, offsetTop);
-      const image = await webContents.capturePage();
-      frames.push({ base64: image.toPNG().toString("base64"), offsetTop });
+    // 根页面入队；visited 同时承担「已访问/已入队」去重职责。
+    const rootKey = normalizeAuditUrl(rootUrl);
+    visited.add(rootKey);
+    queue.push(rootKey);
+
+    while (pages.length < maxPages) {
+      const target = queue.shift();
+      if (!target) break;
+      try {
+        await captureWindow.loadURL(target);
+        await settleAfterLoad(webContents);
+        const { frames, pageHeight } = await scrollCaptureCurrentPage(
+          webContents,
+          maxFramesPerPage,
+        );
+        pages.push({ url: target, frames, pageHeight, error: "" });
+        // 已访问页数达到上限就不再扩队，避免无意义的链接抽取。
+        if (pages.length < maxPages) {
+          const links = await extractSameOriginLinks(webContents, rootOrigin, visited);
+          for (const link of links) {
+            visited.add(link);
+            queue.push(link);
+          }
+        }
+      } catch (error) {
+        pages.push({ url: target, frames: [], pageHeight: 0, error: String(error).slice(0, 200) });
+      }
     }
-    await scrollToOffset(webContents, 0);
-    return { frames, pageHeight, viewportHeight: frameHeight };
+    return { pages };
   } finally {
     if (!captureWindow.isDestroyed()) captureWindow.destroy();
   }
@@ -240,4 +366,20 @@ export function registerApplicationIpc(): void {
         : MAX_SCROLL_FRAMES;
     return captureLocalPageScroll(url, limit);
   });
+
+  ipcMain.handle(
+    "visual:auditSite",
+    async (_event, url: unknown, maxPages: unknown, maxFramesPerPage: unknown) => {
+      if (!isLocalPreviewUrl(url)) throw new Error("只允许巡检 localhost 页面");
+      const pageLimit =
+        typeof maxPages === "number" && Number.isFinite(maxPages)
+          ? Math.max(1, Math.min(Math.floor(maxPages), 12))
+          : MAX_AUDIT_PAGES;
+      const frameLimit =
+        typeof maxFramesPerPage === "number" && Number.isFinite(maxFramesPerPage)
+          ? Math.max(1, Math.min(Math.floor(maxFramesPerPage), 12))
+          : MAX_SCROLL_FRAMES;
+      return auditLocalSite(url, pageLimit, frameLimit);
+    },
+  );
 }

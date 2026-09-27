@@ -50,6 +50,10 @@ export default function PreviewPanel({
     void review.startReview({ rootPath, modelId: selectedModel });
   };
 
+  const handleAudit = () => {
+    void review.auditSite({ rootPath, modelId: selectedModel });
+  };
+
   return (
     <section
       className={`preview-panel flex shrink-0 flex-col overflow-hidden rounded-[22px] border ${className}`}
@@ -131,6 +135,20 @@ export default function PreviewPanel({
                 停止
               </button>
             ) : null}
+            <button
+              type="button"
+              onClick={handleAudit}
+              disabled={busy || !rootPath || !review.canCapture || !review.settingsEnabled}
+              title="自动发现同源页面并逐页截图 Review"
+              className="cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] transition-all hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                background: "var(--glass)",
+                borderColor: "var(--border)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              全站巡检
+            </button>
             <button
               type="button"
               onClick={handleStart}
@@ -230,6 +248,66 @@ export default function PreviewPanel({
               审查模型：{review.reviewModel}
             </p>
           ) : null}
+        </div>
+      ) : null}
+
+      {review.auditResults.length > 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          <div
+            className="mb-1.5 flex items-center justify-between text-[10px]"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            <span>全站巡检结果</span>
+            {review.auditProgress ? (
+              <span>
+                {review.auditProgress.current}/{review.auditProgress.total} 页
+                {review.auditRunning ? " 审查中…" : " 完成"}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-2">
+            {review.auditResults.map((page) => (
+              <div
+                key={page.url}
+                className="rounded-xl border px-3 py-2"
+                style={{ background: "var(--glass)", borderColor: "var(--border)" }}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span
+                    className="truncate text-[11px] font-medium"
+                    style={{ color: "var(--text-primary)" }}
+                    title={page.url}
+                  >
+                    {page.path || "/"}
+                  </span>
+                  <span className="shrink-0 text-[9px]" style={{ color: "var(--text-tertiary)" }}>
+                    {page.status === "reviewed" && "✅ 已审查"}
+                    {page.status === "captured" && "⏳ 待审查"}
+                    {page.status === "captureFailed" && "⚠️ 截图失败"}
+                    {page.status === "reviewFailed" && "⚠️ 审查失败"}
+                  </span>
+                </div>
+                {page.captureError ? (
+                  <p className="text-[10px]" style={{ color: "var(--accent-red, #ff6961)" }}>
+                    {page.captureError}
+                  </p>
+                ) : null}
+                {page.reviewError ? (
+                  <p className="text-[10px]" style={{ color: "var(--accent-amber, #ffd60a)" }}>
+                    {page.reviewError}
+                  </p>
+                ) : null}
+                {page.content ? (
+                  <p
+                    className="text-[11px] leading-relaxed whitespace-pre-wrap"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {page.content}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

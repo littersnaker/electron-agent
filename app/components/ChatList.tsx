@@ -12,6 +12,7 @@ import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
 import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
 import VisualReviewCard from "./visual-review/VisualReviewCard";
+import VisualAuditCard from "./visual-review/VisualAuditCard";
 import { ContextMenu } from "./context-menu";
 import { stripMarkdown, writeClipboard } from "../lib/clipboard";
 
@@ -202,6 +203,7 @@ function ChatList({
               Boolean(message.commerceReport) ||
               Boolean(message.commerceListing) ||
               Boolean(message.visualReview) ||
+              Boolean(message.visualAudit) ||
               (isLastMessage &&
                 (isStreaming || toolActivities.length > 0 || Boolean(agentStatus))));
 
@@ -404,6 +406,7 @@ function ChatList({
                     <ImageRecognitionResultCard result={message.imageResult} />
                   )}
                   {message.visualReview && <VisualReviewCard card={message.visualReview} />}
+                  {message.visualAudit && <VisualAuditCard card={message.visualAudit} />}
                   <MemoizedAssistantMessageRow
                     content={message.content}
                     toolActivities={isLastMessage ? toolActivities : []}

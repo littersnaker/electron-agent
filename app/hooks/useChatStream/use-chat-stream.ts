@@ -5,7 +5,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toMessageAttachments } from "../../constants/page-constants";
-import type { AttachedFile, Message, VisualReviewCardData } from "../../constants/page-constants";
+import type {
+  AttachedFile,
+  Message,
+  VisualAuditCardData,
+  VisualReviewCardData,
+} from "../../constants/page-constants";
 import { useVisualReview } from "./use-visual-review";
 import { buildRetrievedAttachment } from "../../lib/rag/attachment-rag";
 import { buildImageAttachmentsPayload, buildLlmRequestHeaders } from "../../lib/llm/client-request";
@@ -122,10 +127,36 @@ export function useChatStream({
     },
     [activeSession?.id, setMessages, setSessions],
   );
+  /**
+   * 全站巡检留档：多页面逐页结论组装成巡检卡片消息写进会话流。
+   */
+  const appendVisualAuditCard = useCallback(
+    (card: VisualAuditCardData) => {
+      const reviewed = card.pages.filter((page) => page.status === "reviewed").length;
+      const cardMessage: Message = {
+        role: "assistant",
+        content: `🔍 全站巡检（${card.pages.length} 页，${reviewed} 页完成 Review，${
+          card.model || "自动路由"
+        }）：`,
+        createdAt: card.createdAt,
+        visualAudit: card,
+      };
+      setMessages((current) => [...current, cardMessage]);
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === activeSession?.id
+            ? { ...session, messages: [...session.messages, cardMessage] }
+            : session,
+        ),
+      );
+    },
+    [activeSession?.id, setMessages, setSessions],
+  );
   const visualReview = useVisualReview({
     apiKeys,
     endpointOverrides,
     onReviewComplete: appendVisualReviewCard,
+    onAuditComplete: appendVisualAuditCard,
   });
   /**
    * Code Agent review 阶段请求视觉验证：复用与手动触发相同的滚动截图链路。

@@ -56,6 +56,18 @@ declare global {
         pageHeight: number;
         viewportHeight: number;
       }>;
+      auditSite: (
+        url: string,
+        maxPages?: number,
+        maxFramesPerPage?: number,
+      ) => Promise<{
+        pages: Array<{
+          url: string;
+          frames: Array<{ base64: string; offsetTop: number }>;
+          pageHeight: number;
+          error: string;
+        }>;
+      }>;
       clipboard: {
         readText: () => Promise<string>;
         writeText: (text: string) => Promise<void>;

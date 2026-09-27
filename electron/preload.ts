@@ -38,6 +38,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     pageHeight: number;
     viewportHeight: number;
   }> => ipcRenderer.invoke("visual:capturePageScroll", url, maxFrames),
+  auditSite: (
+    url: string,
+    maxPages?: number,
+    maxFramesPerPage?: number,
+  ): Promise<{
+    pages: Array<{
+      url: string;
+      frames: Array<{ base64: string; offsetTop: number }>;
+      pageHeight: number;
+      error: string;
+    }>;
+  }> => ipcRenderer.invoke("visual:auditSite", url, maxPages, maxFramesPerPage),
   clipboard: {
     readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
     writeText: (text: string): Promise<void> => ipcRenderer.invoke("clipboard:writeText", text),

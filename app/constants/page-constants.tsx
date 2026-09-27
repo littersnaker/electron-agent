@@ -30,6 +30,8 @@ export type Message = {
   imageResult?: ImageRecognitionResult;
   /** 内置浏览器滚动截图视觉 Review 的留档卡片（缩略图 + 结论）。 */
   visualReview?: VisualReviewCardData;
+  /** 全站巡检留档卡片：多页面截图 + 逐页结论。 */
+  visualAudit?: VisualAuditCardData;
 };
 
 /** 一次视觉 Review 的留档数据；缩略图为降采样 JPEG Data URL 前缀。 */
@@ -45,6 +47,26 @@ export type VisualReviewCardData = {
   /** 实际使用的视觉模型 ID。 */
   model: string;
   createdAt: string;
+};
+
+/** 一次全站巡检的留档数据：多页面逐页结论。 */
+export type VisualAuditCardData = {
+  /** 巡检根地址（localhost dev server）。 */
+  url: string;
+  /** 实际使用的视觉模型 ID。 */
+  model: string;
+  createdAt: string;
+  pages: Array<{
+    /** 展示用路径（pathname + hash 路由）。 */
+    path: string;
+    frameCount: number;
+    status: "captured" | "reviewed" | "captureFailed" | "reviewFailed";
+    content: string;
+    captureError: string;
+    reviewError: string;
+    /** 缩略图数组（data:image/jpeg;base64,...）。 */
+    thumbnails: string[];
+  }>;
 };
 
 /** 图片识别 Agent 的失败照片记录。 */
