@@ -91,7 +91,7 @@ export function useChatStream({
         { role: "assistant", content: finalTextRef.current },
       ]);
     });
-  }, []);
+  }, [setMessages]);
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
@@ -159,7 +159,7 @@ export function useChatStream({
     onAuditComplete: appendVisualAuditCard,
   });
   /**
-   * Code Agent review 阶段请求视觉验证：复用与手动触发相同的滚动截图链路。
+   * Code Agent review 阶段请求视觉验证：前端有改动即自动跑全站巡检。
    * 设置里关闭「自动视觉验证」时跳过；总开关关闭时 startReview 内部也会拦截。
    */
   const runVisualVerification = useCallback(
@@ -170,9 +170,10 @@ export function useChatStream({
         console.info("[useChatStream] 自动视觉验证已在设置中关闭，跳过");
         return;
       }
-      setAgentStatus("正在自动滚动截图并做视觉 Review…");
+      setAgentStatus("正在自动全站巡检：发现页面 → 逐页截图 → 视觉 Review…");
       try {
-        await visualReview.startReview({
+        // 前端文件有改动即触发全站巡检：改动可能影响任意路由，不只首页。
+        await visualReview.auditSite({
           rootPath,
           taskSummary: payload.taskSummary || "",
         });
@@ -640,6 +641,8 @@ export function useChatStream({
       interactiveRequest,
       messages,
       persistSession,
+      runVisualVerification,
+      scheduleStreamFlush,
       selectedModel,
       codeAgentMode,
       setMessages,

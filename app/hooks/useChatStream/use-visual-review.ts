@@ -56,6 +56,8 @@ export interface VisualAuditPageResult {
 
 export interface VisualAuditStartOptions {
   rootPath: string;
+  /** 任务摘要（自动触发时来自 Code Agent review 事件），随每页 prompt 下发。 */
+  taskSummary?: string;
   modelId?: string;
 }
 
@@ -354,7 +356,7 @@ export function useVisualReview({
 
   /** 全站巡检：BFS 发现同源页面 → 逐页滚动截图 → 逐页视觉 Review → 聚合卡片。 */
   const auditSite = useCallback(
-    async ({ rootPath, modelId = "" }: VisualAuditStartOptions) => {
+    async ({ rootPath, taskSummary = "", modelId = "" }: VisualAuditStartOptions) => {
       if (runningRef.current) return;
       if (!settingsRef.current.settingsEnabled) {
         setStatus("error");
@@ -417,9 +419,10 @@ export function useVisualReview({
             const framesForReview = await Promise.all(
               page.frames.map((frame) => downscaleBase64(frame.base64, REVIEW_FRAME_WIDTH, 0.8)),
             );
+            const summarySuffix = taskSummary ? `；任务目标：${taskSummary}` : "";
             const review = await reviewOnePage(
               framesForReview.map((base64) => ({ base64 })),
-              `全站巡检 · 页面 ${results[index].path}`,
+              `全站巡检 · 页面 ${results[index].path}${summarySuffix}`,
               modelId,
             );
             lastModel = review.model || lastModel;
@@ -468,7 +471,7 @@ export function useVisualReview({
         runningRef.current = false;
       }
     },
-    [apiKeys, endpointOverrides, onAuditComplete, reviewOnePage],
+    [onAuditComplete, reviewOnePage],
   );
 
   const stopPreview = useCallback(async () => {

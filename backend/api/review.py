@@ -99,6 +99,36 @@ async def approve_review_artifact(artifact_id: str) -> dict[str, object]:
     return {"ok": True, "appliedSkills": applied}
 
 
+@router.get("/browser-settings")
+async def get_browser_settings() -> dict[str, object]:
+    """返回浏览器自动化设置。"""
+
+    from backend.services.tools.browser_settings import read_browser_settings
+
+    return (await read_browser_settings()).to_json()
+
+
+class BrowserSettingsUpdate(BaseModel):
+    """浏览器自动化设置更新体。"""
+
+    enabled: bool
+
+
+@router.put("/browser-settings")
+async def put_browser_settings(body: BrowserSettingsUpdate) -> dict[str, object]:
+    """保存浏览器自动化设置（控制 Code Agent 是否可以使用内置浏览器）。"""
+
+    from backend.services.tools.browser_settings import (
+        BrowserSettings as _BrowserSettings,
+    )
+    from backend.services.tools.browser_settings import (
+        write_browser_settings,
+    )
+
+    settings = await write_browser_settings(_BrowserSettings(enabled=body.enabled))
+    return settings.to_json()
+
+
 @router.post("/review-artifacts/{artifact_id}/reject")
 async def reject_review_artifact(artifact_id: str) -> dict[str, object]:
     """驳回一条复盘产物。"""

@@ -36,6 +36,7 @@ from backend.services.agent.worker.pending import (
 )
 from backend.services.agent.worker.work_batch_writer import _env_int
 from backend.services.llm.credentials import LlmCredentials
+from backend.services.tools.browser_settings import read_browser_settings
 from backend.services.tools.browser_tools import (
     browser_tool_approval_enabled,
     browser_tools_enabled,
@@ -137,6 +138,12 @@ class WorkActionHandler:
             )
             await self._env.checkpoint()
             return WorkActionOutcome("failure", error="浏览器自动化已关闭")
+        if not (await read_browser_settings()).enabled:
+            self._env.state.append_transcript(
+                "ACTION browser 已在设置中关闭，无法执行；可在设置 → 视觉与浏览器里重新打开。"
+            )
+            await self._env.checkpoint()
+            return WorkActionOutcome("failure", error="浏览器自动化已在设置中关闭")
 
         browser_action = str(action.tool or "").strip() or "navigate"
         approval_command = "browser-automation"

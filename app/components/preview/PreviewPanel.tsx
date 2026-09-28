@@ -1,7 +1,8 @@
 // 模块说明：内置浏览器预览面板——iframe 实时页面 + 滚动截图缩略图 + 视觉 Review 结论。
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../../lib/api-client";
 import type {
   VisualReviewFrame,
   VisualReviewController,
@@ -35,10 +36,28 @@ export default function PreviewPanel({
 }: PreviewPanelProps) {
   const [selectedModel, setSelectedModel] = useState("");
   const [zoomed, setZoomed] = useState<VisualReviewFrame | null>(null);
+  // 后端设置闸门：设置弹窗关闭「允许浏览器自动化」后这里同步禁用。
+  const [browserEnabled, setBrowserEnabled] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch("/api/agent/browser-settings", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { enabled?: boolean } | null) => {
+        if (!cancelled && payload && typeof payload.enabled === "boolean") {
+          setBrowserEnabled(payload.enabled);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const busy = review.isBusy;
-  const statusLabel = !review.settingsEnabled
-    ? "已在设置中关闭"
-    : (STATUS_LABELS[review.status] ?? review.status);
+  const statusLabel =
+    !review.settingsEnabled || !browserEnabled
+      ? "已在设置中关闭"
+      : (STATUS_LABELS[review.status] ?? review.status);
 
   // 视觉模型选项：自动路由 + 用户勾选了 supportsVision 的自定义模型。
   const modelOptions = useMemo(
@@ -138,7 +157,13 @@ export default function PreviewPanel({
             <button
               type="button"
               onClick={handleAudit}
-              disabled={busy || !rootPath || !review.canCapture || !review.settingsEnabled}
+              disabled={
+                busy ||
+                !rootPath ||
+                !review.canCapture ||
+                !review.settingsEnabled ||
+                !browserEnabled
+              }
               title="自动发现同源页面并逐页截图 Review"
               className="cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] transition-all hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
               style={{

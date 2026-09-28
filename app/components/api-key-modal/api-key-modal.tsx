@@ -50,6 +50,7 @@ export function ApiKeyModal({
   const [testingAll, setTestingAll] = useState(false);
   const [reviewModelId, setReviewModelId] = useState("");
   const [reviewEnabled, setReviewEnabled] = useState(true);
+  const [browserEnabled, setBrowserEnabled] = useState(true);
   const [reviewMinComplexity, setReviewMinComplexity] = useState(5);
 
   useEffect(() => {
@@ -95,7 +96,22 @@ export function ApiKeyModal({
       }
     };
 
+    const loadBrowserSettings = async () => {
+      try {
+        const response = await apiFetch("/api/agent/browser-settings", {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { enabled?: boolean };
+        if (typeof payload.enabled === "boolean") setBrowserEnabled(payload.enabled);
+      } catch {
+        // 设置加载失败时保持默认允许。
+      }
+    };
+
     void loadReviewSettings();
+    void loadBrowserSettings();
     void loadEnvironmentStatus();
     return () => {
       cancelled = true;
@@ -401,6 +417,7 @@ export function ApiKeyModal({
               <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
                 自动滚动截图项目预览页面并发送给云端视觉模型（如 DeepSeek
                 视觉模型）分析。截图内容会离开本机，属于隐私敏感操作，随时可以关闭。
+                「浏览器自动化」额外允许 Agent 导航、点击和输入（首次使用仍会弹审批）。
               </div>
             </div>
             <label className="flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
@@ -423,6 +440,22 @@ export function ApiKeyModal({
                 }
               />
               Code Agent 完成后自动截图 Review
+            </label>
+            <label className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={browserEnabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setBrowserEnabled(enabled);
+                  void apiFetch("/api/agent/browser-settings", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enabled }),
+                  }).catch(() => undefined);
+                }}
+              />
+              允许 Code Agent 使用浏览器自动化（导航/点击/输入/截图）
             </label>
             <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
               {visualReview.settingsEnabled
