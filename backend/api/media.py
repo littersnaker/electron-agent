@@ -6,9 +6,7 @@ import asyncio
 import ipaddress
 import re
 import socket
-import tempfile
 from collections.abc import AsyncIterator
-from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -275,7 +273,9 @@ async def get_media_asset(session_id: str, name: str) -> FileResponse:
         raise HTTPException(status_code=400, detail="非法的会话 ID")
     if not re.match(r"^[A-Za-z0-9._-]{1,160}$", name):
         raise HTTPException(status_code=400, detail="非法的文件名")
-    base = (Path(tempfile.gettempdir()) / "media" / session_id).resolve()
+    from backend.core.config import get_settings
+
+    base = (get_settings().data_dir / "media-cache" / session_id).resolve()
     target = (base / name).resolve()
     if not str(target).startswith(str(base)) or not target.is_file():
         raise HTTPException(status_code=404, detail="资产不存在")

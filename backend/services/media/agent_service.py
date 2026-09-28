@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import datetime
 import re
-import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from backend.core.config import get_settings
 from backend.schemas.chat import ChatRequest
 from backend.schemas.media import MediaGenerateBody
 from backend.services.agent.worker.pending import (
@@ -204,10 +204,12 @@ async def _stream_storyboard(
         preferred_model_id=preferred_model_id,
         emit=_media_emit(queue),
     )
-    output_dir = str(Path(tempfile.gettempdir()) / "media" / (body.session_id or "default"))
+    # 产物持久化在数据目录 media-cache 下：重启不丢、历史会话可回放。
+    output_dir = str(get_settings().data_dir / "media-cache" / (body.session_id or "default"))
     initial: dict[str, object] = {
         "script": user_text,
         "title": "",
+        "characters": [],
         "storyboard": [],
         "shots": [],
         "confirmed": False,
@@ -233,12 +235,17 @@ async def _stream_storyboard(
             "kind": "comic_storyboard",
             "script": user_text,
             "storyboard": storyboard,
+            "characters": state.get("characters") or [],
             "outputDir": output_dir,
         },
     )
     preview = "\n".join(
-        f"{shot.get('index')}. {shot.get('title')}：{shot.get('image_prompt', '')[:60]}"
+        f"{shot.get('index')}. [{shot.get('shot_type', '中景')}] {shot.get('title')}（{shot.get('duration', 5)}s）"
+        f"{'：' + shot.get('dialogue', '')[:40] if shot.get('dialogue') else ''}"
         for shot in storyboard
+    )
+    character_names = "、".join(
+        str(item.get("name") or "") for item in (state.get("characters") or [])
     )
     yield encode_sse(
         {
@@ -248,7 +255,11 @@ async def _stream_storyboard(
                 "source": "media_storyboard",
                 "command": "confirm_storyboard",
                 "prompt": f"分镜表已生成（{len(storyboard)} 个镜头），确认后开始生成？\n{preview}",
-                "description": f"《{state.get('title') or '未命名漫剧'}》分镜确认",
+                "description": (
+                    f"《{state.get('title') or '未命名漫剧'}》分镜确认"
+                    + (f"；角色：{character_names}" if character_names else "")
+                    + "；确认后将以角色设定图保持跨镜一致性"
+                ),
                 "mode": "normal",
                 "suggestedMode": "user",
                 "kind": "confirm",
@@ -286,6 +297,7 @@ async def _resume_comic(
         return
 
     storyboard = action.get("storyboard") or []
+    characters = action.get("characters") or []
     output_dir = str(action.get("outputDir") or "")
     if output_dir:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -298,6 +310,7 @@ async def _resume_comic(
     initial: dict[str, object] = {
         "script": str(action.get("script") or ""),
         "title": "",
+        "characters": characters,
         "storyboard": storyboard,
         "shots": [],
         "confirmed": True,
@@ -329,12 +342,35 @@ async def _resume_comic(
                 "或设置环境变量 MEDIA_VIDEO_MODEL 换用其他视频模型。"
             )
     summary.append("✅ 全部通过" if passed else "⚠️ 存在失败分镜")
+    tts_count = int(report.get("ttsOk") or 0)
+    if tts_count:
+        summary.append(f"🎙️ 台词配音 {tts_count} 段")
+    if report.get("subtitleBurned"):
+        summary.append("💬 字幕已烧录进成片")
 
     attachments: list[dict[str, Any]] = []
+    for character in state.get("characters") or []:
+        sheet = character.get("image")
+        if isinstance(sheet, dict) and sheet.get("dataUrl"):
+            named = dict(sheet)
+            named["name"] = f"角色设定-{character.get('name', '角色')}.png"
+            named["downloadName"] = named["name"]
+            attachments.append(named)
     for shot in state.get("shots") or []:
         image = shot.get("image")
         if isinstance(image, dict) and image.get("dataUrl"):
             attachments.append(dict(image))
+    srt_path = Path(output_dir) / "episode.srt"
+    if srt_path.is_file():
+        attachments.append(
+            {
+                "name": "episode.srt",
+                "downloadName": "episode.srt",
+                "type": "application/x-subrip",
+                "assetKind": "file",
+                "url": f"/api/media/asset/{body.session_id}/episode.srt",
+            }
+        )
     if merged_path:
         attachments.append(
             {

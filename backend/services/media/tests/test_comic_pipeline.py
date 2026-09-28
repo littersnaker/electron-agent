@@ -20,11 +20,17 @@ async def test_extract_storyboard_parses_json() -> None:
     text = """```json
 {"title":"机械猫","shots":[{"title":"开场","image_prompt":"废墟少年与机械猫","video_prompt":"镜头缓缓推进","negative_prompt":"模糊"}]}
 ```"""
-    title, shots = await _extract_storyboard(text)
+    title, characters, shots = await _extract_storyboard(text)
     assert title == "机械猫"
     assert len(shots) == 1
     assert shots[0]["index"] == 1
     assert shots[0]["image_prompt"] == "废墟少年与机械猫"
+    # 新字段缺省回退：景别默认中景、时长钳制到 5 秒、台词/角色为空。
+    assert shots[0]["shot_type"] == "中景"
+    assert shots[0]["duration"] == 5
+    assert shots[0]["dialogue"] == ""
+    assert shots[0]["characters"] == []
+    assert characters == []
 
 
 @pytest.mark.asyncio
@@ -197,3 +203,84 @@ async def test_confirmed_pipeline_generates_images_videos_and_merges(monkeypatch
     assert state["report"]["shotTotal"] == 1
     assert (tmp_path / "episode.mp4").is_file()
     assert any("合并" in str(item.get("detail")) for item in emitted)
+
+
+@pytest.mark.asyncio
+async def test_extract_storyboard_rich_fields_and_clamps() -> None:
+    """新字段全量解析：角色卡、景别、台词、时长钳制到 2-10 秒。"""
+
+    text = """{"title":"试镜","characters":[
+        {"name":"小满","appearance":"短发黑发少女","outfit":"蓝色校服"},
+        {"bad": true},
+        {"name":""}],
+      "shots":[
+        {"title":"开场","shot_type":"远景","image_prompt":"校园全景","video_prompt":"镜头横移","dialogue":"小满:今天也是新学期","duration":99,"characters":["小满"]},
+        {"title":"特写","shot_type":"特写","image_prompt":"小满回头","video_prompt":"回眸","duration":1}]}"""
+    title, characters, shots = await _extract_storyboard(text)
+    assert title == "试镜"
+    assert [item["name"] for item in characters] == ["小满"]
+    assert characters[0]["appearance"] == "短发黑发少女"
+    assert shots[0]["duration"] == 10  # 钳制上限
+    assert shots[0]["dialogue"].startswith("小满:")
+    assert shots[0]["characters"] == ["小满"]
+    assert shots[1]["duration"] == 2  # 钳制下限
+    assert shots[1]["characters"] == []
+
+
+def test_build_srt_timing_and_skip_empty() -> None:
+    """SRT 按时长累计时间轴；无台词分镜只占位不出字幕。"""
+
+    from backend.services.media.audio import build_srt
+
+    shots = [
+        {"index": 1, "dialogue": "", "duration": 3},
+        {"index": 2, "dialogue": "小满:你好", "duration": 4},
+    ]
+    srt = build_srt(shots)
+    assert "00:00:03,000 --> 00:00:07,000" in srt
+    assert "小满:你好" in srt
+    assert "1\n" not in srt.split("00:00:03")[0].splitlines()[0]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_dialogue_degrades_on_error(monkeypatch, tmp_path) -> None:
+    """TTS 接口失败时返回 None（调用方降级为无声），不抛异常。"""
+
+    from backend.services.media.audio import synthesize_dialogue
+
+    class _FailingClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        async def __aenter__(self) -> "_FailingClient":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def post(self, *args: object, **kwargs: object):
+            import httpx as httpx_module
+
+            raise httpx_module.ConnectError("network down")
+
+    monkeypatch.setattr("backend.services.media.audio.httpx.AsyncClient", _FailingClient)
+    result = await synthesize_dialogue("小满:你好", "key", tmp_path / "a.wav")
+    assert result is None
+
+
+def test_normalize_characters_skips_invalid() -> None:
+    """角色卡规范化：跳过无名/非法项，上限 4 个。"""
+
+    from backend.services.media.comic_pipeline import _normalize_characters
+
+    raw = [
+        {"name": "甲", "appearance": "a", "outfit": "o"},
+        {"name": ""},
+        "not-a-dict",
+        {"name": "乙"},
+        {"name": "丙"},
+        {"name": "丁"},
+        {"name": "戊"},
+    ]
+    characters = _normalize_characters(raw)
+    assert [item["name"] for item in characters] == ["甲", "乙", "丙", "丁"]

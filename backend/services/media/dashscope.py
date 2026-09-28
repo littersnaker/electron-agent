@@ -308,7 +308,13 @@ async def generate_video(
         if body.mode == "video-edit":
             parameters = {"resolution": "720P", "watermark": False, "audio_setting": "auto"}
         else:
-            parameters = {"resolution": "720P", "ratio": "16:9", "duration": 5, "watermark": False}
+            # 时长/分辨率/比例可由请求体透传（漫剧按分镜时长），缺省回退原值。
+            parameters = {
+                "resolution": str(body.resolution or "720P"),
+                "ratio": str(body.ratio or "16:9"),
+                "duration": int(body.duration or 5),
+                "watermark": False,
+            }
             if "happyhorse" not in body.model_id:
                 parameters["prompt_extend"] = True
         if body.seed is not None:

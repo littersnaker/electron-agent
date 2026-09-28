@@ -34,3 +34,7 @@ class MediaGenerateBody(FlexibleModel):
     size: str | None = None
     seed: int | None = None
     negative_prompt: str | None = Field(default=None, alias="negativePrompt")
+    # 视频参数（dashscope video-synthesis 原生接受）；缺省回退 5s/720P/16:9。
+    duration: int | None = Field(default=None, ge=2, le=10)
+    resolution: str | None = Field(default=None, max_length=20)
+    ratio: str | None = Field(default=None, max_length=20)
