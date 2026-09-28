@@ -65,6 +65,7 @@ def _media_emit(queue: asyncio.Queue[str | None]):
     """把管线生命周期事件转成 SSE 帧放进队列。"""
 
     async def emit(_kind: str, payload: dict[str, object]) -> None:
+        """把生命周期事件编码为 SSE 帧放入响应队列。"""
         queue.put_nowait(
             encode_sse(
                 {
@@ -93,6 +94,7 @@ async def _drain_graph(
     """运行 LangGraph，边跑边吐 SSE 帧。"""
 
     async def runner() -> dict[str, object]:
+        """执行 LangGraph 工作流，结束时向队列投递结束哨兵。"""
         try:
             return await graph.ainvoke(initial)
         finally:

@@ -333,10 +333,12 @@ class AuditRecorder:
 
     @property
     def enabled(self) -> bool:
+        """返回审计开关是否开启（默认开启，可用环境变量关闭）。"""
         return _env_bool(ENV_ENABLED, True)
 
     @property
     def audit_dir(self) -> Path:
+        """返回审计日志目录；未配置时回退默认数据目录。"""
         raw = os.getenv(ENV_DIR, "").strip()
         if raw:
             return Path(raw).expanduser().resolve()
@@ -344,6 +346,7 @@ class AuditRecorder:
 
     @property
     def max_file_bytes(self) -> int:
+        """返回单份审计日志文件的大小上限（字节）。"""
         return max(1, int(_env_float(ENV_MAX_FILE_MB, DEFAULT_MAX_FILE_MB) * 1024 * 1024))
 
     def _target_path(self, directory: Path) -> Path:
@@ -491,6 +494,7 @@ class RequestAuditMiddleware:
             replay_body = await _collect_body(receive)
 
         async def audit_receive() -> dict[str, Any]:
+            """审计中间件的请求侧：记录方法、路径与请求体元数据。"""
             nonlocal replay_body
             # 请求体只重放一次；之后必须透传真实 receive，绝不能伪造
             # http.disconnect，否则 Starlette 的 StreamingResponse 会在流式
@@ -504,6 +508,7 @@ class RequestAuditMiddleware:
         status_code: int | None = None
 
         async def audit_send(message: dict[str, Any]) -> None:
+            """审计中间件的响应侧：记录状态码并落盘完整审计事件。"""
             nonlocal status_code
             if message.get("type") == "http.response.start":
                 status_code = int(message.get("status") or 500)

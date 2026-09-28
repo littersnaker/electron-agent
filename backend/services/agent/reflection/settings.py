@@ -26,6 +26,7 @@ class ReviewSettings:
     min_complexity: int = 5
 
     def to_json(self) -> dict[str, object]:
+        """转换为前端可读的复盘设置 JSON（模型名为裸格式）。"""
         model = resolve_review_model(self.model_id)
         display = model.model if model is not None else self.model_id
         return {

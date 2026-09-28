@@ -272,6 +272,7 @@ def build_research_graph(
     }
 
     async def intent_node(state: ResearchState) -> dict[str, Any]:
+        """研究工作流意图节点：调用文本模型判定商品类目与研究路径。"""
         if llm is not None:
             analysis = await try_complete_json(
                 llm,
@@ -300,6 +301,7 @@ def build_research_graph(
         return {"category": category}
 
     def after_intent(state: ResearchState) -> list[Send] | str:
+        """意图识别后的路由节点：按类目与凭证状态选择下一跳。"""
         token = state["credentials"].get("talordata")
         keywords = (state["category"].get("keywords") or [])[:2] or [state["query"]]
         sends: list[Send] = []
@@ -361,6 +363,7 @@ def build_research_graph(
         return sends
 
     async def search_source(payload: dict[str, Any]) -> dict[str, Any]:
+        """数据源搜索节点：携带 token 调用选定市场数据源并记录诊断。"""
         try:
             items, current_diagnostic = await request_search(
                 payload["token"],
@@ -436,6 +439,7 @@ def build_research_graph(
             }
 
     async def demo_fill(state: ResearchState) -> dict[str, Any]:
+        """演示数据填充节点：无有效观察时以示例数据继续流程。"""
         if state.get("observations"):
             return {}
         return {
@@ -451,6 +455,7 @@ def build_research_graph(
         }
 
     async def normalize_node(state: ResearchState) -> dict[str, Any]:
+        """观察归一化节点：把各数据源原始返回整理成统一结构。"""
         observations = state.get("observations") or []
         unique = {item["id"]: item for item in observations}
         observations = list(unique.values())[: body.sample_size]
@@ -458,6 +463,7 @@ def build_research_graph(
         return {"observations": observations, "products": products}
 
     async def analyze_node(state: ResearchState) -> dict[str, Any]:
+        """观察分析节点：从归一化数据中提炼商品信号与指标。"""
         observations = state.get("observations") or []
         products = state.get("products") or []
         is_demo = bool(state.get("is_demo") or not observations)
@@ -603,6 +609,7 @@ def build_research_graph(
         return {"review_analyses": list(analyses)}
 
     async def report_node(state: ResearchState) -> dict[str, Any]:
+        """研究报告节点：汇总分析结果生成结构化市场报告。"""
         observations = state.get("observations") or []
         is_demo = bool(state.get("is_demo") or not observations)
         source_status = "demo" if is_demo else "collected"
@@ -757,9 +764,11 @@ def build_listing_graph(
     }
 
     async def intent_node(state: ListingState) -> dict[str, Any]:
+        """Listing 意图节点：从用户 Brief 解析商品类目。"""
         return {"category": resolve_category(state["query"])}
 
     async def collect_node(state: ListingState) -> dict[str, Any]:
+        """Listing 收集节点：把 Brief 与类目整理成事实清单。"""
         facts = [
             {
                 "id": "brief",
@@ -784,9 +793,11 @@ def build_listing_graph(
         return {"mock_erp": mock_erp}
 
     async def keywords_node(state: ListingState) -> dict[str, Any]:
+        """Listing 关键词节点：由类目与 Brief 生成搜索关键词组。"""
         return {"keywords": _keywords(state["query"], state.get("category") or {})}
 
     async def draft_node(state: ListingState) -> dict[str, Any]:
+        """Listing 草稿节点：基于关键词与事实生成标题与五点描述草稿。"""
         keywords = state.get("keywords") or []
         feedback = state.get("draft_feedback") or ""
         if llm is not None:
@@ -811,6 +822,7 @@ def build_listing_graph(
         return {"draft": _draft(state["query"], keywords), "draft_source": "template"}
 
     async def validate_node(state: ListingState) -> dict[str, Any]:
+        """Listing 校验节点：对照事实清单检查草稿合规性。"""
         keywords = state.get("keywords") or []
         return {"validation": _validate(state.get("draft") or {}, keywords)}
 
@@ -830,6 +842,7 @@ def build_listing_graph(
         }
 
     def after_validate(state: ListingState) -> str:
+        """校验后路由节点：通过则生成报告，否则回到草稿重写。"""
         validation = state.get("validation") or {}
         issues = validation.get("issues") or []
         has_error = any(item.get("severity") == "error" for item in issues)
@@ -838,6 +851,7 @@ def build_listing_graph(
         return "report"
 
     async def report_node(state: ListingState) -> dict[str, Any]:
+        """Listing 报告节点：汇总草稿与校验结果生成最终 Listing。"""
         category = state.get("category") or {}
         draft_source = state.get("draft_source") or "template"
         draft_id = ""

@@ -221,6 +221,7 @@ async def execute_factory_audit_work(
     )
 
     async def run_validate() -> dict[str, Any]:
+        """执行 Software Factory 校验工具并返回结构化结果。"""
         result = await execute_code_tool(
             "software_factory.validate",
             root=root,

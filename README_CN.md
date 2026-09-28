@@ -113,6 +113,9 @@ pnpm typecheck
 # Electron 类型检查
 pnpm electron:typecheck
 
+# 前端 Vitest 单测
+pnpm test:ui
+
 # Vite 生产构建
 pnpm build
 ```
@@ -199,6 +202,13 @@ pnpm electron:make:linux
 - MCP Server/工具目录发现；
 - 外部 Skill 发现、GitHub 批量安装与启用配置；
 - Electron 目录选择、窗口控制和 PDF 导出；
+- 视觉 Review：内置浏览器按视口自动滚动分帧截图，多帧交给视觉模型（如 DeepSeek
+  deepseek-v4-flash-vision-exp）审查，结论以卡片留档在会话中；隐私双开关 + 服务端硬闸；
+- 全站巡检：自动发现同源页面逐页截图 Review（Code Agent 前端改动后自动触发）；
+- 浏览器自动化：Code Agent 可导航/抽取/点击/输入/截图/视觉观察（browser.look），
+  任务内首次使用弹审批门；仅回环控制通道 + 独立沙箱会话；
+- 知识库多格式上传（md/markdown/txt/pdf/docx/xlsx/csv），上传异步索引、
+  Jina Key 持久化 + 30 秒 watcher 自动补索引 pending 文档；
 - SQLite 与全盘扫描移出事件循环：`asyncio.to_thread` 承载 DB 操作与文件树遍历，SSE 期间不再被阻塞。
 
 ## 七、需要你知道的迁移边界
@@ -211,8 +221,8 @@ pnpm electron:make:linux
 
 ## 八、代码规范
 
-- Python 业务文件全部控制在 500 行以内；
-- 每个 Python 函数和方法都有中文 docstring；
+- Python 业务文件控制在 650 行以内（测试豁免；超长编排核心在规范脚本白名单中跟踪拆分）；
+- 每个公开 Python 函数和方法都有中文 docstring（私有辅助与接口桩豁免）；
 - 新增 Electron/Vite 工具函数都有中文 JSDoc；
 - API、业务、数据访问分层；
 - 用户密钥从请求头、环境变量或本地设置读取；百炼还可使用构建时嵌入 Python 的共享兜底；

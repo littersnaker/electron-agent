@@ -21,6 +21,7 @@ def register_adapter(name: str) -> Callable[[T], T]:
     """返回一个类装饰器：把适配器类按名称登记到全局注册表。"""
 
     def decorator(cls: T) -> T:
+        """适配器注册装饰器：把适配器类按名字登记进全局表。"""
         _ADAPTERS[name] = cast(type[BaseAgent], cls)
         return cls
 

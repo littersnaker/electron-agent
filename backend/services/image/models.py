@@ -43,6 +43,7 @@ class ImageRecognitionFailure:
     kind: str = "quality"
 
     def to_json(self) -> dict[str, str]:
+        """转换为前端可读的单条失败记录 JSON。"""
         return {
             "imageName": self.image_name,
             "reason": self.reason,
@@ -132,6 +133,7 @@ class RecognitionOutcome:
     excel_download_url: str = ""
 
     def to_json(self) -> dict[str, object]:
+        """转换为前端可读的识别结果 JSON（货架矩阵 + 失败清单）。"""
         return {
             "layers": build_layers(self.rows),
             "failures": [item.to_json() for item in self.failures],

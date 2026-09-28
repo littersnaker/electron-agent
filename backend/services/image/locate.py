@@ -67,10 +67,12 @@ class TagBox:
 
     @property
     def cx(self) -> float:
+        """包围盒中心 X 坐标。"""
         return self.x + self.w / 2
 
     @property
     def cy(self) -> float:
+        """包围盒中心 Y 坐标。"""
         return self.y + self.h / 2
 
 

@@ -111,6 +111,7 @@ def build_comic_pipeline(
     semaphore = asyncio.Semaphore(MAX_PARALLEL_MEDIA)
 
     async def lifecycle(detail: str, status: str = "running") -> None:
+        """发送媒体 Agent 生命周期事件（角色、状态与详情）。"""
         await emit(
             "lifecycle",
             {
@@ -288,6 +289,7 @@ def build_comic_pipeline(
         await lifecycle(f"正在合并 {len(videos)} 个分镜视频…")
 
         def progress(current: int, total: int) -> None:
+            """异步推送分镜合并进度事件（当前/总数）。"""
             asyncio.create_task(lifecycle(f"合并进度 {current}/{total}"))
 
         try:

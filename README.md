@@ -118,6 +118,9 @@ pnpm typecheck
 # Electron type check
 pnpm electron:typecheck
 
+# Frontend Vitest unit tests
+pnpm test:ui
+
 # Vite production build
 pnpm build
 ```
@@ -204,6 +207,16 @@ The equivalent of TypeScript interfaces, but validated at runtime against JSON s
 - MCP Server / tool catalog discovery;
 - External Skill discovery, GitHub bulk install and enablement config;
 - Electron directory picker, window controls and PDF export;
+- Visual review: the built-in browser scrolls viewport-by-viewport capturing frames, which a
+  vision model (e.g. DeepSeek deepseek-v4-flash-vision-exp) reviews; verdicts persist as chat
+  cards. Privacy toggles plus a server-side kill switch;
+- Site-wide audit: same-origin pages are discovered automatically and reviewed page by page
+  (auto-triggered when the Code Agent changes frontend files);
+- Browser automation: the Code Agent can navigate / extract / click / fill / screenshot /
+  visually observe (browser.look) with a per-task approval gate; loopback-only control channel
+  and an isolated sandboxed session;
+- Knowledge base uploads in many formats (md/markdown/txt/pdf/docx/xlsx/csv), async indexing,
+  persisted Jina key and a 30s watcher that retries pending documents;
 - SQLite and full-disk scans off the event loop: DB operations and file-tree traversal run via `asyncio.to_thread`, so SSE streaming is no longer blocked.
 
 ## 7. Migration boundaries you should know
@@ -216,8 +229,9 @@ The equivalent of TypeScript interfaces, but validated at runtime against JSON s
 
 ## 8. Code conventions
 
-- Python business files stay under 500 lines;
-- Every Python function/method has a Chinese docstring;
+- Python business files stay under 650 lines (tests exempt; oversized orchestration cores are
+  tracked in the spec script's allowlist pending future splits);
+- Every public Python function/method has a Chinese docstring (private helpers and stubs exempt);
 - Every new Electron/Vite utility function has a Chinese JSDoc;
 - API / business / data-access layering;
 - User secrets are read from request headers, environment variables or local settings; Bailian may also use a shared fallback embedded at build time;

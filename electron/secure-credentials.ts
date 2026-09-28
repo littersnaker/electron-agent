@@ -102,7 +102,9 @@ export function readSecureCredentials(): CredentialStore {
         ? safeStorage.decryptString(encrypted)
         : encrypted.toString("utf8");
     return normalizeCredentials(JSON.parse(plainText));
-  } catch {
+  } catch (error) {
+    // 读取失败会让所有依赖安全凭证的功能静默失效（如 Jina Key），必须留痕。
+    console.warn("[Electron] 读取安全凭证失败，已按空凭证处理", error);
     return {};
   }
 }

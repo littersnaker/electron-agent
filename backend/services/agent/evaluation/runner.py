@@ -130,6 +130,7 @@ def default_case_runner(
     from backend.services.runtime.contracts import RuntimeRequest
 
     async def run(input_text: str) -> dict[str, Any]:
+        """执行单条评测用例：组装请求并流式收集事件与指标。"""
         payload = ChatRequest(
             messages=[FrontendMessage(role="user", content=input_text)],
             session_id=session_id,
