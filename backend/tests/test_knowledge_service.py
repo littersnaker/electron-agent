@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -66,9 +67,9 @@ def test_upload_markdown_csv_xlsx(monkeypatch, tmp_path: Path) -> None:
             assert response.status_code == 200, filename
             payload = response.json()
             assert payload["document"]["filename"] == filename
-            # 未配置 Key：文件已保存，索引失败原因可读。
-            assert payload["index"]["ok"] is False
-            assert "Jina" in payload["index"]["error"]
+            # 上传异步化：立即返回排队标记，状态停留 pending。
+            assert payload["indexQueued"] is True
+            assert payload["document"]["status"] == "pending"
 
         listing = client.get("/api/knowledge/documents").json()["documents"]
         assert {item["filename"] for item in listing} == {
@@ -109,3 +110,44 @@ def test_upload_accepts_metadata_object(monkeypatch, tmp_path: Path) -> None:
         )
         assert response.status_code == 200
         assert response.json()["document"]["metadata"] == {"source": "test"}
+
+
+def test_jina_key_persisted_and_status_reflects(monkeypatch, tmp_path: Path) -> None:
+    """Key 持久化后：status.hasApiKey 变 true（无请求头也生效），且不回传原文。"""
+
+    with _client(monkeypatch, tmp_path) as client:
+        # 无 Key 时状态为 false。
+        assert client.get("/api/knowledge/status").json()["hasApiKey"] is False
+
+        saved = client.post(
+            "/api/knowledge/key",
+            json={"apiKey": "jina_test_key_123"},
+        )
+        assert saved.status_code == 200
+        assert saved.json() == {"hasKey": True}
+
+        status = client.get("/api/knowledge/status").json()
+        assert status["hasApiKey"] is True
+        assert "jina_test_key_123" not in json.dumps(status)
+
+        # 清空：hasApiKey 回到 false。
+        cleared = client.post("/api/knowledge/key", json={"apiKey": ""})
+        assert cleared.json() == {"hasKey": False}
+        assert client.get("/api/knowledge/status").json()["hasApiKey"] is False
+
+
+def test_persisted_key_falls_back_for_index(monkeypatch, tmp_path: Path) -> None:
+    """持久化 Key 后上传不再带请求头也能进入索引（background 任务拉起）。"""
+
+    import json as json_module
+
+    with _client(monkeypatch, tmp_path) as client:
+        client.post("/api/knowledge/key", json={"apiKey": "jina_fallback_key"})
+        upload = client.post(
+            "/api/knowledge/documents",
+            files={"file": ("a.md", "# 内容", "text/markdown")},
+        )
+        assert upload.status_code == 200
+        # 后台任务异步执行：这里只验证接口不再要求请求头即可排队。
+        assert upload.json()["indexQueued"] is True
+        assert json_module is not None

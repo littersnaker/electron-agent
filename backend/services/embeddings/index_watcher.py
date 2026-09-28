@@ -12,6 +12,7 @@ import logging
 import os
 
 from backend.services.embeddings.knowledge import index_knowledge_base
+from backend.services.embeddings.knowledge_settings import read_jina_api_key
 from backend.services.workspace.database import open_database
 from backend.services.workspace.indexer import index_project
 
@@ -76,7 +77,9 @@ class IndexWatcher:
                 await index_project(project_id)
             except Exception:  # noqa: BLE001 - 单项目失败不影响其他项目
                 LOGGER.exception("项目 %s 增量索引失败", project_id)
-        await index_knowledge_base()
+        # 带持久化 Key 补索引：上传时索引失败（如当时无 Key）的 pending 文档
+        # 在用户保存 Key 之后由这里自动重试，不再卡死。
+        await index_knowledge_base(await read_jina_api_key())
 
 
 WATCHER = IndexWatcher()

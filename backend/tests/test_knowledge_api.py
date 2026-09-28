@@ -41,8 +41,9 @@ def test_upload_list_delete_flow(monkeypatch, tmp_path: Path) -> None:
         assert upload.status_code == 200
         document = upload.json()["document"]
         assert document["filename"] == "guide.md"
-        # 未配置 Jina Key 时索引失败但文件已登记。
-        assert upload.json()["index"]["ok"] is False
+        # 上传已异步化：立即返回，后台索引，状态停留 pending。
+        assert upload.json()["indexQueued"] is True
+        assert document["status"] == "pending"
 
         listing = client.get("/api/knowledge/documents")
         assert listing.status_code == 200

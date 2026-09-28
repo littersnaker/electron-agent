@@ -411,7 +411,9 @@ async def get_knowledge_status(api_key: str = "") -> dict[str, object]:
     settings = get_settings()
     usage = await get_usage_totals()
     documents = await list_knowledge_documents()
-    has_key = bool(api_key.strip() or settings.jina_api_key)
+    from backend.services.embeddings.knowledge_settings import read_jina_api_key
+
+    has_key = bool(api_key.strip() or settings.jina_api_key or (await read_jina_api_key()))
     return {
         "enabled": settings.jina_embedding_enabled,
         "hasApiKey": has_key,

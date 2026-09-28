@@ -140,6 +140,16 @@ export default function KnowledgeBasePage({
       }
       window.localStorage.setItem(JINA_STORAGE_KEY, value);
       jinaKeyRef.current = value;
+      // 同步持久化到后端：30 秒 watcher 与上传后的后台索引靠它兜底补索引。
+      try {
+        await apiFetch("/api/knowledge/key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: value }),
+        });
+      } catch {
+        // 持久化失败不阻塞保存；请求头路径仍然可用。
+      }
       showToast("success", "Jina API Key 已保存");
       await loadData();
     } catch (caught) {
@@ -176,11 +186,8 @@ export default function KnowledgeBasePage({
         // 后端统一返回 {"error": ...}（main.py 异常处理器），不是 detail。
         throw new Error(payload.error || "上传失败");
       }
-      if (payload.index?.ok === false) {
-        showToast("error", `文件已保存，但索引失败：${payload.index.error || ""}`);
-      } else {
-        showToast("success", `已上传并索引「${payload.document?.filename ?? ""}」`);
-      }
+      // 上传接口已异步化：立即返回，后台索引，列表轮询 status 直到 ready/error。
+      showToast("success", `已上传「${payload.document?.filename ?? ""}」，后台索引中…`);
       if (fileInputRef.current) fileInputRef.current.value = "";
       setSelectedFileName("");
       await loadData();
@@ -234,6 +241,25 @@ export default function KnowledgeBasePage({
       setReindexing(false);
     }
   };
+
+  // 上传异步化后的列表轮询：还有 pending 文档就每 2.5s 刷新，直到全部落定；
+  // 连续 60 轮（约 2.5 分钟）仍 pending 则停止，避免无限轮询。
+  const pollRoundsRef = useRef(0);
+  const documentsLengthRef = useRef(0);
+  useEffect(() => {
+    if (documents.length !== documentsLengthRef.current) {
+      documentsLengthRef.current = documents.length;
+      pollRoundsRef.current = 0;
+    }
+    if (hidden) return;
+    if (!documents.some((doc) => doc.status === "pending")) return;
+    if (pollRoundsRef.current >= 60) return;
+    pollRoundsRef.current += 1;
+    const timer = window.setTimeout(() => {
+      if (!uploading) void loadData();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [documents, hidden, uploading, loadData]);
 
   const remainingTokens = useMemo(() => {
     const used = status?.usage?.totalTokens ?? 0;

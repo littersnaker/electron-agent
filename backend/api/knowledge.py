@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
+from pydantic import Field
 
 from backend.core.background import spawn
+from backend.schemas.common import FlexibleModel
 from backend.schemas.knowledge import (
     KnowledgeEvalRequest,
     KnowledgeSearchRequest,
@@ -19,6 +21,10 @@ from backend.services.embeddings.knowledge import (
     index_knowledge_document,
     list_knowledge_documents,
 )
+from backend.services.embeddings.knowledge_settings import (
+    read_jina_api_key,
+    write_jina_api_key,
+)
 from backend.services.embeddings.retrieval import (
     evaluate_knowledge_recall,
     search_knowledge,
@@ -27,10 +33,19 @@ from backend.services.embeddings.retrieval import (
 router = APIRouter(tags=["knowledge"])
 
 
-def _jina_api_key(request: Request) -> str:
-    """读取请求头传入的 Jina API Key。"""
+class KnowledgeKeyBody(FlexibleModel):
+    """Jina Key 持久化请求体；空串表示清除。"""
 
-    return request.headers.get("x-jina-api-key", "").strip()
+    api_key: str = Field(default="", max_length=400, alias="apiKey")
+
+
+async def _jina_api_key(request: Request) -> str:
+    """Jina Key 解析链：请求头 → 持久化存储（watcher/后台索引靠它兜底）。"""
+
+    header_key = request.headers.get("x-jina-api-key", "").strip()
+    if header_key:
+        return header_key
+    return await read_jina_api_key()
 
 
 @router.post("/api/knowledge/documents")
@@ -56,8 +71,22 @@ async def post_knowledge_document(
         )
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = await index_knowledge_document(str(document["id"]), api_key=_jina_api_key(request))
-    return {"document": document, "index": result}
+
+    async def _index_document() -> None:
+        """后台索引：失败只更新文档状态，不抛出（状态由列表接口可见）。"""
+
+        try:
+            await index_knowledge_document(
+                str(document["id"]), api_key=await _jina_api_key(request)
+            )
+        except Exception:  # noqa: BLE001 - 索引失败不影响上传成功，watcher 会兜底重试
+            import logging
+
+            logging.getLogger(__name__).exception("知识库文档后台索引失败：%s", document["id"])
+
+    # 异步索引：上传立即返回，前端轮询列表看 status (pending → ready/error)。
+    spawn(_index_document())
+    return {"document": document, "indexQueued": True}
 
 
 @router.post("/api/knowledge/search")
@@ -68,7 +97,7 @@ async def post_knowledge_search(
 
     result = await search_knowledge(
         body.query,
-        api_key=_jina_api_key(request),
+        api_key=await _jina_api_key(request),
         recall_k=body.recall_k,
         top_k=body.top_k,
         metadata_filter=body.metadata_filter,
@@ -106,15 +135,23 @@ async def delete_knowledge_document_endpoint(document_id: str) -> dict[str, obje
 async def post_knowledge_reindex(request: Request) -> dict[str, object]:
     """后台重建整个知识库索引（外部文档 + 复盘记忆）。"""
 
-    spawn(index_knowledge_base(_jina_api_key(request)))
+    spawn(index_knowledge_base(await _jina_api_key(request)))
     return {"ok": True, "started": True}
+
+
+@router.post("/api/knowledge/key")
+async def post_knowledge_key(body: KnowledgeKeyBody) -> dict[str, object]:
+    """持久化（或清空）Jina API Key，供 watcher 与后台索引兜底使用。"""
+
+    settings = await write_jina_api_key(body.api_key)
+    return settings.to_json()
 
 
 @router.get("/api/knowledge/status")
 async def get_knowledge_status_endpoint(request: Request) -> dict[str, object]:
     """返回知识库与 Jina 配置状态（不含密钥）。"""
 
-    return await get_knowledge_status(_jina_api_key(request))
+    return await get_knowledge_status(await _jina_api_key(request))
 
 
 @router.post("/api/knowledge/evaluate")
@@ -132,7 +169,7 @@ async def post_knowledge_evaluate(
         raise HTTPException(status_code=400, detail="请至少提供一条“问题 | 期望文档”测试用例。")
     return await evaluate_knowledge_recall(
         cases,
-        api_key=_jina_api_key(request),
+        api_key=await _jina_api_key(request),
         recall_k=body.recall_k,
         top_k=body.top_k,
     )
