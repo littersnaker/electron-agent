@@ -1,6 +1,5 @@
 // 模块说明：负责 page 页面或应用入口逻辑。
 /* eslint-disable react-hooks/immutability */
-/* eslint-disable max-lines */ // 应用根组件聚合所有 Agent 接线，文件天然较长。
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";

@@ -81,6 +81,10 @@ def test_custom_model_crud_and_router(tmp_path: Path, monkeypatch) -> None:
 def test_media_base_url_accepts_chat_or_full_endpoint(monkeypatch) -> None:
     """验证设置页聊天 Base URL 同时能驱动图片和视频原生接口。"""
 
+    # 隔离更高优先级的媒体环境变量（.env.local 可能定义），
+    # 否则本用例设置的 DASHSCOPE_BASE_URL 永远不会生效。
+    monkeypatch.delenv("DASHSCOPE_MEDIA_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_BASE", raising=False)
     monkeypatch.setenv(
         "DASHSCOPE_BASE_URL",
         "https://workspace.example.test/compatible-mode/v1",
