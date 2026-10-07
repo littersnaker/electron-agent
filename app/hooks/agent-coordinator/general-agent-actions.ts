@@ -36,6 +36,7 @@ const LIFECYCLE_ROLE_TO_AGENT: Record<string, AgentKind> = {
   memory_consolidation_agent: "orchestrator",
   verification_agent: "terminal",
   final_report_agent: "orchestrator",
+  media_agent: "media",
 };
 
 function lifecycleToAgentStatus(status: string): { status: AgentStatus; progress: number } {

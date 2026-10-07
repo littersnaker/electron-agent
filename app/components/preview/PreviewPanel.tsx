@@ -222,10 +222,25 @@ export default function PreviewPanel({
         </div>
       ) : (
         <div
-          className="mx-4 mb-2 flex h-[120px] shrink-0 items-center justify-center rounded-xl border border-dashed text-[11px]"
+          className="mx-4 mb-2 flex h-[120px] shrink-0 items-center justify-center gap-2 rounded-xl border border-dashed text-[11px]"
           style={{ borderColor: "var(--border)", color: "var(--text-tertiary)" }}
         >
-          {rootPath ? "点击「截图 Review」启动预览并审查页面" : "先打开一个项目后可用"}
+          {review.status === "previewStarting" ? (
+            <>
+              <span
+                className="h-3.5 w-3.5 animate-spin rounded-full border-2"
+                style={{
+                  borderColor: "rgba(10,132,255,0.25)",
+                  borderTopColor: "var(--accent-blue)",
+                }}
+              />
+              正在启动预览…
+            </>
+          ) : rootPath ? (
+            "点击「截图 Review」启动预览并审查页面"
+          ) : (
+            "先打开一个项目后可用"
+          )}
         </div>
       )}
 
@@ -233,7 +248,7 @@ export default function PreviewPanel({
         <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pb-2">
           {review.frames.map((frame, index) => (
             <button
-              key={frame.offsetTop}
+              key={`${frame.offsetTop}-${index}`}
               type="button"
               onClick={() => setZoomed(frame)}
               className="relative shrink-0 cursor-pointer overflow-hidden rounded-lg border transition-transform hover:scale-[1.03]"
@@ -256,28 +271,27 @@ export default function PreviewPanel({
         </div>
       ) : null}
 
-      {review.reviewText ? (
+      {(review.reviewText || review.auditResults.length > 0) && (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          <div
-            className="rounded-xl border px-3 py-2.5 text-[12px] leading-relaxed whitespace-pre-wrap"
-            style={{
-              background: "var(--glass)",
-              borderColor: "var(--border)",
-              color: "var(--text-secondary)",
-            }}
-          >
-            {review.reviewText}
-          </div>
-          {review.reviewModel ? (
-            <p className="mt-1.5 text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-              审查模型：{review.reviewModel}
-            </p>
+          {review.reviewText ? (
+            <>
+              <div
+                className="rounded-xl border px-3 py-2.5 text-[12px] leading-relaxed whitespace-pre-wrap"
+                style={{
+                  background: "var(--glass)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {review.reviewText}
+              </div>
+              {review.reviewModel ? (
+                <p className="mt-1.5 text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+                  审查模型：{review.reviewModel}
+                </p>
+              ) : null}
+            </>
           ) : null}
-        </div>
-      ) : null}
-
-      {review.auditResults.length > 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <div
             className="mb-1.5 flex items-center justify-between text-[10px]"
             style={{ color: "var(--text-tertiary)" }}
@@ -334,13 +348,19 @@ export default function PreviewPanel({
             ))}
           </div>
         </div>
-      ) : null}
+      )}
 
       {zoomed ? (
         <div
-          role="presentation"
+          role="dialog"
+          aria-modal="true"
+          aria-label="截图放大查看"
           onClick={() => setZoomed(null)}
-          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center p-8"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setZoomed(null);
+          }}
+          tabIndex={-1}
+          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center p-8 outline-none"
           style={{ background: "rgba(0,0,0,0.72)" }}
         >
           <img

@@ -10,7 +10,11 @@ export interface WorkspaceResponse {
 }
 
 export type InteractiveRequestSource =
-  "terminal" | "file_create_confirmation" | "risk_approval" | "mcp_tool_approval";
+  | "terminal"
+  | "file_create_confirmation"
+  | "risk_approval"
+  | "mcp_tool_approval"
+  | "media_storyboard";
 
 export interface InteractiveRequest {
   id: string;
@@ -29,7 +33,8 @@ export interface InteractiveRequest {
   description?: string;
   filePath?: string;
   originalUserRequest?: string;
-  approvalKind?: "workspace_write" | "mcp_tool";
+  approvalKind?:
+    "workspace_write" | "mcp_tool" | "command_run" | "browser_run" | "comic_storyboard";
   riskLevel?: "medium" | "high";
   toolName?: string;
   toolArguments?: Record<string, unknown>;

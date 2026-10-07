@@ -12,6 +12,12 @@ interface KnowledgeDocumentListProps {
   deletingId: string | null;
   /** 点击删除的回调 */
   onDelete: (documentId: string) => void;
+  /** 列表加载中（首次请求未返回） */
+  loading?: boolean;
+  /** 列表加载失败信息（非空时展示错误横幅 + 重试） */
+  error?: string;
+  /** 点击重试的回调 */
+  onRetry?: () => void;
 }
 
 /** 文档列表主组件。 */
@@ -19,7 +25,52 @@ export function KnowledgeDocumentList({
   documents,
   deletingId,
   onDelete,
+  loading = false,
+  error = "",
+  onRetry,
 }: KnowledgeDocumentListProps) {
+  if (error) {
+    return (
+      <div
+        className="flex h-36 flex-col items-center justify-center gap-2 rounded-[18px] border"
+        style={{
+          borderColor: "rgba(255,69,58,0.3)",
+          background: "rgba(255,69,58,0.06)",
+          color: "var(--text-tertiary)",
+        }}
+        role="alert"
+      >
+        <p className="text-[12px]" style={{ color: "var(--accent-red, #ff6961)" }}>
+          文档列表加载失败：{error}
+        </p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="h-8 rounded-[9px] border px-3 text-[11px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
+            style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
+          >
+            重试
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (documents.length === 0 && loading) {
+    return (
+      <div className="space-y-2.5" aria-busy="true">
+        {[0, 1, 2].map((skeleton) => (
+          <div
+            key={skeleton}
+            className="flex h-[68px] animate-pulse items-center gap-3 rounded-[16px] border px-4"
+            style={{ background: "var(--glass-soft)", borderColor: "var(--border)" }}
+          />
+        ))}
+      </div>
+    );
+  }
+
   if (documents.length === 0) {
     return (
       <div
@@ -73,7 +124,9 @@ export function KnowledgeDocumentList({
             <div className="flex items-center gap-2">
               <span className="truncate text-[12px] font-medium">{document.filename}</span>
               <span
-                className="shrink-0 rounded-full px-2 py-0.5 text-[10px]"
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                  document.status === "pending" ? "animate-pulse" : ""
+                }`}
                 style={{
                   background:
                     document.status === "ready"

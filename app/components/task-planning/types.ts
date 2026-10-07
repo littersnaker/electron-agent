@@ -30,6 +30,8 @@ export interface PlanningStageDefinition {
   activityStageIds?: string[];
   /** 后端真实 lifecycle role；媒体阶段可留空并继续走旧的前端派生逻辑。 */
   lifecycleRoles?: string[];
+  /** 同一 role 驱动多个阶段时，用 lifecycle detail 关键词区分当前阶段。 */
+  detailKeywords?: string[];
 }
 
 export interface PlanningStageView extends PlanningStageDefinition {

@@ -51,7 +51,7 @@ export default function AgentTaskPanel({
   visionModels,
 }: AgentTaskPanelProps) {
   return (
-    <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-4 overflow-y-auto xl:flex">
+    <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-4 overflow-y-auto lg:flex">
       <TaskPlanningPanel
         agents={agents}
         toolActivities={toolActivities}

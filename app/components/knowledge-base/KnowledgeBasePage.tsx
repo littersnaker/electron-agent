@@ -51,8 +51,12 @@ export default function KnowledgeBasePage({
   const [reindexing, setReindexing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState("");
+  const [pollCapped, setPollCapped] = useState(false);
   const [showEval, setShowEval] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 与 jinaKey state 同步的镜像：loadData 在 loadKey 之后立即执行，
   // 直接读 state 会拿到旧闭包值，用 ref 保证请求头带的是最新 Key。
   const jinaKeyRef = useRef("");
@@ -60,7 +64,9 @@ export default function KnowledgeBasePage({
   /** 展示一次性提示，4 秒后自动消失。 */
   const showToast = useCallback((kind: ToastData["kind"], message: string) => {
     setToast({ kind, message });
-    window.setTimeout(() => setToast(null), 4000);
+    // 错误提示驻留更久且可手动关闭；先清掉上一条计时器，避免连发时互相砍。
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), kind === "error" ? 8000 : 4000);
   }, []);
 
   /** 从 Electron 安全凭证读取 Jina Key，纯浏览器模式回退 localStorage。 */
@@ -100,9 +106,14 @@ export default function KnowledgeBasePage({
           documents?: KnowledgeDocument[];
         };
         setDocuments(payload.documents ?? []);
+        setListError("");
+      } else {
+        setListError(`HTTP ${docsResponse.status}`);
       }
-    } catch {
-      // 状态加载失败仅静默保留旧数据，操作按钮会单独反馈错误。
+    } catch (caught) {
+      setListError(caught instanceof Error ? caught.message : "网络异常");
+    } finally {
+      setListLoading(false);
     }
   }, []);
 
@@ -250,10 +261,14 @@ export default function KnowledgeBasePage({
     if (documents.length !== documentsLengthRef.current) {
       documentsLengthRef.current = documents.length;
       pollRoundsRef.current = 0;
+      setPollCapped(false);
     }
     if (hidden) return;
     if (!documents.some((doc) => doc.status === "pending")) return;
-    if (pollRoundsRef.current >= 60) return;
+    if (pollRoundsRef.current >= 60) {
+      setPollCapped(true);
+      return;
+    }
     pollRoundsRef.current += 1;
     const timer = window.setTimeout(() => {
       if (!uploading) void loadData();
@@ -451,7 +466,7 @@ export default function KnowledgeBasePage({
                     strokeLinecap="round"
                   />
                 </svg>
-                正在上传并索引：文档切块与向量化中，请稍候…
+                已提交上传，索引在后台进行中（见列表状态）…
               </div>
             )}
 
@@ -486,11 +501,41 @@ export default function KnowledgeBasePage({
               </div>
             </div>
 
+            {pollCapped && documents.some((doc) => doc.status === "pending") && (
+              <div
+                className="flex items-center justify-between gap-3 rounded-[12px] border px-3 py-2 text-[11px]"
+                style={{
+                  background: "rgba(255,196,0,0.08)",
+                  borderColor: "rgba(255,196,0,0.25)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <span>部分文档索引用时较长，已停止自动刷新。</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pollRoundsRef.current = 0;
+                    setPollCapped(false);
+                    void loadData();
+                  }}
+                  className="h-7 shrink-0 rounded-[8px] border px-2.5 text-[10px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
+                  style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
+                >
+                  继续刷新
+                </button>
+              </div>
+            )}
             <div className="space-y-2.5 pr-1 lg:max-h-[calc(100vh-330px)] lg:overflow-y-auto">
               <KnowledgeDocumentList
                 documents={documents}
                 deletingId={deletingId}
                 onDelete={(documentId) => void deleteDocument(documentId)}
+                loading={listLoading}
+                error={listError}
+                onRetry={() => {
+                  setListLoading(true);
+                  void loadData();
+                }}
               />
             </div>
           </section>
@@ -498,8 +543,10 @@ export default function KnowledgeBasePage({
       </div>
 
       {toast && (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+        <div className="pointer-events-auto fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3">
           <div
+            role="status"
+            aria-live="polite"
             className="rounded-[14px] border px-4 py-2.5 text-[12px] shadow-2xl"
             style={{
               background: "var(--glass)",
@@ -511,6 +558,19 @@ export default function KnowledgeBasePage({
           >
             {toast.message}
           </div>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="关闭提示"
+            className="flex h-8 w-8 items-center justify-center rounded-full border text-[11px]"
+            style={{
+              background: "var(--glass)",
+              borderColor: "var(--border)",
+              color: "var(--text-tertiary)",
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
       <KnowledgeEvalModal open={showEval} jinaKey={jinaKey} onClose={() => setShowEval(false)} />

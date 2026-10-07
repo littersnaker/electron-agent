@@ -90,8 +90,13 @@ async def _drain_graph(
     graph,
     initial: dict[str, object],
     queue: asyncio.Queue[str | None],
-) -> tuple[dict[str, object], list[str]]:
-    """运行 LangGraph，边跑边吐 SSE 帧。"""
+    state_out: list[dict[str, object]],
+) -> AsyncIterator[str]:
+    """运行 LangGraph 并实时逐帧转发 SSE 帧，结束时把最终状态写入 state_out。
+
+    生命周期事件在生产端（emit 回调）是实时的，转发必须同样实时——
+    漫剧生成可达数分钟，攒到最后一次性吐出会让前端全程无进度可看。
+    """
 
     async def runner() -> dict[str, object]:
         """执行 LangGraph 工作流，结束时向队列投递结束哨兵。"""
@@ -101,17 +106,16 @@ async def _drain_graph(
             queue.put_nowait(None)
 
     task = asyncio.create_task(runner())
-    frames: list[str] = []
     while True:
         while not queue.empty():
             frame = queue.get_nowait()
             if frame is None:
-                state = await task
-                return state, frames
-            frames.append(frame)
+                state_out.append(await task)
+                return
+            yield frame
         if task.done():
-            state = await task
-            return state, frames
+            state_out.append(await task)
+            return
         await asyncio.sleep(0.05)
 
 
@@ -218,9 +222,10 @@ async def _stream_storyboard(
         "report": {},
         "errors": [],
     }
-    state, frames = await _drain_graph(graph, initial, queue)
-    for frame in frames:
+    state_holder: list[dict[str, object]] = []
+    async for frame in _drain_graph(graph, initial, queue, state_holder):
         yield frame
+    state = state_holder[0] if state_holder else {}
     storyboard = state.get("storyboard") or []
     if not storyboard:
         yield encode_sse({"type": "TEXT", "content": "分镜生成失败，请调整剧本后重试。"})
@@ -273,7 +278,11 @@ async def _stream_storyboard(
                 "title": "分镜表确认",
                 "approvalKind": "comic_storyboard",
                 "toolName": "media_pipeline",
-                "toolArguments": {"storyboardCount": len(storyboard)},
+                "toolArguments": {
+                    "storyboardCount": len(storyboard),
+                    "storyboard": storyboard,
+                    "characters": state.get("characters") or [],
+                },
             },
         }
     )
@@ -319,9 +328,10 @@ async def _resume_comic(
         "report": {},
         "errors": [],
     }
-    state, frames = await _drain_graph(graph, initial, queue)
-    for frame in frames:
+    state_holder: list[dict[str, object]] = []
+    async for frame in _drain_graph(graph, initial, queue, state_holder):
         yield frame
+    state = state_holder[0] if state_holder else {}
 
     report = state.get("report") or {}
     passed = bool(report.get("passed"))

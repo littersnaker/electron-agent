@@ -148,10 +148,12 @@ export const MEDIA_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
   },
   {
     id: "media-review",
-    title: "结果检查",
-    description: "检查重影、重复元素、无关改动与文件可下载性",
+    title: "合成与检查",
+    description: "音轨/字幕合成成片并质检分镜完成度",
     agentTypes: ["reviewer"],
     activityKeys: ["检查结果", "质量检查", "重影", "审查", "预览", "下载"],
+    lifecycleRoles: ["media_agent"],
+    detailKeywords: ["合并", "合成", "回退"],
   },
   {
     id: "media-deliver",
@@ -159,6 +161,8 @@ export const MEDIA_STAGE_DEFINITIONS: PlanningStageDefinition[] = [
     description: "保存到会话并显示消耗额度",
     agentTypes: ["reviewer"],
     activityKeys: ["保存", "额度", "交付"],
+    lifecycleRoles: ["media_agent"],
+    detailKeywords: ["漫剧生成结束"],
   },
 ];
 

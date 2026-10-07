@@ -113,7 +113,13 @@ function findLifecycleStageIndex(
   definitions: PlanningStageDefinition[],
   event: AgentLifecycleEventPayload,
 ): number {
-  return definitions.findIndex((definition) => definition.lifecycleRoles?.includes(event.role));
+  return definitions.findIndex((definition) => {
+    if (!definition.lifecycleRoles?.includes(event.role)) return false;
+    const keywords = definition.detailKeywords;
+    // 同一 role 的多阶段：有关键词时按 detail 匹配；最后兜底到无关键词的首个阶段。
+    if (!keywords || keywords.length === 0) return true;
+    return keywords.some((keyword) => (event.detail || "").includes(keyword));
+  });
 }
 
 function lifecycleStatusToPlanningStatus(
@@ -182,7 +188,8 @@ function buildLifecycleStages(
     return {
       ...definition,
       status,
-      progress: status === "completed" || status === "error" ? 100 : status === "active" ? 58 : 0,
+      // 无真实进度信号时不展示写死的百分比，由 UI 呈现不定进度。
+      progress: status === "completed" || status === "error" ? 100 : 0,
       detail,
       activityCount: activities.filter((activity) => matchesActivity(activity, definition)).length,
       iteration,
