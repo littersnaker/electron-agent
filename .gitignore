@@ -60,3 +60,6 @@ python-dist/
 .venv/
 .uploads/
 .zcode/
+
+# ZCode 工具自动生成的忽略同步文件
+/.zcodeignore
