@@ -280,3 +280,36 @@ async def get_media_asset(session_id: str, name: str) -> FileResponse:
     if not str(target).startswith(str(base)) or not target.is_file():
         raise HTTPException(status_code=404, detail="资产不存在")
     return FileResponse(target)
+
+
+@router.get("/api/media/library")
+async def get_media_library() -> dict[str, object]:
+    """角色设定图库列表（含 Data URL 预览、模型与创建时间）。"""
+
+    from backend.services.media.asset_library import (
+        list_character_sheets,
+        read_asset_data_url,
+    )
+
+    assets: list[dict[str, object]] = []
+    for asset in await list_character_sheets():
+        data_url = read_asset_data_url(str(asset["filePath"]))
+        assets.append({**asset, "dataUrl": data_url} if data_url else asset)
+    return {"assets": assets}
+
+
+@router.delete("/api/media/library/{asset_id}")
+async def delete_media_library_asset(asset_id: str) -> dict[str, object]:
+    """删除角色库资产（文件 + 行）；不存在返回 404。"""
+
+    from backend.services.media.asset_library import (
+        delete_character_sheet,
+        is_safe_asset_id,
+    )
+
+    if not is_safe_asset_id(asset_id):
+        raise HTTPException(status_code=400, detail="非法的资产 ID")
+    deleted = await delete_character_sheet(asset_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    return {"ok": True}

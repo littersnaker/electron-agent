@@ -22,6 +22,12 @@ from backend.schemas.media import MediaGenerateBody
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.llm.gateway import GATEWAY
 from backend.services.llm.types import LlmMessage
+from backend.services.media.asset_library import (
+    character_content_hash,
+    find_character_sheet,
+    read_asset_data_url,
+    save_character_sheet,
+)
 from backend.services.media.audio import build_srt, synthesize_dialogue
 from backend.services.media.dashscope import generate_media, resolve_media_api_base
 from backend.services.media.rate_limit import throttle_media_request
@@ -284,7 +290,9 @@ def build_comic_pipeline(
                     )
                 attachments = result.get("attachments") or []
                 if attachments:
-                    return dict(attachments[0])
+                    sheet = dict(attachments[0])
+                    sheet["prompt"] = prompt  # 入角色库时记录完整出图提示词。
+                    return sheet
             except Exception as exc:  # noqa: BLE001
                 record_error = f"角色 {character.get('name')} 设定图失败：{exc}"
                 await lifecycle(record_error)
@@ -322,12 +330,56 @@ def build_comic_pipeline(
             return {"characters": []}
 
         output_dir = Path(state["output_dir"])
-        await lifecycle(f"正在生成 {len(characters)} 张角色设定图…")
+        provider = str(image_model_id).split(":", 1)[0] or "qwen"
+        await lifecycle(f"正在准备 {len(characters)} 张角色设定图…")
         for index, character in enumerate(characters):
             if character.get("image"):
                 continue
+            # 先查角色设定图库：同描述同模型只生成一次，跨会话/跨集复用。
+            content_hash = character_content_hash(
+                appearance=str(character.get("appearance") or ""),
+                outfit=str(character.get("outfit") or ""),
+                model_id=image_model_id,
+            )
+            try:
+                cached = await find_character_sheet(
+                    content_hash=content_hash, model_id=image_model_id
+                )
+            except Exception as exc:  # noqa: BLE001 - 库不可用时照常生成。
+                cached = None
+                record_error = f"角色库查询失败，跳过复用：{exc}"
+                await lifecycle(record_error)
+            if cached is not None:
+                data_url = read_asset_data_url(str(cached["filePath"]))
+                if data_url:
+                    character["image"] = {
+                        "name": f"角色设定-{cached['name']}.png",
+                        "downloadName": f"角色设定-{cached['name']}.png",
+                        "type": "image/png",
+                        "assetKind": "image",
+                        "data_url": data_url,
+                    }
+                    await lifecycle(f"角色 {character.get('name')}：命中角色库，直接复用设定图")
+                    continue
+
             sheet = await _generate_character_sheet(character, output_dir, index)
             character["image"] = sheet
+            if sheet:
+                data_url = str(sheet.get("data_url") or sheet.get("data") or "")
+                if data_url:
+                    try:
+                        await save_character_sheet(
+                            name=str(character.get("name") or "未命名角色"),
+                            appearance=str(character.get("appearance") or ""),
+                            outfit=str(character.get("outfit") or ""),
+                            model_id=image_model_id,
+                            provider=provider,
+                            prompt=str(sheet.get("prompt") or ""),
+                            image_data_url=data_url,
+                        )
+                        await lifecycle(f"角色 {character.get('name')}：设定图已入角色库（下次同描述直接复用）")
+                    except Exception as exc:  # noqa: BLE001 - 入库失败不影响本次结果。
+                        await lifecycle(f"角色 {character.get('name')}：设定图入库失败：{exc}")
         done = sum(1 for item in characters if item.get("image"))
         await lifecycle(f"角色设定图完成：{done}/{len(characters)}")
         return {"characters": characters}

@@ -38,6 +38,8 @@ import { useCheckpointedAgentRuns } from "./hooks/useCheckpointedAgentRuns";
 import { useComposer } from "./hooks/useComposer";
 import { useCommerceResearch } from "./hooks/useCommerceResearch";
 import { useCustomModels } from "./hooks/useCustomModels";
+import { useCharacterLibrary } from "./hooks/useCharacterLibrary";
+import CharacterLibraryModal from "./components/media/CharacterLibraryModal";
 import { useMediaGeneration } from "./hooks/useMediaGeneration";
 import { useModelSelection } from "./hooks/useModelSelection";
 import { usePluginManager } from "./hooks/usePluginManager";
@@ -58,6 +60,8 @@ export default function Home() {
   const { selectedChatModel, selectedMediaModel, setSelectedChatModel, setSelectedMediaModel } =
     useModelSelection();
   const customModels = useCustomModels();
+  const characterLibrary = useCharacterLibrary();
+  const [characterLibraryOpen, setCharacterLibraryOpen] = useState(false);
   const [mediaImageModelId, setMediaImageModelId] = useState("");
   const { codeAgentMode, setCodeAgentMode } = useCodeAgentMode();
   const [typographyPolicy, setTypographyPolicy] =
@@ -349,6 +353,16 @@ export default function Home() {
             onCancel={() => setDeleteProjectId(null)}
           />
         )}
+        {characterLibraryOpen && (
+          <CharacterLibraryModal
+            open
+            assets={characterLibrary.assets}
+            loaded={characterLibrary.loaded}
+            onDelete={characterLibrary.deleteAsset}
+            onReload={characterLibrary.reload}
+            onClose={() => setCharacterLibraryOpen(false)}
+          />
+        )}
         {showPluginCenter && (
           <PluginCenter
             open
@@ -526,6 +540,8 @@ export default function Home() {
                   visionModels={customModels.models
                     .filter((model) => model.supportsVision)
                     .map((model) => ({ id: model.id, name: model.name }))}
+                  isMediaSession={workspace.activeSession?.mode === "media"}
+                  onOpenCharacterLibrary={() => setCharacterLibraryOpen(true)}
                 />
               </div>
             </div>
