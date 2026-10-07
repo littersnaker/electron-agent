@@ -1,6 +1,5 @@
 // 模块说明：负责 ChatSidebar 用户界面组件。
-/* eslint-disable max-lines */ // 多个 Agent 入口区块聚合，文件天然较长。
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import type { ChatSession, WorkspaceProject } from "../constants/page-constants";
 import SidebarSettingsMenu from "./sidebar-settings-menu";
 interface ChatSidebarProps {
@@ -111,6 +110,87 @@ function CommerceIcon({ className = "h-4 w-4" }: { className?: string }) {
         opacity=".9"
       />
     </svg>
+  );
+}
+
+function FilmIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <rect x="2.8" y="4.2" width="14.4" height="11.6" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.8 7.6h14.4M7 4.2v3.4M13 4.2v3.4M7 12.2v3.4M13 12.2v3.4M2.8 12.2h14.4" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+function CameraIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <path
+        d="M6.8 6 8 4.2h4L13.2 6h2.4A1.8 1.8 0 0 1 17.4 7.8v6.4a1.8 1.8 0 0 1-1.8 1.8H4.4a1.8 1.8 0 0 1-1.8-1.8V7.8A1.8 1.8 0 0 1 4.4 6h2.4Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <circle cx="10" cy="10.8" r="2.6" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+/**
+ * 插件 Agent 的紧凑入口行：小图标 + 名字 + 新建加号。
+ * 相比早期大卡片省掉副文案行，侧边栏一屏能看完所有 Agent。
+ */
+function AgentEntryButton({
+  icon,
+  title,
+  onClick,
+  disabled,
+  ariaLabel,
+}: {
+  icon: ReactNode;
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      className="group mb-1.5 flex w-full cursor-pointer items-center gap-2.5 rounded-[11px] border px-2.5 py-2 text-left transition-all duration-200 active:scale-[0.99] disabled:opacity-40"
+      style={{
+        background: "color-mix(in srgb, var(--accent-blue-soft-strong) 72%, transparent)",
+        borderColor: "var(--accent-blue-border)",
+      }}
+    >
+      <span
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] border text-(--accent-blue-hover)"
+        style={{
+          background: "var(--accent-blue-soft-strong)",
+          borderColor: "var(--accent-blue-border-strong)",
+        }}
+      >
+        {icon}
+      </span>
+      <span
+        className="min-w-0 flex-1 truncate text-[11.5px] font-semibold tracking-[-0.01em]"
+        style={{ color: COLORS.text }}
+      >
+        {title}
+      </span>
+      <span
+        className="flex h-5 w-5 items-center justify-center rounded-full transition-transform duration-200 group-hover:scale-110"
+        style={{
+          background: "var(--accent-blue-soft-strong)",
+          color: "var(--accent-blue-hover)",
+        }}
+      >
+        <PlusIcon className="h-3 w-3" />
+      </span>
+    </button>
   );
 }
 
@@ -283,9 +363,9 @@ export default function ChatSidebar(props: ChatSidebarProps) {
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-5">
         {props.commercePluginEnabled && (
           <>
-            <section className="mb-5">
+            <section className="mb-4">
               <div
-                className="mb-2 flex items-center justify-between px-2"
+                className="mb-1.5 flex items-center justify-between px-2"
                 style={{ color: COLORS.textSubtle }}
               >
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
@@ -294,53 +374,13 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                 </div>
               </div>
 
-              <button
-                type="button"
+              <AgentEntryButton
+                icon={<CommerceIcon className="h-3.5 w-3.5" />}
+                title="跨境市场情报"
                 onClick={props.createCommerceSession}
                 disabled={props.isStreaming}
-                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
-                style={{
-                  background:
-                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
-                  borderColor: "var(--accent-blue-border)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
-                }}
-                title="新建跨境市场情报研究"
-              >
-                <span
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    borderColor: "var(--accent-blue-border-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  <CommerceIcon className="h-[18px] w-[18px]" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className="block text-[12px] font-semibold tracking-[-0.01em]"
-                    style={{ color: COLORS.text }}
-                  >
-                    跨境市场情报
-                  </span>
-                  <span
-                    className="mt-0.5 block truncate text-[10px]"
-                    style={{ color: COLORS.textSubtle }}
-                  >
-                    公开市场研究 · 竞品可见度 · 机会信号
-                  </span>
-                </span>
-                <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  <PlusIcon className="h-3.5 w-3.5" />
-                </span>
-              </button>
+                ariaLabel="新建跨境市场情报研究"
+              />
 
               {commerceSessions.length > 0 && (
                 <div className="space-y-0.5">
@@ -362,64 +402,24 @@ export default function ChatSidebar(props: ChatSidebarProps) {
 
         {props.mediaPluginEnabled && (
           <>
-            <section className="mb-5">
+            <section className="mb-4">
               <div
-                className="mb-2 flex items-center justify-between px-2"
+                className="mb-1.5 flex items-center justify-between px-2"
                 style={{ color: COLORS.textSubtle }}
               >
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                  <span>🎬</span>
+                  <FilmIcon />
                   AI 漫剧
                 </div>
               </div>
 
-              <button
-                type="button"
+              <AgentEntryButton
+                icon={<FilmIcon className="h-3.5 w-3.5" />}
+                title="AI 漫剧工作室"
                 onClick={props.createMediaSession}
                 disabled={props.isStreaming}
-                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
-                style={{
-                  background:
-                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
-                  borderColor: "var(--accent-blue-border)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
-                }}
-                title="新建 AI 漫剧会话"
-              >
-                <span
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border text-[16px]"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    borderColor: "var(--accent-blue-border-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  🎬
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className="block text-[12px] font-semibold tracking-[-0.01em]"
-                    style={{ color: COLORS.text }}
-                  >
-                    AI 漫剧工作室
-                  </span>
-                  <span
-                    className="mt-0.5 block truncate text-[10px]"
-                    style={{ color: COLORS.textSubtle }}
-                  >
-                    剧本 → 分镜确认 → 出图 → 视频 → 合并
-                  </span>
-                </span>
-                <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  <PlusIcon className="h-3.5 w-3.5" />
-                </span>
-              </button>
+                ariaLabel="新建 AI 漫剧会话"
+              />
 
               {mediaSessions.length > 0 && (
                 <div className="space-y-0.5">
@@ -441,64 +441,24 @@ export default function ChatSidebar(props: ChatSidebarProps) {
 
         {props.imagePluginEnabled && (
           <>
-            <section className="mb-5">
+            <section className="mb-4">
               <div
-                className="mb-2 flex items-center justify-between px-2"
+                className="mb-1.5 flex items-center justify-between px-2"
                 style={{ color: COLORS.textSubtle }}
               >
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
-                  <span>📷</span>
+                  <CameraIcon />
                   图片识别
                 </div>
               </div>
 
-              <button
-                type="button"
+              <AgentEntryButton
+                icon={<CameraIcon className="h-3.5 w-3.5" />}
+                title="图片识别"
                 onClick={props.createImageSession}
                 disabled={props.isStreaming}
-                className="group mb-2 flex w-full items-center gap-3 rounded-[15px] border px-3 py-3 text-left transition-all active:scale-[0.99] disabled:opacity-40"
-                style={{
-                  background:
-                    "linear-gradient(145deg, var(--accent-blue-soft-strong), var(--accent-blue-soft))",
-                  borderColor: "var(--accent-blue-border)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.055)",
-                }}
-                title="新建图片识别会话"
-              >
-                <span
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border text-[16px]"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    borderColor: "var(--accent-blue-border-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  📷
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span
-                    className="block text-[12px] font-semibold tracking-[-0.01em]"
-                    style={{ color: COLORS.text }}
-                  >
-                    图片识别
-                  </span>
-                  <span
-                    className="mt-0.5 block truncate text-[10px]"
-                    style={{ color: COLORS.textSubtle }}
-                  >
-                    货架图纸识别 → 视觉 → Excel
-                  </span>
-                </span>
-                <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full transition-transform group-hover:scale-105"
-                  style={{
-                    background: "var(--accent-blue-soft-strong)",
-                    color: "var(--accent-blue-hover)",
-                  }}
-                >
-                  <PlusIcon className="h-3.5 w-3.5" />
-                </span>
-              </button>
+                ariaLabel="新建图片识别会话"
+              />
 
               {imageSessions.length > 0 && (
                 <div className="space-y-0.5">
@@ -518,7 +478,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
           </>
         )}
 
-        <section className="mb-5">
+        <section className="mb-4">
           <div
             className="mb-1 flex items-center gap-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em]"
             style={{ color: COLORS.textSubtle }}
