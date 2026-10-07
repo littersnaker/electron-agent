@@ -3,7 +3,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
-import AgentTaskPanel from "./components/AgentTaskPanel";
 import InteractiveRequestPanel from "./components/InteractiveRequestPanel";
 import PluginCenter from "./components/plugins/PluginCenter";
 import { ProjectInitModal } from "./components/ProjectInitModal";
@@ -40,6 +39,7 @@ import { useCommerceResearch } from "./hooks/useCommerceResearch";
 import { useCustomModels } from "./hooks/useCustomModels";
 import { useCharacterLibrary } from "./hooks/useCharacterLibrary";
 import CharacterLibraryModal from "./components/media/CharacterLibraryModal";
+import FloatingPreview from "./components/preview/FloatingPreview";
 import { useMediaGeneration } from "./hooks/useMediaGeneration";
 import { useModelSelection } from "./hooks/useModelSelection";
 import { usePluginManager } from "./hooks/usePluginManager";
@@ -62,6 +62,7 @@ export default function Home() {
   const customModels = useCustomModels();
   const characterLibrary = useCharacterLibrary();
   const [characterLibraryOpen, setCharacterLibraryOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [mediaImageModelId, setMediaImageModelId] = useState("");
   const { codeAgentMode, setCodeAgentMode } = useCodeAgentMode();
   const [typographyPolicy, setTypographyPolicy] =
@@ -176,6 +177,18 @@ export default function Home() {
     clearAfterSubmit: composer.clearAfterSubmit,
     agents: agentCoordinator,
   });
+  const visualReviewStatus = chat.visualReview.status;
+  const visualReviewUrl = chat.visualReview.previewUrl;
+  // 悬浮预览自动弹出：review 信号（状态+URL）非空闲即显示；用户关闭后记住该信号，
+  // 同一次 review 不再弹回，新的 review 活动会重新触发。
+  const reviewSignal = `${visualReviewStatus}:${visualReviewUrl}`;
+  const [dismissedReviewSignal, setDismissedReviewSignal] = useState("");
+  const previewVisible =
+    previewOpen || (reviewSignal !== "idle:" && reviewSignal !== dismissedReviewSignal);
+  const handleDismissPreview = () => {
+    setPreviewOpen(false);
+    setDismissedReviewSignal(reviewSignal);
+  };
   const checkpointRuns = useCheckpointedAgentRuns({
     sessionId: workspace.activeSession?.id,
     sessionMode: workspace.activeSession?.mode,
@@ -363,6 +376,16 @@ export default function Home() {
             onClose={() => setCharacterLibraryOpen(false)}
           />
         )}
+        {previewVisible && (
+          <FloatingPreview
+            review={chat.visualReview}
+            rootPath={workspace.activeProject?.rootPath || ""}
+            visionModels={customModels.models
+              .filter((model) => model.supportsVision)
+              .map((model) => ({ id: model.id, name: model.name }))}
+            onClose={handleDismissPreview}
+          />
+        )}
         {showPluginCenter && (
           <PluginCenter
             open
@@ -418,6 +441,21 @@ export default function Home() {
                 composerMode={effectiveComposerMode}
                 tokenInfo={activeUsage}
                 isStreaming={isBusy}
+                agentStatus={activeStatus}
+                showPreview={
+                  workspace.activeSession?.mode === "code" &&
+                  Boolean(workspace.activeProject?.rootPath)
+                }
+                previewActive={previewVisible}
+                onTogglePreview={() => {
+                  setPreviewOpen(!previewVisible);
+                  if (previewVisible) setDismissedReviewSignal(reviewSignal);
+                }}
+                onOpenCharacterLibrary={
+                  workspace.activeSession?.mode === "media"
+                    ? () => setCharacterLibraryOpen(true)
+                    : undefined
+                }
                 onStop={
                   commerce.isResearching
                     ? commerce.stop
@@ -522,32 +560,6 @@ export default function Home() {
                     />
                   </div>
                 </div>
-                <AgentTaskPanel
-                  agents={agentCoordinator.agents}
-                  toolActivities={activeToolActivities}
-                  lifecycleEvents={
-                    workspace.activeSession?.mode === "commerce" ? [] : chat.agentLifecycleEvents
-                  }
-                  workListSnapshot={
-                    workspace.activeSession?.mode === "code" ? chat.workListSnapshot : null
-                  }
-                  agentStatus={activeStatus}
-                  isStreaming={isBusy}
-                  workflowMode={
-                    workspace.activeSession?.mode === "commerce"
-                      ? `commerce-${commerce.workflowMode}`
-                      : workspace.activeSession?.mode === "media"
-                        ? "media"
-                        : effectiveComposerMode
-                  }
-                  visualReview={chat.visualReview}
-                  projectRootPath={workspace.activeProject?.rootPath || ""}
-                  visionModels={customModels.models
-                    .filter((model) => model.supportsVision)
-                    .map((model) => ({ id: model.id, name: model.name }))}
-                  isMediaSession={workspace.activeSession?.mode === "media"}
-                  onOpenCharacterLibrary={() => setCharacterLibraryOpen(true)}
-                />
               </div>
             </div>
           </section>

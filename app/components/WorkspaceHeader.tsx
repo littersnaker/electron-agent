@@ -16,6 +16,14 @@ interface WorkspaceHeaderProps {
   tokenInfo: TokenInfo | null;
   isStreaming: boolean;
   onStop: () => void;
+  /** Agent 运行状态摘要（来自 SSE 生命周期/工具事件）。 */
+  agentStatus?: string;
+  /** Code 会话且有项目：显示页面预览入口。 */
+  showPreview?: boolean;
+  previewActive?: boolean;
+  onTogglePreview?: () => void;
+  /** 漫剧会话：显示角色库入口。 */
+  onOpenCharacterLibrary?: () => void;
 }
 
 function isMediaMode(mode: ComposerMode): boolean {
@@ -132,6 +140,11 @@ export default function WorkspaceHeader({
   tokenInfo,
   isStreaming,
   onStop,
+  agentStatus,
+  showPreview = false,
+  previewActive = false,
+  onTogglePreview,
+  onOpenCharacterLibrary,
 }: WorkspaceHeaderProps) {
   const header = resolveHeaderText(activeSession, activeProject, composerMode);
 
@@ -150,13 +163,58 @@ export default function WorkspaceHeader({
         <SessionGlyph sessionMode={activeSession?.mode} composerMode={composerMode} />
         <div className="min-w-0">
           <h1 className="truncate text-[15px] font-semibold tracking-[-0.015em]">{header.title}</h1>
-          <div className="mt-0.5 truncate text-[10px] text-[var(--text-tertiary)]">
-            {header.subtitle}
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 truncate text-[10px] text-[var(--text-tertiary)]">
+            <span className="truncate">{agentStatus || header.subtitle}</span>
           </div>
         </div>
       </div>
 
       <div className="flex items-center gap-2">
+        {agentStatus && isStreaming && (
+          <span
+            className="hidden h-2 w-2 animate-pulse rounded-full sm:block"
+            style={{ background: "var(--accent-green)" }}
+            title="Agent 运行中"
+          />
+        )}
+        {onOpenCharacterLibrary && (
+          <button
+            type="button"
+            onClick={onOpenCharacterLibrary}
+            className="flex h-8 cursor-pointer items-center gap-1.5 rounded-[10px] border px-2.5 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] active:scale-[0.96]"
+            style={{ background: "var(--glass)", borderColor: "var(--border)", color: "var(--text-secondary)" }}
+            title="管理角色设定图库（跨集复用）"
+          >
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none">
+              <path
+                d="M10 3.2c.42 2.8 2.07 4.45 4.86 4.86-2.79.42-4.44 2.07-4.86 4.87-.42-2.8-2.07-4.45-4.86-4.87C7.93 7.65 9.58 6 10 3.2Z"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
+            角色库
+          </button>
+        )}
+        {showPreview && onTogglePreview && (
+          <button
+            type="button"
+            onClick={onTogglePreview}
+            className="flex h-8 cursor-pointer items-center gap-1.5 rounded-[10px] border px-2.5 text-[11px] font-medium transition-all duration-150 hover:bg-[var(--glass-hover)] active:scale-[0.96]"
+            style={{
+              background: previewActive ? "rgba(10,132,255,0.14)" : "var(--glass)",
+              borderColor: previewActive ? "var(--accent-blue-border-strong)" : "var(--border)",
+              color: previewActive ? "var(--accent-blue)" : "var(--text-secondary)",
+            }}
+            title="打开页面预览与视觉 Review"
+          >
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none">
+              <rect x="3" y="4" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M3 7.5h14" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            预览
+          </button>
+        )}
         {tokenInfo && (
           <span
             className="hidden h-8 items-center gap-1.5 rounded-[10px] border px-2.5 font-mono text-[10px] tabular-nums sm:flex"
