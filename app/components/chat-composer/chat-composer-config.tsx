@@ -62,6 +62,10 @@ export interface ChatComposerProps {
   mediaImageModels?: readonly ModelOption[];
   mediaImageModelId?: string;
   onMediaImageModelChange?: (modelId: string) => void;
+  /** 漫剧会话：视频模型选项与当前选择。 */
+  mediaVideoModels?: readonly ModelOption[];
+  mediaVideoModelId?: string;
+  onMediaVideoModelChange?: (modelId: string) => void;
 }
 
 export const TYPOGRAPHY_OPTIONS: ReadonlyArray<{

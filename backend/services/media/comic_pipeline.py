@@ -175,6 +175,27 @@ def _normalize_characters(raw: Any) -> list[dict[str, Any]]:
     return characters
 
 
+def _media_provider_context(
+    model_id: str,
+    credentials: LlmCredentials,
+) -> tuple[str, str | None]:
+    """按模型 ID 解析其供应商的 API Key 与 API Base。
+
+    图与视频模型可以来自不同供应商（如百炼出图 + 火山出视频），
+    各自的 Key 均来自用户在设置里填写的对应供应商凭证。
+    """
+
+    provider = str(model_id).split(":", 1)[0] or "qwen"
+    api_key = credentials.get(provider)
+    endpoint = credentials.get_endpoint(provider)
+    api_base = (
+        resolve_volcengine_base(endpoint)
+        if provider == "doubao"
+        else resolve_media_api_base(endpoint)
+    )
+    return api_key, api_base
+
+
 def build_comic_pipeline(
     *,
     credentials: LlmCredentials,
@@ -237,15 +258,9 @@ def build_comic_pipeline(
     ) -> dict[str, Any] | None:
         """为一个角色生成设定图（全身立绘，保证跨镜一致性锚点）。"""
 
-        provider = str(image_model_id).split(":", 1)[0] or "qwen"
-        api_key = credentials.get(provider)
+        api_key, api_base = _media_provider_context(image_model_id, credentials)
         if not api_key:
             return None
-        api_base = (
-            resolve_volcengine_base(credentials.get_endpoint(provider))
-            if provider == "doubao"
-            else resolve_media_api_base(credentials.get_endpoint(provider))
-        )
         prompt = (
             f"角色设定图，全身立绘，白色纯色背景，正面站姿，柔和均匀打光，"
             f"2D 动漫风格：{character.get('name')}。外貌：{character.get('appearance')}。"
@@ -367,17 +382,21 @@ def build_comic_pipeline(
             "status": "pending",
             "error": "",
         }
-        provider = str(image_model_id).split(":", 1)[0] or "qwen"
-        api_key = credentials.get(provider)
-        endpoint = credentials.get_endpoint(provider)
-        api_base = (
-            resolve_volcengine_base(endpoint)
-            if provider == "doubao"
-            else resolve_media_api_base(endpoint)
-        )
-        if not api_key:
+        image_api_key, image_api_base = _media_provider_context(image_model_id, credentials)
+        if not image_api_key:
             record["status"] = "failed"
-            record["error"] = f"缺少 {provider} API Key"
+            record["error"] = (
+                f"出图模型 {image_model_id} 需要 {image_model_id.split(':', 1)[0]} "
+                "供应商的 API Key，请在设置里填写"
+            )
+            return {"shots": [record]}
+        video_api_key, video_api_base = _media_provider_context(video_model_id, credentials)
+        if not video_api_key:
+            record["status"] = "failed"
+            record["error"] = (
+                f"视频模型 {video_model_id} 需要 {video_model_id.split(':', 1)[0]} "
+                "供应商的 API Key，请在设置里填写"
+            )
             return {"shots": [record]}
 
         await lifecycle(f"分镜 {index}：生成画面…")
@@ -415,8 +434,8 @@ def build_comic_pipeline(
                             size=IMAGE_SIZE,
                             attachments=refs,
                         ),
-                        api_key,
-                        api_base,
+                        image_api_key,
+                        image_api_base,
                     )
                 attachments = image_result.get("attachments") or []
                 if attachments:
@@ -447,8 +466,8 @@ def build_comic_pipeline(
                             ratio=VIDEO_RATIO,
                             attachment=image_attachment,
                         ),
-                        api_key,
-                        api_base,
+                        video_api_key,
+                        video_api_base,
                     )
                 attachments = video_result.get("attachments") or []
                 if attachments:
@@ -482,17 +501,12 @@ def build_comic_pipeline(
         # 台词 TTS：失败降级为无声（字幕仍会生成）。
         dialogue = record["dialogue"]
         if dialogue:
-            media_provider = str(video_model_id).split(":", 1)[0] or "qwen"
-            tts_key = credentials.get(media_provider) or api_key
+            # qwen-tts 是百炼语音服务：固定用 qwen 供应商的用户 Key。
+            tts_key = credentials.get("qwen") or ""
             audio_path = await synthesize_dialogue(
                 dialogue,
-                tts_key or "",
+                tts_key,
                 output_dir / f"shot_{index:02d}.wav",
-                api_base=(
-                    resolve_media_api_base(credentials.get_endpoint(media_provider))
-                    if media_provider != "doubao"
-                    else None
-                ),
             )
             if audio_path:
                 record["audio_file"] = audio_path.as_posix()

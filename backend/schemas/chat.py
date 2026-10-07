@@ -26,3 +26,5 @@ class ChatRequest(FlexibleModel):
     resume_checkpoint_id: str = Field(default="", alias="resumeCheckpointId")
     # 漫剧管线出图模型覆盖（空 = env 默认 MEDIA_IMAGE_MODEL）。
     media_image_model_id: str = Field(default="", alias="mediaImageModelId", max_length=200)
+    # 漫剧管线视频模型覆盖（空 = env 默认 MEDIA_VIDEO_MODEL）。
+    media_video_model_id: str = Field(default="", alias="mediaVideoModelId", max_length=200)

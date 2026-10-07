@@ -197,6 +197,28 @@ def _resolve_comic_image_model(
     return image_model_id
 
 
+def _resolve_comic_video_model(
+    preferred_model_id: str,
+    media_video_model_id: str,
+) -> str:
+    """解析漫剧视频模型：显式指定 > 会话所选媒体模型 > env 默认。"""
+
+    from backend.services.media.catalog import get_media_model
+
+    for candidate in (media_video_model_id, preferred_model_id):
+        selected = (candidate or "").strip()
+        if not selected or selected == "auto":
+            continue
+        try:
+            model = get_media_model(selected)
+        except ValueError:
+            continue
+        if "image-to-video" in (model.get("modes") or []):
+            return selected
+    _image_model_id, video_model_id = resolve_default_media_models()
+    return video_model_id
+
+
 def _resolve_media_model_id(
     preferred_model_id: str,
     mode: str,
@@ -233,6 +255,7 @@ async def _stream_storyboard(
         credentials=credentials,
         preferred_model_id=preferred_model_id,
         image_model_id=_resolve_comic_image_model(preferred_model_id, body.media_image_model_id),
+        video_model_id=_resolve_comic_video_model(preferred_model_id, body.media_video_model_id),
         emit=_media_emit(queue),
     )
     # 产物持久化在数据目录 media-cache 下：重启不丢、历史会话可回放。
@@ -342,6 +365,7 @@ async def _resume_comic(
         credentials=credentials,
         preferred_model_id=preferred_model_id,
         image_model_id=_resolve_comic_image_model(preferred_model_id, body.media_image_model_id),
+        video_model_id=_resolve_comic_video_model(preferred_model_id, body.media_video_model_id),
         emit=_media_emit(queue),
     )
     initial: dict[str, object] = {

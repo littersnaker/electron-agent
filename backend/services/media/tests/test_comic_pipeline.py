@@ -320,3 +320,48 @@ def test_comic_pipeline_resolves_env_models_at_call_time(monkeypatch, tmp_path) 
         emit=lambda _d, _p: None,
     )
     assert graph is not None
+
+
+def test_resolve_comic_video_model_precedence(monkeypatch) -> None:
+    """视频模型解析：显式指定 > 会话所选 i2v 媒体模型 > env 默认。"""
+
+    from backend.services.media.agent_service import _resolve_comic_video_model
+    from backend.services.media.comic_pipeline import resolve_default_media_models
+
+    monkeypatch.setenv("MEDIA_VIDEO_MODEL", "qwen:wan2.7-i2v-2026-04-25")
+    _image, default_video = resolve_default_media_models()
+
+    # 1. 显式指定优先。
+    assert (
+        _resolve_comic_video_model("auto", "qwen:wan2.7-i2v-2026-04-25")
+        == "qwen:wan2.7-i2v-2026-04-25"
+    )
+    # 2. 会话所选是支持 i2v 的媒体模型则复用。
+    assert _resolve_comic_video_model("qwen:wan2.7-i2v-2026-04-25", "") == default_video
+    # 3. 聊天模型 ID 无法解析 → env 默认。
+    assert _resolve_comic_video_model("deepseek:deepseek-v4-flash", "") == default_video
+    # 4. auto → env 默认。
+    assert _resolve_comic_video_model("auto", "") == default_video
+
+
+def test_media_provider_context_uses_user_keys() -> None:
+    """每个模型的 Key/端点按其供应商从用户凭证解析（豆包走火山、通义走百炼）。"""
+
+    from backend.services.llm.credentials import LlmCredentials
+    from backend.services.media.comic_pipeline import _media_provider_context
+
+    credentials = LlmCredentials(
+        values={"qwen": "dash-key", "doubao": "ark-key"},
+        endpoints={"doubao": "https://ark.example.test/api/v3"},
+    )
+    qwen_key, qwen_base = _media_provider_context("qwen:qwen-image-2.0-pro", credentials)
+    assert qwen_key == "dash-key"
+    assert qwen_base.startswith("https://dashscope.aliyuncs.com")
+
+    doubao_key, doubao_base = _media_provider_context("doubao:doubao-seedance-1-0-pro", credentials)
+    assert doubao_key == "ark-key"
+    assert doubao_base == "https://ark.example.test/api/v3"
+
+    # 未填 Key 的供应商返回 None（管线据此提示去设置填写）。
+    missing_key, _base = _media_provider_context("kimi:whatever", credentials)
+    assert missing_key is None

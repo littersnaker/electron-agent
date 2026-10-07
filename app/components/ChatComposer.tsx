@@ -65,6 +65,9 @@ export function ChatComposer({
   mediaImageModels,
   mediaImageModelId = "",
   onMediaImageModelChange,
+  mediaVideoModels,
+  mediaVideoModelId = "",
+  onMediaVideoModelChange,
   onSubmit,
   onStop,
 }: ChatComposerProps) {
@@ -414,6 +417,27 @@ export function ChatComposer({
                 }}
               >
                 {mediaImageModels.map((model) => (
+                  <option key={model.id || "auto"} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {mode === "media" && mediaVideoModels && onMediaVideoModelChange && (
+              <select
+                value={mediaVideoModelId}
+                onChange={(event) => onMediaVideoModelChange(event.target.value)}
+                disabled={disabled}
+                aria-label="选择漫剧视频模型"
+                title="漫剧视频模型（图生视频）"
+                className="max-w-[150px] min-h-[32px] cursor-pointer truncate rounded-lg border px-2 text-[11px] outline-none"
+                style={{
+                  background: "var(--glass)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {mediaVideoModels.map((model) => (
                   <option key={model.id || "auto"} value={model.id}>
                     {model.name}
                   </option>
