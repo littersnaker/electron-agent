@@ -58,6 +58,7 @@ export default function Home() {
   const { selectedChatModel, selectedMediaModel, setSelectedChatModel, setSelectedMediaModel } =
     useModelSelection();
   const customModels = useCustomModels();
+  const [mediaImageModelId, setMediaImageModelId] = useState("");
   const { codeAgentMode, setCodeAgentMode } = useCodeAgentMode();
   const [typographyPolicy, setTypographyPolicy] =
     useState<TypographyPolicy>("avoid-generated-text");
@@ -100,6 +101,19 @@ export default function Home() {
     }
     return getAvailableMediaModelOptions(effectiveComposerMode, customModels.models);
   }, [customModels.models, effectiveComposerMode]);
+  // 漫剧会话出图模型：AUTO（env 默认）+ 支持出图的媒体模型目录。
+  const mediaImageModels = useMemo(() => {
+    if (workspace.activeSession?.mode !== "media") return [];
+    return [
+      {
+        id: "",
+        name: "自动（env 默认）",
+        provider: "默认",
+        description: "使用 MEDIA_IMAGE_MODEL 环境变量指定的模型",
+      },
+      ...getAvailableMediaModelOptions("text-to-image", customModels.models),
+    ];
+  }, [workspace.activeSession?.mode, customModels.models]);
   useEffect(() => {
     if (!customModels.loaded || !selectedChatModel.startsWith("custom:")) return;
     const stillExists = customModels.models.some((model) => model.id === selectedChatModel);
@@ -113,6 +127,7 @@ export default function Home() {
   const chat = useChatStream({
     activeSession: workspace.activeSession,
     activeProject: workspace.activeProject,
+    mediaImageModelId,
     messages: workspace.messages,
     setMessages: workspace.setMessages,
     setSessions: workspace.setSessions,
@@ -459,6 +474,9 @@ export default function Home() {
                       models={availableModels}
                       selectedModel={selectedModel}
                       onSelectModel={handleSelectModel}
+                      mediaImageModels={mediaImageModels}
+                      mediaImageModelId={mediaImageModelId}
+                      onMediaImageModelChange={setMediaImageModelId}
                       codeAgentMode={codeAgentMode}
                       onCodeAgentModeChange={setCodeAgentMode}
                       onCreateCustomModel={async (input) => {

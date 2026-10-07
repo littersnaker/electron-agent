@@ -58,6 +58,10 @@ export interface ChatComposerProps {
   onSubmit: () => void;
   /** 流式生成进行中时，停止按钮的回调。 */
   onStop?: () => void;
+  /** 漫剧会话：出图模型选项与当前选择（media 会话显示在底部按钮行）。 */
+  mediaImageModels?: readonly ModelOption[];
+  mediaImageModelId?: string;
+  onMediaImageModelChange?: (modelId: string) => void;
 }
 
 export const TYPOGRAPHY_OPTIONS: ReadonlyArray<{

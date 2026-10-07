@@ -30,9 +30,18 @@ from backend.services.media.volcengine import resolve_volcengine_base
 
 EmitCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
-IMAGE_MODEL_ID = os.getenv("MEDIA_IMAGE_MODEL", "qwen:qwen-image-2.0-pro")
-VIDEO_MODEL_ID = os.getenv("MEDIA_VIDEO_MODEL", "qwen:wan2.7-i2v-2026-04-25")
 MAX_PARALLEL_MEDIA = int(os.getenv("MEDIA_MAX_PARALLEL", "1"))
+
+
+def resolve_default_media_models() -> tuple[str, str]:
+    """读取 env 默认的出图/视频模型（调用时读取，改 env 后无需改代码）。"""
+
+    return (
+        os.getenv("MEDIA_IMAGE_MODEL", "qwen:qwen-image-2.0-pro"),
+        os.getenv("MEDIA_VIDEO_MODEL", "qwen:wan2.7-i2v-2026-04-25"),
+    )
+
+
 # 视频与出图参数：漫剧可整体切竖屏（9:16），单镜时长随分镜表透传。
 VIDEO_RESOLUTION = os.getenv("MEDIA_VIDEO_RESOLUTION", "720P")
 VIDEO_RATIO = os.getenv("MEDIA_VIDEO_RATIO", "16:9")
@@ -171,10 +180,18 @@ def build_comic_pipeline(
     credentials: LlmCredentials,
     preferred_model_id: str,
     emit: EmitCallback,
-    image_model_id: str = IMAGE_MODEL_ID,
-    video_model_id: str = VIDEO_MODEL_ID,
+    image_model_id: str | None = None,
+    video_model_id: str | None = None,
 ):
-    """构建并编译 LangGraph 漫剧管线（每次调用独立编译，便于注入 emit）。"""
+    """构建并编译 LangGraph 漫剧管线（每次调用独立编译，便于注入 emit）。
+
+    ``image_model_id`` / ``video_model_id`` 为请求级覆盖；缺省回退 env 默认值
+    （每次构建时读取，env 变更无需重启进程）。
+    """
+
+    env_image_model, env_video_model = resolve_default_media_models()
+    image_model_id = image_model_id or env_image_model
+    video_model_id = video_model_id or env_video_model
 
     from langgraph.graph import END, START, StateGraph
     from langgraph.types import Send
@@ -370,6 +387,15 @@ def build_comic_pipeline(
             character_sheets[name] for name in record["characters"] if name in character_sheets
         ][:2]
         image_mode = "image-edit" if refs else "text-to-image"
+        if image_mode == "image-edit":
+            # 所选出图模型不支持改图模式时回退纯文生图（一致性降级但不阻断）。
+            try:
+                from backend.services.media.catalog import get_media_model
+
+                if "image-edit" not in (get_media_model(image_model_id).get("modes") or []):
+                    image_mode = "text-to-image"
+            except ValueError:
+                image_mode = "text-to-image"
         for attempt in range(2):
             try:
                 async with semaphore:

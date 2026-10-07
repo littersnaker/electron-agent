@@ -52,6 +52,8 @@ export interface UseChatStreamOptions {
   endpointOverrides: LlmEndpointOverrides;
   selectedModel: string;
   codeAgentMode: CodeAgentExecutionMode;
+  /** 漫剧会话的出图模型覆盖（空 = 后端 env 默认）。 */
+  mediaImageModelId?: string;
   attachedFiles: readonly AttachedFile[];
   isParsingFile: boolean;
   clearAfterSubmit: () => void;

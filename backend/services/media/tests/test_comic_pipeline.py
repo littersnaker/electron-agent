@@ -284,3 +284,39 @@ def test_normalize_characters_skips_invalid() -> None:
     ]
     characters = _normalize_characters(raw)
     assert [item["name"] for item in characters] == ["甲", "乙", "丙", "丁"]
+
+
+def test_resolve_comic_image_model_precedence(monkeypatch) -> None:
+    """出图模型解析：显式指定 > 会话所选媒体模型 > env 默认；聊天模型被忽略。"""
+
+    from backend.services.media.agent_service import _resolve_comic_image_model
+    from backend.services.media.comic_pipeline import resolve_default_media_models
+
+    monkeypatch.setenv("MEDIA_IMAGE_MODEL", "qwen:qwen-image-2.0-pro")
+    default_model, _video = resolve_default_media_models()
+
+    # 1. 显式指定优先（即使 preferred 是聊天模型）。
+    assert (
+        _resolve_comic_image_model("auto", "qwen:qwen-image-2.0-pro") == "qwen:qwen-image-2.0-pro"
+    )
+    # 2. 无显式指定时：会话所选恰好是媒体模型则复用。
+    assert _resolve_comic_image_model("qwen:qwen-image-2.0-pro", "") == "qwen:qwen-image-2.0-pro"
+    # 3. 聊天模型 ID 无法解析为媒体模型 → env 默认。
+    assert _resolve_comic_image_model("deepseek:deepseek-v4-flash", "") == default_model
+    # 4. auto → env 默认。
+    assert _resolve_comic_image_model("auto", "") == default_model
+
+
+def test_comic_pipeline_resolves_env_models_at_call_time(monkeypatch, tmp_path) -> None:
+    """build_comic_pipeline 未传模型时按调用时 env 解析（改 env 无需重启）。"""
+
+    from backend.services.media.comic_pipeline import build_comic_pipeline
+
+    monkeypatch.setenv("MEDIA_IMAGE_MODEL", "qwen:qwen-image-test")
+    monkeypatch.setenv("AGENT_DATA_DIR", str(tmp_path))
+    graph = build_comic_pipeline(
+        credentials=None,  # type: ignore[arg-type]
+        preferred_model_id="auto",
+        emit=lambda _d, _p: None,
+    )
+    assert graph is not None

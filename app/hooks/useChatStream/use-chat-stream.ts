@@ -55,6 +55,7 @@ export function useChatStream({
   endpointOverrides,
   selectedModel,
   codeAgentMode,
+  mediaImageModelId,
   attachedFiles,
   isParsingFile,
   clearAfterSubmit,
@@ -368,6 +369,7 @@ export function useChatStream({
             workingDir: activeProject?.rootPath || "",
             projectId: activeProject?.id || "",
             selectedModel: requestModel,
+            mediaImageModelId: mediaImageModelId || undefined,
             agentMode:
               activeSession.mode === "code"
                 ? options.codeAgentModeOverride || codeAgentMode

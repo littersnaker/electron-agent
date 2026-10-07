@@ -62,6 +62,9 @@ export function ChatComposer({
   onCreateCustomModel,
   onUpdateCustomModel,
   onDeleteCustomModel,
+  mediaImageModels,
+  mediaImageModelId = "",
+  onMediaImageModelChange,
   onSubmit,
   onStop,
 }: ChatComposerProps) {
@@ -395,6 +398,27 @@ export function ChatComposer({
                 onChange={onCodeAgentModeChange}
                 disabled={disabled}
               />
+            )}
+            {mode === "media" && mediaImageModels && onMediaImageModelChange && (
+              <select
+                value={mediaImageModelId}
+                onChange={(event) => onMediaImageModelChange(event.target.value)}
+                disabled={disabled}
+                aria-label="选择漫剧出图模型"
+                title="漫剧出图模型（角色设定图与分镜首帧）"
+                className="max-w-[150px] min-h-[32px] cursor-pointer truncate rounded-lg border px-2 text-[11px] outline-none"
+                style={{
+                  background: "var(--glass)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {mediaImageModels.map((model) => (
+                  <option key={model.id || "auto"} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
             )}
             <ModelSelector
               models={models}

@@ -20,9 +20,8 @@ from backend.services.agent.worker.pending import (
 )
 from backend.services.llm.credentials import LlmCredentials
 from backend.services.media.comic_pipeline import (
-    IMAGE_MODEL_ID,
-    VIDEO_MODEL_ID,
     build_comic_pipeline,
+    resolve_default_media_models,
 )
 from backend.services.media.dashscope import generate_media, resolve_media_api_base
 from backend.services.media.rate_limit import throttle_media_request
@@ -172,6 +171,32 @@ async def _stream_direct_media(
     )
 
 
+def _resolve_comic_image_model(
+    preferred_model_id: str,
+    media_image_model_id: str,
+) -> str:
+    """解析漫剧出图模型：显式指定 > 会话所选媒体模型 > env 默认。
+
+    preferred_model_id 是聊天模型选择器的值；只有当它恰好是支持出图的
+    媒体模型时才复用，否则回退默认（聊天模型只用于编剧文本生成）。
+    """
+
+    from backend.services.media.catalog import get_media_model
+
+    for candidate in (media_image_model_id, preferred_model_id):
+        selected = (candidate or "").strip()
+        if not selected or selected == "auto":
+            continue
+        try:
+            model = get_media_model(selected)
+        except ValueError:
+            continue
+        if "text-to-image" in (model.get("modes") or []):
+            return selected
+    image_model_id, _video_model_id = resolve_default_media_models()
+    return image_model_id
+
+
 def _resolve_media_model_id(
     preferred_model_id: str,
     mode: str,
@@ -179,8 +204,9 @@ def _resolve_media_model_id(
     """解析本次媒体生成的模型：用户选择优先，不支持当前模式时回退内置默认。"""
 
     selected = (preferred_model_id or "").strip()
+    default_image_model, default_video_model = resolve_default_media_models()
     if not selected or selected == "auto":
-        return (VIDEO_MODEL_ID if mode == "text-to-video" else IMAGE_MODEL_ID), False
+        return (default_video_model if mode == "text-to-video" else default_image_model), False
     from backend.services.media.catalog import get_media_model
 
     try:
@@ -189,7 +215,7 @@ def _resolve_media_model_id(
             return selected, False
     except ValueError:
         pass
-    return (VIDEO_MODEL_ID if mode == "text-to-video" else IMAGE_MODEL_ID), True
+    return (default_video_model if mode == "text-to-video" else default_image_model), True
 
 
 async def _stream_storyboard(
@@ -206,6 +232,7 @@ async def _stream_storyboard(
     graph = build_comic_pipeline(
         credentials=credentials,
         preferred_model_id=preferred_model_id,
+        image_model_id=_resolve_comic_image_model(preferred_model_id, body.media_image_model_id),
         emit=_media_emit(queue),
     )
     # 产物持久化在数据目录 media-cache 下：重启不丢、历史会话可回放。
@@ -314,6 +341,7 @@ async def _resume_comic(
     graph = build_comic_pipeline(
         credentials=credentials,
         preferred_model_id=preferred_model_id,
+        image_model_id=_resolve_comic_image_model(preferred_model_id, body.media_image_model_id),
         emit=_media_emit(queue),
     )
     initial: dict[str, object] = {
