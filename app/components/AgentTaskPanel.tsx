@@ -118,7 +118,13 @@ export default function AgentTaskPanel({
   );
 
   return (
-    <aside className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-3 overflow-y-auto lg:flex">
+    <aside
+      className="hidden min-h-0 w-[360px] shrink-0 flex-col gap-3 overflow-y-auto border-l p-2 lg:flex"
+      style={{
+        background: "var(--app-bg)",
+        borderColor: "var(--border)",
+      }}
+    >
       <TaskPlanningPanel
         agents={agents}
         toolActivities={toolActivities}
