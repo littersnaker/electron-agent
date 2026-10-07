@@ -62,6 +62,40 @@ function LibraryIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+function GraphIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <circle cx="5" cy="10" r="2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="5" r="2" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="15" r="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6.8 9.1 13.2 5.9M6.8 10.9l6.4 3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SparkIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <path
+        d="M10 3c.4 2.7 2 4.3 4.7 4.7-2.7.4-4.3 2-4.7 4.7-.4-2.7-2-4.3-4.7-4.7C8 7.3 9.6 5.7 10 3Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M14.8 12.6c.2 1.3.9 2 2.2 2.2-1.3.2-2 .9-2.2 2.2-.2-1.3-.9-2-2.2-2.2 1.3-.2 2-.9 2.2-2.2Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MonitorIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} fill="none">
+      <rect x="2.8" y="4" width="14.4" height="9.6" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7 16.4h6M10 13.6v2.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** 右侧固定面板：任务规划进度（常驻）+ 折叠的执行图/预览/Agent 状态。 */
 export default function AgentTaskPanel({
   agents,
@@ -129,12 +163,17 @@ export default function AgentTaskPanel({
         </button>
       )}
 
-      <CollapsiblePanel title="执行图" hint={eventCount > 0 ? `${eventCount}` : undefined}>
+      <CollapsiblePanel
+        title="执行图"
+        icon={<GraphIcon />}
+        hint={eventCount > 0 ? `${eventCount}` : undefined}
+      >
         <ExecutionGraphPanel lifecycleEvents={lifecycleEvents} toolActivities={toolActivities} />
       </CollapsiblePanel>
 
       <CollapsiblePanel
         title="Agent 状态"
+        icon={<SparkIcon />}
         hint={runningCount > 0 ? `${runningCount} 运行中` : undefined}
       >
         <AgentPanel agents={agents} isStreaming={isStreaming} className="" />
@@ -142,6 +181,7 @@ export default function AgentTaskPanel({
 
       <CollapsiblePanel
         title="页面预览"
+        icon={<MonitorIcon />}
         hint={previewActive ? "进行中" : undefined}
       >
         <PreviewPanel review={visualReview} rootPath={projectRootPath} visionModels={visionModels} />

@@ -190,9 +190,20 @@ export default function TaskPlanningPanel({
             : "全部阶段已完成"
           : "等待新的项目任务";
 
+  // 空闲态：没有在跑、没有进度、没有任何事件/改动时，只保留标题行，
+  // 不渲染与当前会话无关的阶段清单——右侧面板不再被“未开始”占满。
+  const idle =
+    !isStreaming &&
+    displayProgress === 0 &&
+    !hasWorkList &&
+    lifecycleEvents.length === 0 &&
+    changedFiles.length === 0 &&
+    !liveEditing &&
+    !agentStatus;
+
   return (
     <section
-      className={`task-planning-panel flex min-h-[300px] max-h-[46%] shrink-0 flex-col overflow-hidden rounded-[22px] border ${className}`}
+      className={`task-planning-panel ${idle ? "" : "flex min-h-[300px]"} max-h-[46%] shrink-0 flex-col overflow-hidden rounded-[22px] border ${className}`}
       style={{
         background: "linear-gradient(145deg, var(--glass-strong), var(--glass-soft))",
         borderColor: "var(--border)",
@@ -269,9 +280,11 @@ export default function TaskPlanningPanel({
         </div>
       </header>
 
-      <div className="mx-4 h-px shrink-0" style={{ background: "var(--border)" }} />
+      {idle ? null : (
+        <>
+          <div className="mx-4 h-px shrink-0" style={{ background: "var(--border)" }} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {(liveEditing || changedFiles.length > 0) && (
           <div
             className="mb-3 rounded-[14px] border p-2"
@@ -531,7 +544,9 @@ export default function TaskPlanningPanel({
             );
           })}
         </div>
-      </div>
+          </div>
+        </>
+      )}
 
       <style>{`
         @keyframes planningStageEnter {
