@@ -13,21 +13,11 @@ const AGENT_INTENTS = agentRoutingConfig.intents as Array<{
 }>;
 
 export function buildWelcomeMessages(mode: SessionMode, project?: WorkspaceProject): Message[] {
-  return [
-    {
-      role: "assistant",
-      content:
-        mode === "code"
-          ? `已进入 ${project?.name || "项目"} 的 Code Agent。可选择建议、自动编辑或全自动模式；自动模式会持续读取、修改并验证项目，而不是只生成步骤文档。`
-          : mode === "commerce"
-            ? "已进入 Cross-border Market Intelligence Agent。告诉我一个大概品类或市场问题，我会用公开 SERP / Shopping 做核心研究，并把 Amazon、Keepa 等平台数据作为可选增强。"
-            : mode === "media"
-              ? "已进入 AI 漫剧工作室。输入剧本或剧情梗概，我会拆分成镜并等待你确认，然后并行出图、图生视频并合并成集。"
-              : mode === "image"
-                ? "已进入图片识别 Agent。上传货架照片，我会先增强清晰度并放大，再由视觉模型识别每个图纸编号在第几层第几位，最后生成 Excel 表格。"
-                : "你好，我是独立的问答 Agent。你可以直接问我任何问题。",
-    },
-  ];
+  // 空会话的引导已由 ChatList 的 WelcomeHero 空态承担（问候 + 能力入口卡），
+  // 不再往消息流里塞一条假的助手欢迎语；历史会话里的旧欢迎语保持原样展示。
+  void mode;
+  void project;
+  return [];
 }
 
 export function normalizeAgentKind(value?: string): AgentKind {

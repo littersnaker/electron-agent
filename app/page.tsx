@@ -437,6 +437,11 @@ export default function Home() {
                     knowledgeSources={chat.knowledgeSources}
                     knowledgeSearched={chat.knowledgeSearched}
                     knowledgeMetrics={chat.knowledgeMetrics}
+                    onCreateSession={(mode) => void handleCreateSession(mode)}
+                    codeEnabled={codePluginEnabled}
+                    commerceEnabled={commercePluginEnabled}
+                    mediaEnabled={mediaPluginEnabled}
+                    imageEnabled={imagePluginEnabled}
                   />
                   <div className="shrink-0 pt-2">
                     {checkpointRuns.checkpoint && !isBusy && !chat.interactiveRequest ? (

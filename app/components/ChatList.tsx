@@ -11,6 +11,7 @@ import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
 import ImageRecognitionResultCard from "./image-recognition/ImageRecognitionResultCard";
+import WelcomeHero from "./welcome-hero";
 import VisualReviewCard from "./visual-review/VisualReviewCard";
 import VisualAuditCard from "./visual-review/VisualAuditCard";
 import { ContextMenu } from "./context-menu";
@@ -24,6 +25,12 @@ interface ChatListProps {
   knowledgeSources?: KnowledgeSourceItem[] | null;
   knowledgeSearched?: boolean;
   knowledgeMetrics?: KnowledgeMetrics | null;
+  /** 空会话欢迎区的快捷入口：创建对应 Agent 会话。 */
+  onCreateSession?: (mode: "qa" | "code" | "commerce" | "media" | "image") => void;
+  codeEnabled?: boolean;
+  commerceEnabled?: boolean;
+  mediaEnabled?: boolean;
+  imageEnabled?: boolean;
 }
 
 const COLORS = {
@@ -69,6 +76,11 @@ function ChatList({
   knowledgeSources = null,
   knowledgeSearched = false,
   knowledgeMetrics = null,
+  onCreateSession,
+  codeEnabled = false,
+  commerceEnabled = false,
+  mediaEnabled = false,
+  imageEnabled = false,
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
@@ -182,6 +194,16 @@ function ChatList({
 
   return (
     <div className="min-h-0 flex-1">
+      {messages.length === 0 ? (
+        <WelcomeHero
+          onCreateSession={onCreateSession ?? (() => {})}
+          codeEnabled={codeEnabled ?? false}
+          commerceEnabled={commerceEnabled ?? false}
+          mediaEnabled={mediaEnabled ?? false}
+          imageEnabled={imageEnabled ?? false}
+          isBusy={Boolean(isStreaming)}
+        />
+      ) : (
       <Virtuoso
         ref={virtuosoRef}
         data={messages}
@@ -421,6 +443,7 @@ function ChatList({
         }}
         computeItemKey={(index, item) => `${item.role}-${index}`}
       />
+      )}
 
       <style>{`
         .message-copy-tooltip {
