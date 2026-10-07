@@ -271,7 +271,7 @@ export default function SkillDetailModal({ skill, onClose, onConfigSaved }: Skil
                       className="flex items-center gap-2 rounded-[10px] border px-2.5 py-2 text-[11px] transition-colors"
                       style={{
                         borderColor: checked ? "rgba(10,132,255,0.35)" : "var(--border)",
-                        background: checked ? "rgba(10,132,255,0.08)" : "var(--glass-black)",
+                        background: checked ? "var(--accent-blue-soft)" : "var(--glass-black)",
                         color: checked ? "var(--accent-blue)" : "var(--text-secondary)",
                         cursor: "pointer",
                       }}

@@ -72,7 +72,7 @@ export default function VisualAuditCard({ card }: { card?: VisualAuditCardData }
         <div className="flex items-center gap-2">
           <span
             className="flex h-6 w-6 items-center justify-center rounded-lg text-[12px]"
-            style={{ background: "rgba(10,132,255,0.14)", color: COLORS.blue }}
+            style={{ background: "var(--accent-blue-soft-strong)", color: COLORS.blue }}
           >
             🔍
           </span>
@@ -104,7 +104,7 @@ export default function VisualAuditCard({ card }: { card?: VisualAuditCardData }
                 >
                   {page.path || "/"}
                 </span>
-                <span className="shrink-0 text-[9px]" style={{ color: meta.color }}>
+                <span className="shrink-0 text-[10px]" style={{ color: meta.color }}>
                   {meta.label}
                 </span>
               </div>

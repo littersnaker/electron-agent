@@ -38,7 +38,7 @@ function PerformanceRow({ snapshot }: { snapshot: WorkListSnapshotPayload }) {
   const totalTokens = step.totalPromptTokens + step.totalCompletionTokens;
   return (
     <div
-      className="mt-2 flex items-center justify-between rounded-[10px] px-2.5 py-1.5 font-mono text-[8px] tabular-nums"
+      className="mt-2 flex items-center justify-between rounded-[10px] px-2.5 py-1.5 font-mono text-[10px] tabular-nums"
       style={{
         color: "var(--text-tertiary)",
         background: "rgba(0,0,0,0.07)",
@@ -71,7 +71,7 @@ function QualityScoreRow({ snapshot }: { snapshot: WorkListSnapshotPayload }) {
       style={{ borderColor: "var(--border)" }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[8px] font-medium" style={{ color: "var(--text-tertiary)" }}>
+        <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>
           Quality Score
         </span>
         <span
@@ -87,17 +87,17 @@ function QualityScoreRow({ snapshot }: { snapshot: WorkListSnapshotPayload }) {
           const hasValue = typeof value === "number";
           return (
             <div key={key} className="flex items-center gap-2">
-              <span className="w-8 shrink-0 text-[8px]" style={{ color: "var(--text-tertiary)" }}>
+              <span className="w-8 shrink-0 text-[10px]" style={{ color: "var(--text-tertiary)" }}>
                 {label}
               </span>
               <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--glass)]">
                 <span
-                  className="block h-full rounded-full bg-[linear-gradient(90deg,#0a84ff,#64d2ff)]"
+                  className="block h-full rounded-full bg-[linear-gradient(90deg,var(--accent-blue),#64d2ff)]"
                   style={{ width: hasValue ? `${Math.max(0, Math.min(100, value))}%` : "0%" }}
                 />
               </div>
               <span
-                className="w-6 shrink-0 text-right font-mono text-[8px] tabular-nums"
+                className="w-6 shrink-0 text-right font-mono text-[10px] tabular-nums"
                 style={{ color: "var(--text-tertiary)" }}
               >
                 {hasValue ? Math.round(value) : "—"}
@@ -130,7 +130,7 @@ function MetricCell({ label, value, tone }: { label: string; value: string; tone
           className="h-1.5 w-1.5 shrink-0 rounded-full"
           style={{ background: tone, boxShadow: `0 0 8px ${tone}` }}
         />
-        <span className="text-[8px] font-medium" style={{ color: "var(--text-tertiary)" }}>
+        <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>
           {label}
         </span>
       </div>
@@ -182,13 +182,13 @@ export default function QualityMetricsCard({ snapshot }: QualityMetricsCardProps
     >
       <div className="mb-2 flex items-center justify-between px-0.5">
         <span
-          className="text-[9px] font-semibold tracking-[-0.01em]"
+          className="text-[10px] font-semibold tracking-[-0.01em]"
           style={{ color: "var(--text-secondary)" }}
         >
           Engineering Quality
         </span>
         <span
-          className="rounded-full px-2 py-0.5 text-[8px] font-medium"
+          className="rounded-full px-2 py-0.5 text-[10px] font-medium"
           style={{
             color: quality?.codeGatePassed ? "var(--accent-green)" : "var(--text-tertiary)",
             background: quality?.codeGatePassed ? "rgba(48,209,88,0.10)" : "var(--glass)",
@@ -203,7 +203,11 @@ export default function QualityMetricsCard({ snapshot }: QualityMetricsCardProps
       </div>
 
       <div className="grid grid-cols-4 gap-1.5">
-        <MetricCell label="Changes" value={String(quality?.changes ?? 0)} tone="#64b5ff" />
+        <MetricCell
+          label="Changes"
+          value={String(quality?.changes ?? 0)}
+          tone="var(--accent-blue)"
+        />
         <MetricCell label="Risk" value={quality ? `${quality.riskScore}` : "—"} tone={riskTone} />
         <MetricCell
           label="Validation"
@@ -221,7 +225,7 @@ export default function QualityMetricsCard({ snapshot }: QualityMetricsCardProps
         <div
           className={
             "mt-2 flex items-center justify-between rounded-[10px] px-2.5 " +
-            "py-1.5 font-mono text-[8px] tabular-nums"
+            "py-1.5 font-mono text-[10px] tabular-nums"
           }
           style={{
             color: "var(--text-tertiary)",

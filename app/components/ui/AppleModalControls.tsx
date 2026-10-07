@@ -28,10 +28,10 @@ const SIZE_CLASS_NAMES: Record<AppleButtonSize, string> = {
 
 const VARIANT_STYLES: Record<AppleButtonVariant, CSSProperties> = {
   primary: {
-    background: "linear-gradient(180deg, #2997ff 0%, #0a84ff 100%)",
+    background: "linear-gradient(180deg, #2997ff 0%, var(--accent-blue) 100%)",
     borderColor: "rgba(10,132,255,0.52)",
     color: "#ffffff",
-    boxShadow: "0 8px 20px rgba(10,132,255,0.2), inset 0 1px 0 rgba(255,255,255,0.3)",
+    boxShadow: "0 8px 20px var(--accent-blue-border), inset 0 1px 0 rgba(255,255,255,0.3)",
   },
   secondary: {
     background:
@@ -47,9 +47,9 @@ const VARIANT_STYLES: Record<AppleButtonVariant, CSSProperties> = {
     boxShadow: "none",
   },
   accent: {
-    background: "rgba(10,132,255,0.08)",
-    borderColor: "rgba(10,132,255,0.18)",
-    color: "#0a84ff",
+    background: "var(--accent-blue-soft)",
+    borderColor: "var(--accent-blue-border)",
+    color: "var(--accent-blue)",
     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.18)",
   },
 };
@@ -114,10 +114,10 @@ export function AppleSwitch({ checked, ariaLabel, disabled = false, onChange }: 
       className="relative inline-flex h-7.5 w-12.5 shrink-0 rounded-full p-0.5 transition-all duration-300 active:scale-[0.98] disabled:opacity-45 cursor-pointer"
       style={{
         background: checked
-          ? "linear-gradient(180deg, #39a5ff 0%, #0a84ff 100%)"
+          ? "linear-gradient(180deg, #39a5ff 0%, var(--accent-blue) 100%)"
           : "rgba(120,120,128,0.2)",
         boxShadow: checked
-          ? "inset 0 0 0 1px rgba(255,255,255,0.14), 0 7px 18px rgba(10,132,255,0.18)"
+          ? "inset 0 0 0 1px rgba(255,255,255,0.14), 0 7px 18px var(--accent-blue-border)"
           : "inset 0 0 0 1px rgba(15,23,42,0.08)",
       }}
     >

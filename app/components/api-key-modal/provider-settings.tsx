@@ -84,7 +84,7 @@ export const COLORS = {
   material: "var(--glass-solid)",
   materialSoft: "var(--glass)",
   border: "var(--border)",
-  blue: "#0a84ff",
+  blue: "var(--accent-blue)",
   red: "#ff453a",
   orange: "#ff9f0a",
   green: "#30d158",

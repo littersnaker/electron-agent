@@ -132,7 +132,7 @@ export function LlmProviderSettings({
     <section>
       <div className="mb-3">
         <div className="text-[11px] font-semibold text-[var(--text-primary)]">模型服务</div>
-        <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+        <div className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
           Auto 会先使用近期验证成功的模型；模型不存在时向下兼容，端点断网或鉴权失败时跳过该供应商。
         </div>
       </div>
@@ -205,9 +205,9 @@ export function LlmProviderSettings({
 
               {provider.endpointEnvironmentKey ? (
                 <label className="mt-2 block">
-                  <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+                  <span className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
                     <span>API Base URL（可选）</span>
-                    <span className="text-[8px] text-[var(--text-tertiary)]">
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
                       {provider.endpointEnvironmentKey}
                     </span>
                   </span>
@@ -225,7 +225,7 @@ export function LlmProviderSettings({
               ) : null}
 
               {provider.id === "qwen" ? (
-                <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                <div className="mt-1.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
                   建议粘贴百炼控制台当前业务空间的
                   <span className="font-mono"> /compatible-mode/v1 </span>
                   地址。保存后聊天、图片和视频请求都会使用该业务空间；媒体接口会自动去掉
@@ -236,7 +236,7 @@ export function LlmProviderSettings({
               ) : null}
 
               {status.state !== "idle" ? (
-                <div className="mt-1.5 flex items-start gap-1.5 text-[9px] leading-4">
+                <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-4">
                   <span className="shrink-0 font-medium" style={{ color }}>
                     {providerStatusLabel(status.state)}
                   </span>

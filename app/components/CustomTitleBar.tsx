@@ -67,7 +67,7 @@ export default function CustomTitleBar({
           Multi-agent
         </span>
         <span
-          className="rounded-full px-2 py-0.5 text-[9px] font-medium"
+          className="rounded-full px-2 py-0.5 text-[10px] font-medium"
           style={{
             background: "var(--glass)",
             color: "var(--text-tertiary)",
@@ -77,7 +77,7 @@ export default function CustomTitleBar({
         </span>
         {runningAgentCount > 0 && (
           <span
-            className="ml-1 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[9px] font-medium"
+            className="ml-1 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium"
             style={{
               background: "var(--accent-blue-soft-strong)",
               color: "var(--accent-blue)",

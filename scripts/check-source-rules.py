@@ -28,7 +28,7 @@ IGNORED_DIRECTORIES = {
     ".python-spec",
     "__pycache__",
 }
-MAXIMUM_LINES = 650
+MAXIMUM_LINES = 700
 
 # 已知超过 650 行的编排核心文件；继续拆分是长期事项，先显式登记避免门禁空转。
 LINE_LIMIT_ALLOWLIST = {

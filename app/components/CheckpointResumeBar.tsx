@@ -29,12 +29,12 @@ export default function CheckpointResumeBar({
     <div
       className="mb-2 flex items-center gap-3 rounded-[14px] border px-3 py-2"
       style={{
-        background: "color-mix(in srgb, var(--glass-solid) 88%, #0a84ff 12%)",
-        borderColor: "rgba(10,132,255,0.28)",
+        background: "color-mix(in srgb, var(--glass-solid) 88%, var(--accent-blue) 12%)",
+        borderColor: "var(--accent-blue-border-strong)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
       }}
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.13)] text-[#64b5ff]">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-blue-soft-strong)] text-[var(--accent-blue)]">
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
           <path
             d="M5 8a8 8 0 1 1-1 7M5 8V3M5 8h5"
@@ -49,7 +49,7 @@ export default function CheckpointResumeBar({
         <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">
           可恢复：{checkpoint.label || KIND_LABELS[checkpoint.agentKind]}
         </div>
-        <div className="truncate text-[9px] text-[var(--text-quaternary)]">
+        <div className="truncate text-[10px] text-[var(--text-quaternary)]">
           {checkpoint.agentKind === "code"
             ? "会保留已成功 Work、已修改文件和验证记录"
             : "会从最后保存的请求重新继续"}
@@ -70,7 +70,10 @@ export default function CheckpointResumeBar({
         disabled={disabled}
         onClick={onResume}
         className="h-8 rounded-[9px] px-3 text-[10px] font-semibold text-white disabled:opacity-40"
-        style={{ background: "linear-gradient(180deg, #168dff, #0879eb)" }}
+        style={{
+          background:
+            "linear-gradient(180deg, var(--accent-blue-gradient-start), var(--accent-blue-gradient-end))",
+        }}
       >
         恢复任务
       </button>

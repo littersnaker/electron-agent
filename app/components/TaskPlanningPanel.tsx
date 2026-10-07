@@ -207,9 +207,9 @@ export default function TaskPlanningPanel({
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border"
               style={{
-                background: "rgba(10,132,255,0.13)",
-                borderColor: "rgba(10,132,255,0.22)",
-                color: "#64b5ff",
+                background: "var(--accent-blue-soft-strong)",
+                borderColor: "var(--accent-blue-border)",
+                color: "var(--accent-blue)",
               }}
             >
               <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
@@ -236,10 +236,10 @@ export default function TaskPlanningPanel({
           </div>
 
           <span
-            className="shrink-0 rounded-full px-2 py-1 font-mono text-[9px] tabular-nums"
+            className="shrink-0 rounded-full px-2 py-1 font-mono text-[10px] tabular-nums"
             style={{
-              color: displayFailed ? "var(--accent-red)" : "#64b5ff",
-              background: displayFailed ? "rgba(255,69,58,0.11)" : "rgba(10,132,255,0.12)",
+              color: displayFailed ? "var(--accent-red)" : "var(--accent-blue)",
+              background: displayFailed ? "rgba(255,69,58,0.11)" : "var(--accent-blue-soft-strong)",
             }}
           >
             {displayProgress}%
@@ -261,7 +261,7 @@ export default function TaskPlanningPanel({
               }}
             />
           </div>
-          <span className="text-[9px] tabular-nums" style={{ color: "var(--text-tertiary)" }}>
+          <span className="text-[10px] tabular-nums" style={{ color: "var(--text-tertiary)" }}>
             {hasWorkList
               ? `${workFinished}/${workProgress?.total || 0} Work`
               : `${summary.completed}/${stages.length} 阶段`}
@@ -281,11 +281,11 @@ export default function TaskPlanningPanel({
               <div className="flex items-center gap-2 px-1">
                 <span
                   className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full"
-                  style={{ background: "#64b5ff" }}
+                  style={{ background: "var(--accent-blue)" }}
                 />
                 <span
-                  className="min-w-0 flex-1 truncate text-[9px] font-medium"
-                  style={{ color: "#64b5ff" }}
+                  className="min-w-0 flex-1 truncate text-[10px] font-medium"
+                  style={{ color: "var(--accent-blue)" }}
                   title={(liveEditing.currentFiles || []).join("、")}
                 >
                   {liveActionLabel(liveEditing)} {workIdFromAgent(liveEditing.agentId)} ·{" "}
@@ -299,7 +299,7 @@ export default function TaskPlanningPanel({
                 style={{ borderColor: "var(--border)" }}
               >
                 <p
-                  className="px-1 text-[8px] font-semibold"
+                  className="px-1 text-[10px] font-semibold"
                   style={{ color: "var(--text-tertiary)" }}
                 >
                   本次已修改 {changedFiles.length} 个文件
@@ -308,13 +308,13 @@ export default function TaskPlanningPanel({
                   {changedFiles.map((path) => (
                     <div key={path} className="flex items-center gap-1.5">
                       <span
-                        className="shrink-0 text-[8px]"
+                        className="shrink-0 text-[10px]"
                         style={{ color: "var(--accent-green)" }}
                       >
                         ✓
                       </span>
                       <span
-                        className="truncate font-mono text-[8px]"
+                        className="truncate font-mono text-[10px]"
                         style={{ color: "var(--text-secondary)" }}
                         title={path}
                       >
@@ -333,10 +333,13 @@ export default function TaskPlanningPanel({
             style={{ borderColor: "var(--border)", background: "var(--glass)" }}
           >
             <div className="flex items-center justify-between px-1">
-              <span className="text-[9px] font-semibold" style={{ color: "var(--text-secondary)" }}>
+              <span
+                className="text-[10px] font-semibold"
+                style={{ color: "var(--text-secondary)" }}
+              >
                 WorkList · revision {workListSnapshot.revision}
               </span>
-              <span className="text-[8px]" style={{ color: "var(--text-tertiary)" }}>
+              <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
                 成功 {workListSnapshot.succeeded} · 失败 {workListSnapshot.failed}
                 {workListSnapshot.scheduler?.maxParallel
                   ? ` · 并行 ${workListSnapshot.scheduler.maxParallel}`
@@ -363,27 +366,27 @@ export default function TaskPlanningPanel({
                           : completed
                             ? "var(--accent-green)"
                             : item.status === "running"
-                              ? "#64b5ff"
+                              ? "var(--accent-blue)"
                               : item.status === "paused"
                                 ? "#ff9f0a"
                                 : "var(--text-quaternary)",
                       }}
                     />
                     <span
-                      className="shrink-0 font-mono text-[8px]"
+                      className="shrink-0 font-mono text-[10px]"
                       style={{ color: "var(--text-tertiary)" }}
                     >
                       {item.id}
                       {typeof item.priority === "number" ? `·P${item.priority}` : ""}
                     </span>
                     <span
-                      className="min-w-0 flex-1 truncate text-[9px]"
+                      className="min-w-0 flex-1 truncate text-[10px]"
                       style={{ color: "var(--text-secondary)" }}
                     >
                       {item.title}
                     </span>
                     <span
-                      className="shrink-0 text-[8px]"
+                      className="shrink-0 text-[10px]"
                       style={{
                         color: failed ? "var(--accent-red)" : "var(--text-tertiary)",
                       }}
@@ -402,9 +405,9 @@ export default function TaskPlanningPanel({
                     const files = liveEvent.currentFiles?.length ? liveEvent.currentFiles : null;
                     return (
                       <p
-                        className="mt-1 truncate pl-3.5 text-[8px] leading-[1.45]"
+                        className="mt-1 truncate pl-3.5 text-[10px] leading-[1.45]"
                         style={{
-                          color: files ? "#64b5ff" : "var(--text-tertiary)",
+                          color: files ? "var(--accent-blue)" : "var(--text-tertiary)",
                         }}
                         title={files ? files.join("、") : liveEvent.detail}
                       >
@@ -414,7 +417,7 @@ export default function TaskPlanningPanel({
                   })()}
                   {failed && item.error && (
                     <p
-                      className="mt-1 line-clamp-2 pl-3.5 text-[8px] leading-[1.45]"
+                      className="mt-1 line-clamp-2 pl-3.5 text-[10px] leading-[1.45]"
                       style={{ color: "var(--text-tertiary)" }}
                       title={item.error}
                     >
@@ -446,7 +449,7 @@ export default function TaskPlanningPanel({
                 }
                 style={{
                   background: isActive ? "rgba(10,132,255,0.09)" : "transparent",
-                  borderColor: isActive ? "rgba(10,132,255,0.22)" : "transparent",
+                  borderColor: isActive ? "var(--accent-blue-border)" : "transparent",
                 }}
               >
                 <span
@@ -471,7 +474,7 @@ export default function TaskPlanningPanel({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <span
-                        className="shrink-0 font-mono text-[9px] tabular-nums"
+                        className="shrink-0 font-mono text-[10px] tabular-nums"
                         style={{ color: "var(--text-quaternary)" }}
                       >
                         {String(index + 1).padStart(2, "0")}
@@ -484,7 +487,7 @@ export default function TaskPlanningPanel({
                       </h3>
                     </div>
                     <span
-                      className="shrink-0 rounded-full px-2 py-0.5 text-[8px] font-medium"
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
                       style={{ color: meta.color, background: meta.background }}
                     >
                       {meta.label}
@@ -492,7 +495,7 @@ export default function TaskPlanningPanel({
                   </div>
 
                   <p
-                    className="mt-1 line-clamp-2 text-[9px] leading-4"
+                    className="mt-1 line-clamp-2 text-[10px] leading-4"
                     style={{ color: "var(--text-secondary)" }}
                     title={stage.detail}
                   >
@@ -515,7 +518,7 @@ export default function TaskPlanningPanel({
                       </div>
                       {stage.activityCount > 0 && (
                         <span
-                          className="shrink-0 font-mono text-[8px]"
+                          className="shrink-0 font-mono text-[10px]"
                           style={{ color: "var(--text-tertiary)" }}
                         >
                           {stage.activityCount} activity

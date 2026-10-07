@@ -169,7 +169,7 @@ export function ChatComposer({
                   title={tab.description}
                 >
                   <div className="text-[11px] font-semibold">{tab.label}</div>
-                  <div className="mt-0.5 text-[9px] opacity-70">{tab.description}</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">{tab.description}</div>
                 </button>
               );
             })}
@@ -197,7 +197,7 @@ export function ChatComposer({
       )}
 
       {attachmentError && mode !== "commerce" && (
-        <div className="mb-2 rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[9px] text-amber-300">
+        <div className="mb-2 rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-[10px] text-amber-300">
           {attachmentError}
         </div>
       )}
@@ -230,7 +230,7 @@ export function ChatComposer({
               </button>
             );
           })}
-          <span className="w-full text-[9px] leading-4 text-[var(--text-quaternary)]">
+          <span className="w-full text-[10px] leading-4 text-[var(--text-quaternary)]">
             AI 生成图中的文字已经是像素，CSS
             无法修正歪字。商业图建议先生成无字底图，再使用真实字体叠加。
           </span>
@@ -274,7 +274,7 @@ export function ChatComposer({
               checked={enableQualityGuard && imageEditFidelity !== "creative"}
               onChange={(event) => onEnableQualityGuardChange(event.target.checked)}
               disabled={imageEditFidelity === "creative"}
-              className="mt-0.5 h-3.5 w-3.5 accent-[#0a84ff] disabled:opacity-40"
+              className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent-blue)] disabled:opacity-40"
             />
             <span>
               生成后检查重影、重复元素和无关改动；发现明显问题时自动重试一次。
@@ -284,7 +284,7 @@ export function ChatComposer({
             </span>
           </label>
 
-          <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-quaternary)]">
+          <div className="mt-1.5 text-[10px] leading-4 text-[var(--text-quaternary)]">
             UI
             截图、商品图、按钮/标题文字替换请使用“精准修改”。模型仍属于生成式编辑，无法保证像素级完全不变。
           </div>
@@ -382,7 +382,7 @@ export function ChatComposer({
               </button>
             )}
             {mode !== "commerce" && (
-              <span className="hidden text-[9px] text-[var(--text-quaternary)] sm:inline">
+              <span className="hidden text-[10px] text-[var(--text-quaternary)] sm:inline">
                 粘贴图片 / 拖入文件夹 / 选中文字后拖入 · Enter 发送
               </span>
             )}
@@ -427,7 +427,7 @@ export function ChatComposer({
                 boxShadow: isStreaming
                   ? undefined
                   : mode === "commerce" || composerMode === "chat"
-                    ? "0 8px 18px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.2)"
+                    ? "0 8px 18px var(--accent-blue-border), inset 0 1px 0 rgba(255,255,255,0.2)"
                     : "0 8px 18px rgba(125,76,229,0.24), inset 0 1px 0 rgba(255,255,255,0.2)",
               }}
               aria-label={isStreaming ? "停止生成" : "发送"}

@@ -278,7 +278,7 @@ export function ToolActivityPanel({
               {hasRunning && isStreaming ? (
                 <span
                   className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                  style={{ background: COLORS.blueSoft, color: "#64b5ff" }}
+                  style={{ background: COLORS.blueSoft, color: "var(--accent-blue)" }}
                 >
                   运行中
                 </span>
@@ -368,7 +368,8 @@ export function ToolActivityPanel({
                       <span
                         className="tool-sweep block h-full w-1/3 rounded-full"
                         style={{
-                          background: "linear-gradient(90deg, transparent, #64b5ff, transparent)",
+                          background:
+                            "linear-gradient(90deg, transparent, var(--accent-blue), transparent)",
                         }}
                       />
                     </div>

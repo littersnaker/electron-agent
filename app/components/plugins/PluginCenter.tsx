@@ -113,7 +113,7 @@ export default function PluginCenter({
           >
             {plugins.map((plugin, index) => {
               const active = enabled[plugin.id];
-              const accent = plugin.id === "code-agent" ? "#0a84ff" : "#5e5ce6";
+              const accent = plugin.id === "code-agent" ? "var(--accent-blue)" : "#5e5ce6";
 
               return (
                 <div
@@ -140,7 +140,7 @@ export default function PluginCenter({
                         {plugin.name}
                       </span>
                       <span
-                        className="rounded-full px-2 py-0.5 text-[9px] font-medium"
+                        className="rounded-full px-2 py-0.5 text-[10px] font-medium"
                         style={{
                           background: "var(--glass)",
                           color: "var(--text-tertiary)",

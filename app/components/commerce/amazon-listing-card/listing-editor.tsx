@@ -29,14 +29,14 @@ function FieldHeader({
       <div className="text-[10px] font-semibold text-[var(--text-secondary)]">
         {label}
         {issues > 0 && (
-          <span className="ml-1.5 rounded-full bg-[rgba(255,159,10,0.12)] px-1.5 py-0.5 text-[8px] text-[#ff9f0a]">
+          <span className="ml-1.5 rounded-full bg-[rgba(255,159,10,0.12)] px-1.5 py-0.5 text-[10px] text-[#ff9f0a]">
             {issues} 项提示
           </span>
         )}
       </div>
       {typeof count === "number" && typeof limit === "number" && (
         <span
-          className="font-mono text-[8px]"
+          className="font-mono text-[10px]"
           style={{ color: count > limit ? "#ff453a" : "var(--text-quaternary)" }}
         >
           {count}/{limit}
@@ -91,7 +91,7 @@ export function ListingEditor({
         <div className="space-y-2">
           {draft.bulletPoints.map((bullet, index) => (
             <div key={`bullet-${index + 1}`} className="flex gap-2">
-              <span className="mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(10,132,255,0.12)] text-[8px] font-semibold text-[#64b5ff]">
+              <span className="mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-blue-soft-strong)] text-[10px] font-semibold text-[var(--accent-blue)]">
                 {index + 1}
               </span>
               <div className="min-w-0 flex-1">
@@ -103,7 +103,7 @@ export function ListingEditor({
                   rows={3}
                   className="w-full resize-y rounded-[12px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-2 text-[10px] leading-5 text-[var(--text-primary)] outline-none focus:border-[rgba(10,132,255,0.38)]"
                 />
-                <div className="mt-0.5 text-right font-mono text-[8px] text-[var(--text-quaternary)]">
+                <div className="mt-0.5 text-right font-mono text-[10px] text-[var(--text-quaternary)]">
                   {bullet.length}/{validation.bulletMaximumCharacters}
                 </div>
               </div>

@@ -62,8 +62,8 @@ const AGENT_META: Record<
     path: "M10 2.7c.48 3.42 2.41 5.35 5.83 5.83-3.42.48-5.35 2.41-5.83 5.83-.48-3.42-2.41-5.35-5.83-5.83C7.59 8.05 9.52 6.12 10 2.7Z",
   },
   planner: {
-    accent: "#64b5ff",
-    soft: "rgba(10,132,255,0.14)",
+    accent: "var(--accent-blue)",
+    soft: "var(--accent-blue-soft-strong)",
     description: "分析需求并拆分可执行步骤",
     path: "M5 4.2h10M5 8.1h10M5 12h6.5M5 15.9h4",
   },
@@ -86,8 +86,8 @@ const AGENT_META: Record<
     path: "M4.5 14.5 8 11l2.5 2.4 5-5M5 5h10v10H5zM12.6 7.4h.01",
   },
   commerce: {
-    accent: "#0a84ff",
-    soft: "rgba(10,132,255,0.14)",
+    accent: "var(--accent-blue)",
+    soft: "var(--accent-blue-soft-strong)",
     description: "解析类目、采集公开 SERP/Shopping 市场信号并生成跨境市场情报",
     path: "M3.8 14.8V9.7M8 14.8V6.5M12.2 14.8V10.6M16.2 14.8V4.1M3 16.2h14",
   },
@@ -194,7 +194,7 @@ export default function AgentPanel({ agents, isStreaming, className = "" }: Agen
           <div className="flex items-center gap-2">
             <h2 className="truncate text-[13px] font-semibold">Agent Orchestra</h2>
             {summary.running > 0 && (
-              <span className="rounded-full bg-[#0a84ff]/15 px-2 py-0.5 text-[9px] font-medium text-[#64b5ff]">
+              <span className="rounded-full bg-[var(--accent-blue)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-blue)]">
                 {summary.running} 运行中
               </span>
             )}
@@ -240,7 +240,7 @@ export default function AgentPanel({ agents, isStreaming, className = "" }: Agen
                       <div className="flex items-center justify-between gap-2">
                         <div className="truncate text-[12px] font-semibold">{agent.name}</div>
                         <span
-                          className="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-medium"
+                          className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
                           style={{
                             color:
                               agent.status === "error"
@@ -267,7 +267,7 @@ export default function AgentPanel({ agents, isStreaming, className = "" }: Agen
                             }}
                           />
                         </div>
-                        <span className="w-7 text-right font-mono text-[9px] tabular-nums text-(--text-tertiary)">
+                        <span className="w-7 text-right font-mono text-[10px] tabular-nums text-(--text-tertiary)">
                           {agent.progress}%
                         </span>
                       </div>

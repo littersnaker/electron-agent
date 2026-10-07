@@ -351,12 +351,12 @@ async def _resume_comic(
                 "提示：视频模型免费额度已用完，请在百炼控制台充值或关闭“仅免费额度”模式；"
                 "或设置环境变量 MEDIA_VIDEO_MODEL 换用其他视频模型。"
             )
-    summary.append("✅ 全部通过" if passed else "⚠️ 存在失败分镜")
+    summary.append("全部通过" if passed else "存在失败分镜")
     tts_count = int(report.get("ttsOk") or 0)
     if tts_count:
-        summary.append(f"🎙️ 台词配音 {tts_count} 段")
+        summary.append(f"台词配音 {tts_count} 段")
     if report.get("subtitleBurned"):
-        summary.append("💬 字幕已烧录进成片")
+        summary.append("字幕已烧录进成片")
 
     attachments: list[dict[str, Any]] = []
     for character in state.get("characters") or []:

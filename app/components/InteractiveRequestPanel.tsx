@@ -1,6 +1,7 @@
 // 模块说明：负责 InteractiveRequestPanel 用户界面组件。
 "use client";
 
+import { APPROVAL_KIND_META } from "./interactive-approval-meta";
 import type { InteractiveRequest } from "../types/workspace";
 
 interface InteractiveRequestPanelProps {
@@ -35,9 +36,9 @@ function FileCreateConfirmationCard({
         <span
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border"
           style={{
-            background: "rgba(10,132,255,0.11)",
-            borderColor: "rgba(10,132,255,0.18)",
-            color: "#0a84ff",
+            background: "var(--accent-blue-soft)",
+            borderColor: "var(--accent-blue-border)",
+            color: "var(--accent-blue)",
           }}
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
@@ -114,7 +115,7 @@ function FileCreateConfirmationCard({
           type="button"
           onClick={() => onReply("user", createOption?.value || "create")}
           className="h-9 rounded-[10px] px-3.5 text-[11px] font-semibold text-white shadow-[0_5px_18px_rgba(10,132,255,0.24)] transition-[filter,transform] hover:brightness-105 active:scale-[0.98]"
-          style={{ background: "#0a84ff" }}
+          style={{ background: "var(--accent-blue)" }}
         >
           {createOption?.label || "新建并继续"}
         </button>
@@ -132,6 +133,9 @@ function RiskApprovalCard({
   const rejectOption =
     request.options.find((option) => option.value === "reject") || request.options[1];
   const isHighRisk = request.riskLevel === "high";
+  const kindMeta = APPROVAL_KIND_META[request.approvalKind ?? ""];
+  // 主按钮色：高风险红示警；其余回归全局蓝色 CTA 体系（不再用橙黄误导读作警告）。
+  const approveColor = isHighRisk ? "#ff453a" : "var(--accent-blue)";
   const argumentPreview =
     request.toolArguments && Object.keys(request.toolArguments).length > 0
       ? JSON.stringify(request.toolArguments, null, 2)
@@ -149,14 +153,24 @@ function RiskApprovalCard({
     >
       <div className="flex items-start gap-3.5 px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
         <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border text-lg"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border"
           style={{
             background: isHighRisk ? "rgba(255,69,58,0.11)" : "rgba(255,159,10,0.11)",
             borderColor: isHighRisk ? "rgba(255,69,58,0.22)" : "rgba(255,159,10,0.22)",
+            color: isHighRisk ? "#ff453a" : "var(--accent-blue)",
           }}
           aria-hidden="true"
         >
-          {isHighRisk ? "⚠️" : "🛡️"}
+          {kindMeta?.icon ?? (
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none">
+              <path
+                d="M12 3.5 20 7v5.5c0 4.6-3.2 7.4-8 8.5-4.8-1.1-8-3.9-8-8.5V7z"
+                stroke="currentColor"
+                strokeWidth="1.55"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -165,7 +179,7 @@ function RiskApprovalCard({
               {request.title || "操作需要人工批准"}
             </p>
             <span
-              className="rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase"
+              className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase"
               style={{
                 background: isHighRisk ? "rgba(255,69,58,0.12)" : "rgba(255,159,10,0.12)",
                 color: isHighRisk ? "#ff453a" : "#ff9f0a",
@@ -186,6 +200,11 @@ function RiskApprovalCard({
               style={{ color: "var(--text-tertiary)" }}
             >
               {request.description}
+            </p>
+          )}
+          {kindMeta && (
+            <p className="mt-1 text-[11px] leading-[1.6]" style={{ color: "var(--text-tertiary)" }}>
+              {kindMeta.purpose}
             </p>
           )}
 
@@ -248,7 +267,7 @@ function RiskApprovalCard({
           type="button"
           onClick={() => onReply("user", approveOption?.value || "approve")}
           className="h-9 rounded-[10px] px-3.5 text-[11px] font-semibold text-white active:scale-[0.98]"
-          style={{ background: isHighRisk ? "#ff453a" : "#ff9f0a" }}
+          style={{ background: approveColor }}
         >
           {approveOption?.label || "批准并继续"}
         </button>
@@ -268,14 +287,14 @@ function TerminalInteractiveCard({
       className="mb-3 overflow-hidden rounded-[20px] border"
       style={{
         background: "linear-gradient(180deg, var(--glass), var(--glass-soft))",
-        borderColor: "rgba(10,132,255,0.22)",
+        borderColor: "var(--accent-blue-border)",
         boxShadow: "var(--shadow-soft), inset 0 1px 0 rgba(255,255,255,0.055)",
       }}
     >
       <div className="flex items-start gap-3 px-4 py-3.5">
         <span
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px]"
-          style={{ background: "rgba(10,132,255,0.13)", color: "#64b5ff" }}
+          style={{ background: "var(--accent-blue-soft-strong)", color: "var(--accent-blue)" }}
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none">
             <path
@@ -303,8 +322,8 @@ function TerminalInteractiveCard({
               </div>
             </div>
             <span
-              className="rounded-full px-2 py-1 font-mono text-[9px] uppercase"
-              style={{ background: "rgba(10,132,255,0.11)", color: "#64b5ff" }}
+              className="rounded-full px-2 py-1 font-mono text-[10px] uppercase"
+              style={{ background: "var(--accent-blue-soft)", color: "var(--accent-blue)" }}
             >
               {request.mode}
             </span>
@@ -348,8 +367,10 @@ function TerminalInteractiveCard({
             className="rounded-[10px] border px-3 py-2 text-[11px] font-medium transition-all hover:-translate-y-px active:translate-y-0"
             style={{
               background:
-                index === 0 ? "linear-gradient(180deg, #168dff, #0879eb)" : "var(--glass)",
-              borderColor: index === 0 ? "rgba(10,132,255,0.46)" : "var(--border)",
+                index === 0
+                  ? "linear-gradient(180deg, var(--accent-blue-gradient-start), var(--accent-blue-gradient-end))"
+                  : "var(--glass)",
+              borderColor: index === 0 ? "var(--accent-blue-border-strong)" : "var(--border)",
               color: index === 0 ? "white" : "var(--text-secondary)",
             }}
           >
@@ -395,14 +416,14 @@ function TerminalInteractiveCard({
             }
           }}
           placeholder="输入自定义回答，留空表示发送回车"
-          className="h-9 min-w-0 flex-1 rounded-[10px] border bg-[var(--glass-black)] px-3 text-[11px] outline-none placeholder:text-[var(--text-quaternary)] focus:border-[#0a84ff]"
+          className="h-9 min-w-0 flex-1 rounded-[10px] border bg-[var(--glass-black)] px-3 text-[11px] outline-none placeholder:text-[var(--text-quaternary)] focus:border-[var(--accent-blue)]"
           style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
         />
         <button
           type="button"
           onClick={() => onReply("user")}
           className="h-9 rounded-[10px] px-3 text-[11px] font-semibold text-white transition-all active:scale-[0.98]"
-          style={{ background: "#0a84ff" }}
+          style={{ background: "var(--accent-blue)" }}
         >
           发送输入
         </button>
@@ -436,7 +457,7 @@ function ComicStoryboardCard({
       className="mb-3 overflow-hidden rounded-[22px] border"
       style={{
         background: "color-mix(in srgb, var(--glass-strong) 94%, transparent)",
-        borderColor: "rgba(10,132,255,0.28)",
+        borderColor: "var(--accent-blue-border-strong)",
         boxShadow: "0 18px 55px rgba(0,0,0,0.13), inset 0 1px 0 rgba(255,255,255,0.10)",
       }}
       aria-live="polite"
@@ -445,8 +466,8 @@ function ComicStoryboardCard({
         <span
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border"
           style={{
-            background: "rgba(10,132,255,0.11)",
-            borderColor: "rgba(10,132,255,0.18)",
+            background: "var(--accent-blue-soft)",
+            borderColor: "var(--accent-blue-border)",
             color: "var(--accent-blue)",
           }}
         >
@@ -517,7 +538,10 @@ function ComicStoryboardCard({
               >
                 <span
                   className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
-                  style={{ background: "rgba(10,132,255,0.14)", color: "var(--accent-blue)" }}
+                  style={{
+                    background: "var(--accent-blue-soft-strong)",
+                    color: "var(--accent-blue)",
+                  }}
                 >
                   {String(shot.index ?? index + 1)}
                 </span>
@@ -530,12 +554,12 @@ function ComicStoryboardCard({
                       {String(shot.title ?? "")}
                     </span>
                     <span
-                      className="rounded-full px-1.5 py-0.5 text-[9px]"
+                      className="rounded-full px-1.5 py-0.5 text-[10px]"
                       style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
                     >
                       {String(shot.shot_type ?? "中景")}
                     </span>
-                    <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>
+                    <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
                       {String(shot.duration ?? 5)}s
                     </span>
                   </div>

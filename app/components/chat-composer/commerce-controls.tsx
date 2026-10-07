@@ -34,7 +34,7 @@ export function CommerceControls({
           <div className="text-[10px] font-semibold text-[var(--text-secondary)]">
             Commerce 工作流
           </div>
-          <div className="mt-0.5 text-[8px] text-[var(--text-quaternary)]">
+          <div className="mt-0.5 text-[10px] text-[var(--text-quaternary)]">
             市场研究与 Listing Demo 共用 Amazon 数据链路
           </div>
         </div>
@@ -52,7 +52,7 @@ export function CommerceControls({
                 type="button"
                 onClick={() => onWorkflowModeChange?.(value)}
                 disabled={disabled}
-                className="rounded-[8px] px-2.5 py-1.5 text-[9px] font-semibold transition-colors disabled:opacity-40"
+                className="rounded-[8px] px-2.5 py-1.5 text-[10px] font-semibold transition-colors disabled:opacity-40"
                 style={{
                   background: selected ? "var(--selection-bg-strong)" : "transparent",
                   color: selected ? "var(--selection-text)" : "var(--text-tertiary)",
@@ -68,7 +68,7 @@ export function CommerceControls({
       <div className="flex flex-wrap items-center gap-2">
         <div className="mr-1 min-w-[92px]">
           <div className="text-[10px] font-semibold text-[var(--text-secondary)]">目标市场</div>
-          <div className="mt-0.5 text-[8px] text-[var(--text-quaternary)]">
+          <div className="mt-0.5 text-[10px] text-[var(--text-quaternary)]">
             决定本地化语言与货币
           </div>
         </div>
@@ -81,7 +81,7 @@ export function CommerceControls({
                 type="button"
                 onClick={() => onMarketplaceChange?.(marketplace.code)}
                 disabled={disabled}
-                className="rounded-full border px-2.5 py-1.5 text-[9px] font-medium transition-all disabled:opacity-40"
+                className="rounded-full border px-2.5 py-1.5 text-[10px] font-medium transition-all disabled:opacity-40"
                 style={{
                   background: selected ? "var(--selection-bg)" : "transparent",
                   borderColor: selected ? "var(--selection-border)" : "var(--border)",
@@ -96,7 +96,7 @@ export function CommerceControls({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[8px] leading-4 text-[var(--text-quaternary)]">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] leading-4 text-[var(--text-quaternary)]">
         <span>
           {workflowMode === "listing"
             ? "Listing Demo 使用模拟 ERP 商品档案 + Amazon API/爬虫竞品信息，不会自动发布。"
@@ -105,7 +105,7 @@ export function CommerceControls({
         <button
           type="button"
           onClick={onOpenServiceSettings}
-          className="rounded-full border px-2.5 py-1 text-[8px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
+          className="rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-colors hover:bg-[var(--glass-hover)]"
           style={{
             color: dataSourceState !== "none" ? "var(--accent-blue)" : "var(--text-secondary)",
             borderColor:

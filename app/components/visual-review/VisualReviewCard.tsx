@@ -46,7 +46,7 @@ export default function VisualReviewCard({ card }: { card?: VisualReviewCardData
         <div className="flex items-center gap-2">
           <span
             className="flex h-6 w-6 items-center justify-center rounded-lg text-[12px]"
-            style={{ background: "rgba(10,132,255,0.14)", color: COLORS.blue }}
+            style={{ background: "var(--accent-blue-soft-strong)", color: COLORS.blue }}
           >
             👁
           </span>
@@ -80,7 +80,7 @@ export default function VisualReviewCard({ card }: { card?: VisualReviewCardData
                 className="h-[64px] w-[102px] object-cover object-top"
               />
               <span
-                className="absolute bottom-0.5 right-0.5 rounded px-1 text-[9px]"
+                className="absolute bottom-0.5 right-0.5 rounded px-1 text-[10px]"
                 style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
               >
                 {index + 1}

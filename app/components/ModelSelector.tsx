@@ -114,7 +114,7 @@ export default function ModelSelector({
           >
             <div className="min-w-0">
               <div className="truncate text-[11px] font-medium">{current.name}</div>
-              <div className="truncate text-[9px]" style={{ color: COLORS.textSubtle }}>
+              <div className="truncate text-[10px]" style={{ color: COLORS.textSubtle }}>
                 {current.provider}
               </div>
             </div>
@@ -174,7 +174,7 @@ export default function ModelSelector({
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[12px] font-medium">{model.name}</span>
                         <span
-                          className="shrink-0 rounded-full px-1.5 py-0.5 text-[9px]"
+                          className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px]"
                           style={{
                             background: "var(--accent-blue-soft)",
                             color: COLORS.blue,

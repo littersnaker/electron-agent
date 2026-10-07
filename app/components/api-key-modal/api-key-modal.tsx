@@ -339,16 +339,16 @@ export function ApiKeyModal({
               <div className="text-[11px] font-semibold text-[var(--text-primary)]">
                 Agent 复盘循环
               </div>
-              <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
                 任务完成后自动复盘并沉淀长期记忆；复盘模型与对应厂商的 API Key
                 都配置好后才会运行，且不会阻塞主任务。填模型名即可（如
                 deepseek-v4-flash），无需厂商前缀。
               </div>
             </div>
             <label className="block">
-              <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+              <span className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
                 <span>复盘模型</span>
-                <span className="text-[8px] text-[var(--text-tertiary)]">
+                <span className="text-[10px] text-[var(--text-tertiary)]">
                   默认 deepseek-v4-flash
                 </span>
               </span>
@@ -363,7 +363,7 @@ export function ApiKeyModal({
                 onChange={(event) => setReviewModelId(event.target.value)}
               />
             </label>
-            <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+            <div className="mt-1.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
               {(() => {
                 const effectiveModel = reviewModelId.trim() || DEFAULT_REVIEW_MODEL_ID;
                 const info = reviewProviderInfo(effectiveModel, keys);
@@ -384,9 +384,9 @@ export function ApiKeyModal({
               启用复盘循环
             </label>
             <label className="mt-2 block">
-              <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+              <span className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
                 <span>最低复杂度门槛</span>
-                <span className="text-[8px] text-[var(--text-tertiary)]">
+                <span className="text-[10px] text-[var(--text-tertiary)]">
                   成功任务需达到才复盘，失败任务始终复盘
                 </span>
               </span>
@@ -414,7 +414,7 @@ export function ApiKeyModal({
               <div className="text-[11px] font-semibold text-[var(--text-primary)]">
                 视觉 Review（内置浏览器截图）
               </div>
-              <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
                 自动滚动截图项目预览页面并发送给云端视觉模型（如 DeepSeek
                 视觉模型）分析。截图内容会离开本机，属于隐私敏感操作，随时可以关闭。
                 「浏览器自动化」额外允许 Agent 导航、点击和输入（首次使用仍会弹审批）。
@@ -457,7 +457,7 @@ export function ApiKeyModal({
               />
               允许 Code Agent 使用浏览器自动化（导航/点击/输入/截图）
             </label>
-            <div className="mt-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+            <div className="mt-1.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
               {visualReview.settingsEnabled
                 ? "开启时：右侧「页面预览」面板可手动截图 Review，自动开关控制 Code Agent 是否在任务结束后自动执行。"
                 : "已关闭：预览面板仅显示页面，不会截图，也不会把任何内容发送给视觉模型。"}
@@ -470,7 +470,7 @@ export function ApiKeyModal({
                 <div className="text-[11px] font-semibold text-[var(--text-primary)]">
                   跨境市场数据
                 </div>
-                <div className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                <div className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
                   已检测 {configuredCount}/{PROVIDERS.length}{" "}
                   个可配置来源。单个数据源失败不会阻断其他来源。
                 </div>
@@ -521,7 +521,7 @@ export function ApiKeyModal({
                           <span className="text-[11px] font-semibold text-[var(--text-primary)]">
                             {provider.title}
                           </span>
-                          <span className="text-[8px]" style={{ color: statusColor }}>
+                          <span className="text-[10px]" style={{ color: statusColor }}>
                             {status.state === "idle"
                               ? isConfigured
                                 ? "已配置 · 未验证"
@@ -529,7 +529,7 @@ export function ApiKeyModal({
                               : providerStatusLabel(status.state)}
                           </span>
                         </div>
-                        <div className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                        <div className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
                           {provider.subtitle}
                         </div>
                       </div>
@@ -556,9 +556,9 @@ export function ApiKeyModal({
                         const visible = visibleFields.has(fieldId);
                         return (
                           <label key={fieldId} className="block">
-                            <span className="mb-1 flex items-center justify-between text-[9px] text-[var(--text-secondary)]">
+                            <span className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
                               <span>{field.label}</span>
-                              <span className="text-[8px] text-[var(--text-tertiary)]">
+                              <span className="text-[10px] text-[var(--text-tertiary)]">
                                 {field.environmentKey}
                               </span>
                             </span>
@@ -602,7 +602,7 @@ export function ApiKeyModal({
                       })}
                     </div>
 
-                    <div className="mt-2.5 text-[8px] leading-4 text-[var(--text-tertiary)]">
+                    <div className="mt-2.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
                       {status.message || provider.note}
                       {status.detail ? ` ${status.detail}` : ""}
                       {status.latencyMs !== undefined ? ` · ${status.latencyMs} ms` : ""}

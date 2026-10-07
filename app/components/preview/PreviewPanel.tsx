@@ -90,9 +90,9 @@ export default function PreviewPanel({
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border"
               style={{
-                background: "rgba(10,132,255,0.13)",
-                borderColor: "rgba(10,132,255,0.22)",
-                color: "#64b5ff",
+                background: "var(--accent-blue-soft-strong)",
+                borderColor: "var(--accent-blue-border)",
+                color: "var(--accent-blue)",
               }}
             >
               <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none">
@@ -188,8 +188,8 @@ export default function PreviewPanel({
               className="cursor-pointer rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 background: "rgba(10,132,255,0.16)",
-                borderColor: "rgba(10,132,255,0.28)",
-                color: "#64b5ff",
+                borderColor: "var(--accent-blue-border-strong)",
+                color: "var(--accent-blue)",
               }}
             >
               {busy ? "进行中…" : "截图 Review"}
@@ -230,7 +230,7 @@ export default function PreviewPanel({
               <span
                 className="h-3.5 w-3.5 animate-spin rounded-full border-2"
                 style={{
-                  borderColor: "rgba(10,132,255,0.25)",
+                  borderColor: "var(--accent-blue-border-strong)",
                   borderTopColor: "var(--accent-blue)",
                 }}
               />
@@ -261,7 +261,7 @@ export default function PreviewPanel({
                 className="h-[72px] w-[116px] object-cover object-top"
               />
               <span
-                className="absolute bottom-0.5 right-0.5 rounded px-1 text-[9px]"
+                className="absolute bottom-0.5 right-0.5 rounded px-1 text-[10px]"
                 style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
               >
                 {index + 1}
@@ -319,11 +319,23 @@ export default function PreviewPanel({
                   >
                     {page.path || "/"}
                   </span>
-                  <span className="shrink-0 text-[9px]" style={{ color: "var(--text-tertiary)" }}>
-                    {page.status === "reviewed" && "✅ 已审查"}
-                    {page.status === "captured" && "⏳ 待审查"}
-                    {page.status === "captureFailed" && "⚠️ 截图失败"}
-                    {page.status === "reviewFailed" && "⚠️ 审查失败"}
+                  <span
+                    className="shrink-0 text-[10px]"
+                    style={{
+                      color:
+                        page.status === "reviewed"
+                          ? "var(--accent-green)"
+                          : page.status === "captured"
+                            ? "var(--text-tertiary)"
+                            : page.status === "reviewFailed"
+                              ? "var(--accent-amber)"
+                              : "var(--accent-red)",
+                    }}
+                  >
+                    {page.status === "reviewed" && "已审查"}
+                    {page.status === "captured" && "待审查"}
+                    {page.status === "captureFailed" && "截图失败"}
+                    {page.status === "reviewFailed" && "审查失败"}
                   </span>
                 </div>
                 {page.captureError ? (

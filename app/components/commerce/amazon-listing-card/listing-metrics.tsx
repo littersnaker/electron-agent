@@ -18,7 +18,7 @@ export function ListingMetrics({ score }: { score: AmazonListingScore }) {
           key={metric.key}
           className="rounded-[12px] border border-[var(--border)] bg-[var(--glass-soft)] px-2.5 py-2"
         >
-          <div className="flex items-center justify-between text-[9px] text-[var(--text-tertiary)]">
+          <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
             <span>{metric.label}</span>
             <span className="font-mono">{score[metric.key]}</span>
           </div>

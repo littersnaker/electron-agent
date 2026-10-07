@@ -68,24 +68,24 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className="rounded-full px-2 py-1 text-[9px] font-semibold"
+                className="rounded-full px-2 py-1 text-[10px] font-semibold"
                 style={{
-                  color: "#64b5ff",
-                  background: "rgba(10,132,255,0.12)",
+                  color: "var(--accent-blue)",
+                  background: "var(--accent-blue-soft-strong)",
                 }}
               >
                 {report.marketplaceLabel}
               </span>
               <span
-                className="rounded-full px-2 py-1 text-[9px] font-semibold"
+                className="rounded-full px-2 py-1 text-[10px] font-semibold"
                 style={{
-                  color: isDemo ? "#ff9f0a" : "#0a84ff",
+                  color: isDemo ? "#ff9f0a" : "var(--accent-blue)",
                   background: isDemo ? "rgba(255,159,10,0.12)" : "rgba(10,132,255,0.10)",
                 }}
               >
                 {modeMeta.label}
               </span>
-              <span className="text-[9px] text-[var(--text-tertiary)]">{qualityLabel}</span>
+              <span className="text-[10px] text-[var(--text-tertiary)]">{qualityLabel}</span>
             </div>
             <h3 className="mt-2 truncate text-[16px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
               {report.category.categoryName}
@@ -99,7 +99,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
             <div
               className="flex h-12 w-12 items-center justify-center rounded-full"
               style={{
-                background: `conic-gradient(#0a84ff ${score}%, var(--glass) ${score}% 100%)`,
+                background: `conic-gradient(var(--accent-blue) ${score}%, var(--glass) ${score}% 100%)`,
               }}
             >
               <div className="flex h-[38px] w-[38px] items-center justify-center rounded-full bg-[var(--glass-solid)] font-mono text-[12px] font-semibold text-[var(--text-primary)]">
@@ -107,7 +107,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
               </div>
             </div>
             <div>
-              <div className="text-[9px] text-[var(--text-tertiary)]">
+              <div className="text-[10px] text-[var(--text-tertiary)]">
                 {isDemo
                   ? "Demo Signal"
                   : runMode === "full"
@@ -184,18 +184,18 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
             }}
           >
             <div>
-              <div className="text-[9px] font-medium text-[var(--text-secondary)]">
+              <div className="text-[10px] font-medium text-[var(--text-secondary)]">
                 样本月销量估算区间
               </div>
               <div className="mt-0.5 font-mono text-[12px] font-semibold text-[var(--text-primary)]">
                 {formatCompact(report.metrics.estimatedMonthlyUnits.low)} –{" "}
                 {formatCompact(report.metrics.estimatedMonthlyUnits.high)}
-                <span className="ml-2 text-[9px] font-normal text-[var(--text-tertiary)]">
+                <span className="ml-2 text-[10px] font-normal text-[var(--text-tertiary)]">
                   中位估算 {formatCompact(report.metrics.estimatedMonthlyUnits.median)}
                 </span>
               </div>
             </div>
-            <span className="text-[9px] text-[var(--text-tertiary)]">
+            <span className="text-[10px] text-[var(--text-tertiary)]">
               基于公开购买提示 / Sales Rank 的区间估算 · 非 Amazon 官方成交量
             </span>
           </div>
@@ -209,7 +209,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
               <div className="text-[11px] font-semibold text-[var(--text-primary)]">
                 公开市场观察
               </div>
-              <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
                 {isDemo
                   ? "模拟 SERP / Shopping 结果 · 仅用于展示交互和报告结构"
                   : "来自 SERP / Shopping 的真实公开结果 · 不等同于平台销量或市场份额"}
@@ -219,7 +219,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
               <button
                 type="button"
                 onClick={() => setShowAllObservations((value: boolean) => !value)}
-                className="rounded-[9px] border px-2.5 py-1.5 text-[9px] font-medium transition-colors hover:bg-[var(--glass-hover)]"
+                className="rounded-[9px] border px-2.5 py-1.5 text-[10px] font-medium transition-colors hover:bg-[var(--glass-hover)]"
                 style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
               >
                 {showAllObservations ? "收起" : `查看全部 ${observations.length}`}
@@ -227,7 +227,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
             )}
           </div>
           <div className="overflow-hidden rounded-[13px] border border-[var(--border)] bg-[var(--glass-soft)]">
-            <div className="grid grid-cols-[70px_minmax(0,1fr)_88px] gap-2 px-2 py-2 text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--text-quaternary)]">
+            <div className="grid grid-cols-[70px_minmax(0,1fr)_88px] gap-2 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-quaternary)]">
               <span>Type</span>
               <span>Result</span>
               <span className="text-right">Price</span>
@@ -246,7 +246,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
               <div className="text-[11px] font-semibold text-[var(--text-primary)]">
                 {isDemo ? "演示商品样本" : "平台商品增强样本"}
               </div>
-              <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
                 {isDemo
                   ? "当前展示的是明确标记的模拟商品样本"
                   : "仅在真实获取到平台结构化商品字段时展示"}
@@ -256,7 +256,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
               <button
                 type="button"
                 onClick={() => setShowAllProducts((value: boolean) => !value)}
-                className="rounded-[9px] border px-2.5 py-1.5 text-[9px] font-medium transition-colors hover:bg-[var(--glass-hover)]"
+                className="rounded-[9px] border px-2.5 py-1.5 text-[10px] font-medium transition-colors hover:bg-[var(--glass-hover)]"
                 style={{
                   borderColor: "var(--border)",
                   color: "var(--text-secondary)",
@@ -268,7 +268,7 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
           </div>
 
           <div className="overflow-hidden rounded-[13px] border border-[var(--border)] bg-[var(--glass-soft)]">
-            <div className="grid grid-cols-[minmax(0,1fr)_78px_62px_66px] gap-2 px-2 py-2 text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--text-quaternary)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_78px_62px_66px] gap-2 px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-quaternary)]">
               <span>Product</span>
               <span className="text-right">Price</span>
               <span className="text-right">Rank</span>
@@ -287,10 +287,10 @@ export function CommerceReportCard({ report }: { report: CommerceResearchReport 
 
       <div className="border-t border-[var(--border)] px-4 py-3">
         <details>
-          <summary className="cursor-pointer list-none text-[9px] font-medium text-[var(--text-tertiary)]">
+          <summary className="cursor-pointer list-none text-[10px] font-medium text-[var(--text-tertiary)]">
             数据来源与限制
           </summary>
-          <div className="mt-2 space-y-1.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+          <div className="mt-2 space-y-1.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
             <p>{report.dataSource.description}</p>
             {report.warnings.map((warning) => (
               <p key={warning}>• {warning}</p>

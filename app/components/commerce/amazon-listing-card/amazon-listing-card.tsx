@@ -18,7 +18,7 @@ import { ListingMetrics } from "./listing-metrics";
 function issueColor(severity: "error" | "warning" | "suggestion"): string {
   if (severity === "error") return "#ff453a";
   if (severity === "warning") return "#ff9f0a";
-  return "#64b5ff";
+  return "var(--accent-blue)";
 }
 
 const STATUS_STYLE: Record<string, { label: string; color: string; background: string }> = {
@@ -132,26 +132,26 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-[rgba(10,132,255,0.12)] px-2 py-1 text-[8px] font-semibold text-[#64b5ff]">
+              <span className="rounded-full bg-[var(--accent-blue-soft-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--accent-blue)]">
                 Amazon Listing Demo
               </span>
-              <span className="rounded-full bg-[rgba(255,159,10,0.12)] px-2 py-1 text-[8px] font-semibold text-[#ff9f0a]">
+              <span className="rounded-full bg-[rgba(255,159,10,0.12)] px-2 py-1 text-[10px] font-semibold text-[#ff9f0a]">
                 Mock ERP
               </span>
               <span
-                className="rounded-full px-2 py-1 text-[8px] font-semibold"
+                className="rounded-full px-2 py-1 text-[10px] font-semibold"
                 style={{ color: statusStyle.color, background: statusStyle.background }}
               >
                 {statusStyle.label}
               </span>
-              <span className="text-[8px] text-[var(--text-quaternary)]">
+              <span className="text-[10px] text-[var(--text-quaternary)]">
                 {report.marketplaceLabel} · {sourceLabel} {report.source.sampleSize} 条
               </span>
             </div>
             <h3 className="mt-2 text-[15px] font-semibold text-[var(--text-primary)]">
               {report.mockErp.productName}
             </h3>
-            <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+            <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
               SKU {report.mockErp.sku} · 当前仅用于演示生成、编辑和本地校验，不会发布到 Amazon。
             </p>
           </div>
@@ -160,12 +160,12 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
               <div className="font-mono text-[18px] font-semibold text-[var(--text-primary)]">
                 {validation.score.overall}
               </div>
-              <div className="text-[8px] text-[var(--text-quaternary)]">Demo Score</div>
+              <div className="text-[10px] text-[var(--text-quaternary)]">Demo Score</div>
             </div>
             <button
               type="button"
               onClick={() => void handleCopy()}
-              className="rounded-[11px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-2 text-[9px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--glass-hover)]"
+              className="rounded-[11px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-2 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--glass-hover)]"
             >
               {copied ? "JSON 已复制" : "复制 Listing JSON"}
             </button>
@@ -187,7 +187,7 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
                   type="button"
                   disabled={busy !== null || terminal}
                   onClick={handleSave}
-                  className="rounded-[11px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-1.5 text-[9px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="rounded-[11px] border border-[var(--border)] bg-[var(--glass-soft)] px-3 py-1.5 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {busy === "save" ? "保存中…" : "保存草稿"}
                 </button>
@@ -195,7 +195,7 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
                   type="button"
                   disabled={busy !== null || terminal}
                   onClick={handleConfirm}
-                  className="rounded-[11px] border border-[rgba(48,209,88,0.35)] bg-[rgba(48,209,88,0.1)] px-3 py-1.5 text-[9px] font-semibold text-[#30d158] transition-colors hover:bg-[rgba(48,209,88,0.16)] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="rounded-[11px] border border-[rgba(48,209,88,0.35)] bg-[rgba(48,209,88,0.1)] px-3 py-1.5 text-[10px] font-semibold text-[#30d158] transition-colors hover:bg-[rgba(48,209,88,0.16)] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {busy === "confirm" ? "确认中…" : "确认草稿"}
                 </button>
@@ -203,27 +203,27 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
                   type="button"
                   disabled={busy !== null || terminal}
                   onClick={handleReject}
-                  className="rounded-[11px] border border-[rgba(255,69,58,0.35)] bg-[rgba(255,69,58,0.08)] px-3 py-1.5 text-[9px] font-semibold text-[#ff453a] transition-colors hover:bg-[rgba(255,69,58,0.14)] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="rounded-[11px] border border-[rgba(255,69,58,0.35)] bg-[rgba(255,69,58,0.08)] px-3 py-1.5 text-[10px] font-semibold text-[#ff453a] transition-colors hover:bg-[rgba(255,69,58,0.14)] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {busy === "reject" ? "驳回中…" : "驳回草稿"}
                 </button>
-                <span className="text-[8px] text-[var(--text-quaternary)]">
+                <span className="text-[10px] text-[var(--text-quaternary)]">
                   {savedAt ? `上次保存 ${formatSavedAt(savedAt)}` : "编辑后点击保存可回写草稿"}
                 </span>
               </>
             ) : (
-              <span className="text-[8px] text-[var(--text-quaternary)]">
+              <span className="text-[10px] text-[var(--text-quaternary)]">
                 草稿未持久化（生成时保存失败），本卡片的编辑仅保留在本地。
               </span>
             )}
             {actionError && (
-              <span className="text-[8px] font-semibold text-[#ff453a]">{actionError}</span>
+              <span className="text-[10px] font-semibold text-[#ff453a]">{actionError}</span>
             )}
           </div>
         </div>
 
         <aside className="space-y-3">
-          <div className="rounded-[14px] border border-[rgba(255,159,10,0.22)] bg-[rgba(255,159,10,0.07)] p-3 text-[9px] leading-4 text-[var(--text-secondary)]">
+          <div className="rounded-[14px] border border-[rgba(255,159,10,0.22)] bg-[rgba(255,159,10,0.07)] p-3 text-[10px] leading-4 text-[var(--text-secondary)]">
             <strong className="text-[#ff9f0a]">不可直接发布：</strong>
             当前商品主数据来自模拟 ERP。尺寸、材质、包装、认证、兼容性和性能声明必须由真实 ERP
             或人工确认。
@@ -242,13 +242,13 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
                   key={fact.id}
                   className="rounded-[9px] border border-[var(--border)] bg-[var(--glass)] px-2.5 py-2"
                 >
-                  <div className="flex items-center justify-between gap-2 text-[8px] text-[var(--text-quaternary)]">
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-quaternary)]">
                     <span>{fact.label}</span>
                     <span style={{ color: fact.requiresConfirmation ? "#ff9f0a" : "#30d158" }}>
                       {fact.requiresConfirmation ? "待确认" : "用户提供"}
                     </span>
                   </div>
-                  <div className="mt-1 break-words text-[9px] text-[var(--text-secondary)]">
+                  <div className="mt-1 break-words text-[10px] text-[var(--text-secondary)]">
                     {fact.value}
                   </div>
                 </div>
@@ -267,7 +267,7 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
               {report.keywords.map((keyword) => (
                 <span
                   key={keyword.normalized}
-                  className="rounded-full border border-[var(--border)] bg-[var(--glass)] px-2 py-1 text-[8px] text-[var(--text-tertiary)]"
+                  className="rounded-full border border-[var(--border)] bg-[var(--glass)] px-2 py-1 text-[10px] text-[var(--text-tertiary)]"
                   title={`${keyword.source} · ${keyword.cluster} · ${keyword.placement} · ${keyword.score}`}
                 >
                   {keyword.phrase}
@@ -285,12 +285,12 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
             </summary>
             <div className="mt-2 space-y-1.5">
               {validation.issues.length === 0 ? (
-                <div className="text-[9px] text-[#30d158]">本地 Demo 规则检查已通过。</div>
+                <div className="text-[10px] text-[#30d158]">本地 Demo 规则检查已通过。</div>
               ) : (
                 validation.issues.map((issue: AmazonListingIssue, index: number) => (
                   <div
                     key={`${issue.code}-${index}`}
-                    className="text-[9px] leading-4 text-[var(--text-secondary)]"
+                    className="text-[10px] leading-4 text-[var(--text-secondary)]"
                   >
                     <span style={{ color: issueColor(issue.severity) }}>●</span> {issue.message}
                   </div>
@@ -303,7 +303,7 @@ export function AmazonListingCard({ report }: { report: AmazonListingDemoReport 
             <summary className="cursor-pointer text-[10px] font-semibold text-[var(--text-secondary)]">
               数据来源与限制
             </summary>
-            <div className="mt-2 space-y-1.5 text-[8px] leading-4 text-[var(--text-tertiary)]">
+            <div className="mt-2 space-y-1.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
               <p>{report.source.description}</p>
               {report.warnings.slice(0, 8).map((warning) => (
                 <p key={warning}>• {warning}</p>

@@ -185,7 +185,7 @@ function MessageAttachmentGallery({
     >
       {title}
       <span
-        className="rounded-full px-1.5 py-0.5 text-[9px]"
+        className="rounded-full px-1.5 py-0.5 text-[10px]"
         style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
       >
         {count}

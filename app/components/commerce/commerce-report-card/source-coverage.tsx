@@ -48,7 +48,7 @@ export function SourceCoverage({ report }: { report: CommerceResearchReport }) {
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <div className="text-[11px] font-semibold text-[var(--text-primary)]">数据源覆盖</div>
-          <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+          <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
             {isDemoMode
               ? "真实数据覆盖 0/100 · 当前仅展示模拟流程"
               : `综合可信度 ${report.confidenceScore}/100 · 未获取来源不会参与事实性结论`}
@@ -98,12 +98,12 @@ export function SourceCoverage({ report }: { report: CommerceResearchReport }) {
                   ) : null}
                 </div>
                 <span
-                  className="rounded-full px-1.5 py-0.5 text-[8px] font-medium"
+                  className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
                   style={{
                     color: isDemoSource
                       ? "#ff9f0a"
                       : ok
-                        ? "#0a84ff"
+                        ? "var(--accent-blue)"
                         : source.status === "error"
                           ? "#ff453a"
                           : "var(--text-tertiary)",
@@ -120,7 +120,7 @@ export function SourceCoverage({ report }: { report: CommerceResearchReport }) {
               <div className="mt-1 font-mono text-[10px] text-[var(--text-secondary)]">
                 {source.sampleSize} samples
               </div>
-              <div className="mt-1 line-clamp-2 text-[8px] leading-3.5 text-[var(--text-tertiary)]">
+              <div className="mt-1 line-clamp-2 text-[10px] leading-3.5 text-[var(--text-tertiary)]">
                 {source.error
                   ? source.error
                   : source.coverage.length
@@ -135,7 +135,7 @@ export function SourceCoverage({ report }: { report: CommerceResearchReport }) {
         {report.sources.map((source) => (
           <div
             key={`${source.id}-detail`}
-            className="rounded-[11px] border px-3 py-2 text-[9px] leading-4"
+            className="rounded-[11px] border px-3 py-2 text-[10px] leading-4"
             style={{
               background: "var(--glass)",
               borderColor: "var(--border)",
@@ -169,7 +169,7 @@ export function PlatformComparison({ metrics }: { metrics: CommerceMarketMetrics
         <div className="text-[11px] font-semibold text-[var(--text-primary)]">
           跨平台公开样本对比
         </div>
-        <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+        <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
           各平台按自身币种独立统计；样本数不代表市场份额，价格不做自动汇率换算
         </div>
       </div>
@@ -187,11 +187,11 @@ export function PlatformComparison({ metrics }: { metrics: CommerceMarketMetrics
               <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
                 {item.label}
               </span>
-              <span className="font-mono text-[9px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[10px] text-[var(--text-tertiary)]">
                 {item.sampleSize} 样本
               </span>
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[8px]">
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
               <span className="text-[var(--text-tertiary)]">中位价格</span>
               <span className="truncate text-right font-mono text-[var(--text-secondary)]">
                 {formatPrice(item.medianPrice, item.currency)}

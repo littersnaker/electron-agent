@@ -172,7 +172,7 @@ export default function WorkspaceHeader({
             </svg>
             {usageLabel(tokenInfo)}
             {Boolean(tokenInfo.auxiliaryTotal) && (
-              <span className="text-[9px] text-[var(--text-quaternary)]">
+              <span className="text-[10px] text-[var(--text-quaternary)]">
                 +{tokenInfo.auxiliaryTotal}T
               </span>
             )}

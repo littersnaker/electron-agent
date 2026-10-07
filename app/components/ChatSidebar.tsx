@@ -325,7 +325,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                     跨境市场情报
                   </span>
                   <span
-                    className="mt-0.5 block truncate text-[9px]"
+                    className="mt-0.5 block truncate text-[10px]"
                     style={{ color: COLORS.textSubtle }}
                   >
                     公开市场研究 · 竞品可见度 · 机会信号
@@ -404,7 +404,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                     AI 漫剧工作室
                   </span>
                   <span
-                    className="mt-0.5 block truncate text-[9px]"
+                    className="mt-0.5 block truncate text-[10px]"
                     style={{ color: COLORS.textSubtle }}
                   >
                     剧本 → 分镜确认 → 出图 → 视频 → 合并
@@ -483,7 +483,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
                     图片识别
                   </span>
                   <span
-                    className="mt-0.5 block truncate text-[9px]"
+                    className="mt-0.5 block truncate text-[10px]"
                     style={{ color: COLORS.textSubtle }}
                   >
                     货架图纸识别 → 视觉 → Excel

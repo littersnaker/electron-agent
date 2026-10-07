@@ -42,7 +42,7 @@ export function MetricBar({ label, score }: { label: string; score: number }) {
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-[var(--glass)]">
         <span
-          className="block h-full rounded-full bg-[linear-gradient(90deg,#0a84ff,#64d2ff)] transition-[width] duration-500"
+          className="block h-full rounded-full bg-[linear-gradient(90deg,var(--accent-blue),#64d2ff)] transition-[width] duration-500"
           style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
         />
       </div>
@@ -87,7 +87,7 @@ export function MetricSnapshot({
             borderColor: "var(--border)",
           }}
         >
-          <div className="text-[9px] text-[var(--text-tertiary)]">{item.label}</div>
+          <div className="text-[10px] text-[var(--text-tertiary)]">{item.label}</div>
           <div className="mt-1 truncate text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
             {item.value}
           </div>

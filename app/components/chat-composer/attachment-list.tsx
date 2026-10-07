@@ -49,7 +49,7 @@ export function AttachmentList({ attachments, onRemove, label }: AttachmentListP
         <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
           {label} · {attachments.length}
         </span>
-        <span className="text-[9px] text-[var(--text-quaternary)]">
+        <span className="text-[10px] text-[var(--text-quaternary)]">
           支持粘贴图片、拖入文件与文件夹
         </span>
       </div>
@@ -71,7 +71,7 @@ export function AttachmentList({ attachments, onRemove, label }: AttachmentListP
               }}
             >
               <div
-                className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[9px] border text-[9px] text-[var(--text-tertiary)]"
+                className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[9px] border text-[10px] text-[var(--text-tertiary)]"
                 style={{
                   background: "var(--glass-black)",
                   borderColor: "var(--border)",
@@ -97,7 +97,7 @@ export function AttachmentList({ attachments, onRemove, label }: AttachmentListP
                 >
                   {attachment.relativePath || attachment.name}
                 </div>
-                <div className="mt-1 flex items-center gap-1.5 text-[9px] text-[var(--text-tertiary)]">
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
                   <span>{resolveSourceLabel(attachment)}</span>
                   <span>·</span>
                   <span>{formatBytes(attachment.size)}</span>

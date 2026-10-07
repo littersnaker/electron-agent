@@ -16,7 +16,7 @@ export function observationTypeLabel(type: CommerceMarketObservation["resultType
 export function ObservationRow({ observation }: { observation: CommerceMarketObservation }) {
   return (
     <div className="grid grid-cols-[70px_minmax(0,1fr)_88px] items-center gap-2 border-t border-[var(--border)] px-2 py-2.5 text-[10px] first:border-t-0">
-      <span className="font-mono text-[9px] text-[var(--text-tertiary)]">
+      <span className="font-mono text-[10px] text-[var(--text-tertiary)]">
         {observationTypeLabel(observation.resultType)}
       </span>
       <div className="min-w-0">
@@ -38,7 +38,7 @@ export function ObservationRow({ observation }: { observation: CommerceMarketObs
             {observation.title}
           </div>
         )}
-        <div className="mt-0.5 truncate text-[9px] text-[var(--text-tertiary)]">
+        <div className="mt-0.5 truncate text-[10px] text-[var(--text-tertiary)]">
           {observation.domain || observation.merchant || "公开搜索结果"}
         </div>
       </div>
@@ -80,7 +80,7 @@ export function ProductRow({ product }: { product: CommerceProductSignal }) {
             {product.title}
           </div>
         )}
-        <div className="mt-0.5 flex items-center gap-2 text-[9px] text-[var(--text-tertiary)]">
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
           <span className="font-mono">
             {product.platform === "amazon" || !product.platform ? product.asin : product.platform}
           </span>
