@@ -371,6 +371,7 @@ export default function Home() {
             open
             assets={characterLibrary.assets}
             loaded={characterLibrary.loaded}
+            error={characterLibrary.error}
             onDelete={characterLibrary.deleteAsset}
             onReload={characterLibrary.reload}
             onClose={() => setCharacterLibraryOpen(false)}

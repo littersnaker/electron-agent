@@ -1,7 +1,7 @@
 // 模块说明：角色设定图库加载与删除（跨会话复用设定图）。
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { apiFetch } from "../lib/api-client";
 
 export type CharacterLibraryAsset = {
@@ -32,31 +32,35 @@ async function readError(response: Response): Promise<string> {
 export function useCharacterLibrary() {
   const [assets, setAssets] = useState<CharacterLibraryAsset[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
-    const response = await apiFetch("/api/media/library", { cache: "no-store" });
-    if (!response.ok) throw new Error(await readError(response));
-    const payload = (await response.json()) as CharacterLibraryResponse;
-    setAssets(Array.isArray(payload.assets) ? payload.assets : []);
-    setLoaded(true);
+    setLoaded(false);
+    setError("");
+    try {
+      const response = await apiFetch("/api/media/library", { cache: "no-store" });
+      if (!response.ok) throw new Error(await readError(response));
+      const payload = (await response.json()) as CharacterLibraryResponse;
+      setAssets(Array.isArray(payload.assets) ? payload.assets : []);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "角色库加载失败，请重试。");
+    } finally {
+      setLoaded(true);
+    }
   }, []);
-
-  useEffect(() => {
-    void Promise.resolve()
-      .then(() => reload())
-      .catch((error) => {
-        console.warn("[Renderer] 角色库加载失败", error);
-        setLoaded(true);
-      });
-  }, [reload]);
 
   const deleteAsset = useCallback(async (assetId: string) => {
-    const response = await apiFetch(`/api/media/library/${encodeURIComponent(assetId)}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) throw new Error(await readError(response));
-    setAssets((current) => current.filter((item) => item.id !== assetId));
+    setError("");
+    try {
+      const response = await apiFetch(`/api/media/library/${encodeURIComponent(assetId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setAssets((current) => current.filter((item) => item.id !== assetId));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "删除失败，请重试。");
+    }
   }, []);
 
-  return { assets, loaded, reload, deleteAsset };
+  return { assets, loaded, error, reload, deleteAsset };
 }

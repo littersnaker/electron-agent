@@ -357,7 +357,7 @@ def build_comic_pipeline(
                         "downloadName": f"角色设定-{cached['name']}.png",
                         "type": "image/png",
                         "assetKind": "image",
-                        "data_url": data_url,
+                        "dataUrl": data_url,
                     }
                     await lifecycle(f"角色 {character.get('name')}：命中角色库，直接复用设定图")
                     continue
@@ -365,7 +365,9 @@ def build_comic_pipeline(
             sheet = await _generate_character_sheet(character, output_dir, index)
             character["image"] = sheet
             if sheet:
-                data_url = str(sheet.get("data_url") or sheet.get("data") or "")
+                data_url = str(
+                    sheet.get("dataUrl") or sheet.get("data_url") or sheet.get("data") or ""
+                )
                 if data_url:
                     try:
                         await save_character_sheet(
@@ -377,7 +379,9 @@ def build_comic_pipeline(
                             prompt=str(sheet.get("prompt") or ""),
                             image_data_url=data_url,
                         )
-                        await lifecycle(f"角色 {character.get('name')}：设定图已入角色库（下次同描述直接复用）")
+                        await lifecycle(
+                            f"角色 {character.get('name')}：设定图已入角色库（下次同描述直接复用）"
+                        )
                     except Exception as exc:  # noqa: BLE001 - 入库失败不影响本次结果。
                         await lifecycle(f"角色 {character.get('name')}：设定图入库失败：{exc}")
         done = sum(1 for item in characters if item.get("image"))
