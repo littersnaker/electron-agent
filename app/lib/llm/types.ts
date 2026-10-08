@@ -1,6 +1,7 @@
 // 模块说明：负责 types 核心服务与领域逻辑。
 /** Multi-agent 支持的模型供应商。 */
-export type LlmProviderId = "qwen" | "openai" | "gemini" | "deepseek" | "glm" | "kimi" | "doubao";
+export type LlmProviderId =
+  "qwen" | "openai" | "gemini" | "deepseek" | "glm" | "kimi" | "doubao" | "openrouter";
 
 /** Agent Runtime 中的调用场景。 */
 export type LlmTaskType =

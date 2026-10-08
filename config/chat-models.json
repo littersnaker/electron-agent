@@ -279,6 +279,44 @@
       "quality": 89,
       "speed": 76,
       "costEfficiency": 86
+    },
+    {
+      "id": "openrouter:openai/gpt-4o-mini",
+      "provider": "openrouter",
+      "model": "openai/gpt-4o-mini",
+      "name": "GPT-4o mini · OpenRouter",
+      "description": "通过 OpenRouter 调用；其他模型可在自定义模型中填写厂商/模型 ID",
+      "autoSelect": true,
+      "fallbackSelect": false,
+      "autoPriority": 200,
+      "chatCompatible": true,
+      "capabilities": [
+        "text",
+        "stream",
+        "tool_call",
+        "coding",
+        "long_context",
+        "structured_output",
+        "vision",
+        "fast"
+      ],
+      "recommendedTasks": [
+        "chat",
+        "read_only",
+        "cli",
+        "memory",
+        "planner",
+        "worker",
+        "reviewer",
+        "reflection",
+        "final_report",
+        "final_answer",
+        "commerce_intent",
+        "commerce_analysis"
+      ],
+      "quality": 70,
+      "speed": 90,
+      "costEfficiency": 90
     }
   ]
 }

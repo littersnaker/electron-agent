@@ -65,6 +65,8 @@ function endpointPlaceholder(providerId: LlmProviderId): string {
       return "https://<业务空间域名>/compatible-mode/v1";
     case "openai":
       return "https://api.openai.com/v1";
+    case "openrouter":
+      return "https://openrouter.ai/api/v1";
     case "deepseek":
       return "https://api.deepseek.com";
     case "glm":

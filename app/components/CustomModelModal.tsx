@@ -25,6 +25,7 @@ const PROVIDERS: ReadonlyArray<{ id: LlmProviderId; label: string }> = [
   { id: "glm", label: "智谱 GLM" },
   { id: "kimi", label: "Kimi / Moonshot" },
   { id: "doubao", label: "火山引擎 / 豆包" },
+  { id: "openrouter", label: "OpenRouter" },
   { id: "gemini", label: "Google Gemini" },
 ];
 

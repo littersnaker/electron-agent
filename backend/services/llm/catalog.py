@@ -33,6 +33,7 @@ ProviderId = Literal[
     "glm",
     "kimi",
     "doubao",
+    "openrouter",
 ]
 Protocol = Literal["openai-compatible", "gemini"]
 

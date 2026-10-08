@@ -81,6 +81,19 @@
       "protocol": "openai-compatible",
       "defaultEndpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       "placeholder": "API Key"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "environmentKeys": [
+        "OPENROUTER_API_KEY"
+      ],
+      "requestHeader": "x-llm-key-openrouter",
+      "endpointRequestHeader": "x-llm-base-url-openrouter",
+      "endpointEnvironmentKey": "OPENROUTER_BASE_URL",
+      "protocol": "openai-compatible",
+      "defaultEndpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "placeholder": "sk-or-v1-..."
     }
   ]
 }

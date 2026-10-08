@@ -16,6 +16,7 @@ ProviderId = Literal[
     "glm",
     "kimi",
     "doubao",
+    "openrouter",
 ]
 
 MediaMode = Literal["text-to-image", "text-to-video", "image-edit"]

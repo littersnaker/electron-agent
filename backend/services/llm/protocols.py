@@ -21,7 +21,7 @@ from backend.services.llm.types import LlmChunk, LlmMessage, LlmToolCall, LlmUsa
 ErrorScope = Literal["model", "provider", "request"]
 
 # 需要走代理的海外供应商；国内模型（qwen/deepseek/kimi/glm）直连。
-PROXY_REQUIRED_PROVIDERS = frozenset({"openai", "gemini"})
+PROXY_REQUIRED_PROVIDERS = frozenset({"openai", "gemini", "openrouter"})
 
 
 class ProviderRequestError(ValueError):
