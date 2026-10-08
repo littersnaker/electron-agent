@@ -11,6 +11,13 @@ import type {
   Message,
   TypographyPolicy,
 } from "../constants/page-constants";
+import {
+  createWorkflow,
+  createWorkflowSaver,
+  recordWorkflowPacket,
+  finishWorkflow,
+  updateWorkflowMessage,
+} from "../lib/message-workflow";
 import { apiFetch } from "../lib/api-client";
 import { toMessageAttachment } from "../constants/page-constants";
 import { buildLlmRequestHeaders, buildMediaAttachmentPayload } from "../lib/llm/client-request";
@@ -161,37 +168,15 @@ export function useMediaGeneration({
   const [status, setStatus] = useState("");
   const [usageInfo, setUsageInfo] = useState<TokenInfo | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const progressTimerRef = useRef<number | null>(null);
-  const progressRef = useRef(18);
-
-  const stopProgressTimer = useCallback(() => {
-    if (progressTimerRef.current) {
-      window.clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
-  }, []);
-
-  useEffect(
-    () => () => {
-      abortRef.current?.abort();
-      stopProgressTimer();
-    },
-    [stopProgressTimer],
-  );
-
-  const stop = useCallback(() => {
-    abortRef.current?.abort();
-    stopProgressTimer();
-  }, [stopProgressTimer]);
-
+  useEffect(() => () => abortRef.current?.abort(), []);
+  const stop = useCallback(() => abortRef.current?.abort("user"), []);
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
-    stopProgressTimer();
     setIsGenerating(false);
     setStatus("");
     setUsageInfo(null);
-  }, [stopProgressTimer]);
+  }, []);
 
   const replaceSessionMessages = useCallback(
     async (session: ChatSession, nextMessages: Message[], title: string): Promise<void> => {
@@ -204,36 +189,6 @@ export function useMediaGeneration({
       await persistSession(session, nextMessages, title);
     },
     [persistSession, setMessages, setSessions],
-  );
-
-  /**
-   * 服务端媒体接口不是 SSE，因此前端用“阶段进度”平滑推进到 88%。
-   * 真正拿到文件后再一次性设为 100%，避免图片已出来但右侧仍显示 0%。
-   */
-  const startProgressTimer = useCallback(
-    (mode: MediaMode) => {
-      stopProgressTimer();
-      progressRef.current = 18;
-      progressTimerRef.current = window.setInterval(
-        () => {
-          const increment = mode.includes("video") ? 3 : 6;
-          progressRef.current = Math.min(88, progressRef.current + increment);
-          const currentProgress = progressRef.current;
-          agents.updateMediaProgress(
-            currentProgress,
-            currentProgress < 40
-              ? "正在提交百炼媒体任务"
-              : currentProgress < 72
-                ? "模型正在生成内容"
-                : mode === "image-edit" && enableQualityGuard
-                  ? "正在检查重影、重复元素和无关改动"
-                  : "正在下载并整理生成结果",
-          );
-        },
-        mode.includes("video") ? 2500 : 1200,
-      );
-    },
-    [agents, enableQualityGuard, stopProgressTimer],
   );
 
   const submit = useCallback(
@@ -276,10 +231,15 @@ export function useMediaGeneration({
       const lastMessage = messages[messages.length - 1];
       const baseMessages =
         resumeExistingRun && lastMessage?.role === "assistant" ? messages.slice(0, -1) : messages;
+      let workflow = createWorkflow("media", resumeExistingRun ? lastMessage?.workflow : undefined);
+      workflow = recordWorkflowPacket(workflow, {
+        type: "TOOL_STATUS",
+        content: `${taskName(mode)} · 等待模型返回结果`,
+      });
       const optimisticHistory: Message[] = [
         ...baseMessages,
         ...(resumeExistingRun ? [] : [userMessage]),
-        { role: "assistant", content: "" },
+        { role: "assistant", content: "", workflow, createdAt: new Date().toISOString() },
       ];
       const title =
         activeSession.title === "新对话"
@@ -305,7 +265,10 @@ export function useMediaGeneration({
           : "Media Agent 正在调用百炼图片模型…",
       );
       agents.beginMediaRun(taskName(mode));
-      startProgressTimer(mode);
+      const saver = createWorkflowSaver((next) => persistSession(activeSession, next, title));
+      void saver.flush(optimisticHistory).catch((error) => {
+        console.warn("[useMediaGeneration] 会话保存失败", error);
+      });
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -338,7 +301,6 @@ export function useMediaGeneration({
           throw new Error(payload.error || "媒体生成失败");
         }
 
-        stopProgressTimer();
         setUsageInfo(
           payload.usage || {
             prompt: 0,
@@ -354,21 +316,32 @@ export function useMediaGeneration({
               ? "首版未通过检查，自动重试后已通过重影检查"
               : "已通过重影、重复元素与无关改动检查"
             : `质量检查仍有风险：${payload.quality.reason || "请人工确认"}`
-          : "已检查结果文件并确认可以预览/下载";
+          : "模型已返回生成结果";
         agents.completeMediaRun(reviewTask);
 
-        const finalHistory: Message[] = [
-          ...optimisticHistory.slice(0, -1),
+        const finalHistory = updateWorkflowMessage(
+          optimisticHistory,
+          finishWorkflow(workflow, "completed", reviewTask),
           {
-            role: "assistant",
             content: payload.content || "生成完成。",
             attachments: payload.attachments,
           },
-        ];
-        await replaceSessionMessages(activeSession, finalHistory, title);
+        );
+        await saver
+          .flush(finalHistory)
+          .catch((error) => console.warn("[useMediaGeneration] 会话保存失败", error));
+        setMessages(finalHistory);
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === activeSession.id
+              ? { ...session, title, messages: finalHistory }
+              : session,
+          ),
+        );
       } catch (error) {
-        stopProgressTimer();
-        const aborted = error instanceof DOMException && error.name === "AbortError";
+        const aborted =
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError");
         checkpointResult = aborted
           ? { status: "interrupted", error: "用户停止或应用中断" }
           : {
@@ -380,11 +353,26 @@ export function useMediaGeneration({
           : `⚠️ ${error instanceof Error ? error.message : "媒体生成失败"}`;
         agents.failMediaRun(message);
 
-        const finalHistory: Message[] = [
-          ...optimisticHistory.slice(0, -1),
-          { role: "assistant", content: message },
-        ];
-        await replaceSessionMessages(activeSession, finalHistory, title);
+        const finalHistory = updateWorkflowMessage(
+          optimisticHistory,
+          finishWorkflow(
+            workflow,
+            aborted ? (controller.signal.reason === "user" ? "stopped" : "interrupted") : "failed",
+            message,
+          ),
+          { content: message },
+        );
+        await saver
+          .flush(finalHistory)
+          .catch((error) => console.warn("[useMediaGeneration] 会话保存失败", error));
+        setMessages(finalHistory);
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === activeSession.id
+              ? { ...session, title, messages: finalHistory }
+              : session,
+          ),
+        );
       } finally {
         abortRef.current = null;
         setIsGenerating(false);
@@ -407,11 +395,10 @@ export function useMediaGeneration({
       isParsingFile,
       messages,
       replaceSessionMessages,
+      persistSession,
       selectedModel,
       setMessages,
       setSessions,
-      startProgressTimer,
-      stopProgressTimer,
       typographyPolicy,
     ],
   );

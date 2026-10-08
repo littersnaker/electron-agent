@@ -278,6 +278,7 @@ async def _stream_storyboard(
     state = state_holder[0] if state_holder else {}
     storyboard = state.get("storyboard") or []
     if not storyboard:
+        yield _lifecycle_frame("分镜生成失败，请调整剧本后重试。", status="failed")
         yield encode_sse({"type": "TEXT", "content": "分镜生成失败，请调整剧本后重试。"})
         return
 
@@ -352,6 +353,7 @@ async def _resume_comic(
     action = await pop_pending_action(request_id)
     approved = str(answer or "").strip().lower() in {"approve", "yes", "确认", "同意"}
     if not approved or not action or action.get("kind") != "comic_storyboard":
+        yield _lifecycle_frame("已取消漫剧生成。", status="canceled")
         yield encode_sse({"type": "TEXT", "content": "已取消漫剧生成。"})
         return
 
@@ -443,7 +445,10 @@ async def _resume_comic(
                 "url": f"/api/media/asset/{body.session_id}/episode.mp4",
             }
         )
-    yield _lifecycle_frame("漫剧生成结束", status="completed")
+    yield _lifecycle_frame(
+        "漫剧生成结束" if passed else str(report.get("reason") or "漫剧生成失败：存在失败分镜"),
+        status="completed" if passed else "failed",
+    )
     if attachments:
         yield encode_sse(
             {
@@ -496,6 +501,7 @@ async def stream_media_agent(
         ):
             yield frame
     except Exception as exc:  # noqa: BLE001
+        yield _lifecycle_frame(f"媒体生成失败：{exc}", status="failed")
         yield encode_sse({"type": "TEXT", "content": f"❌ 媒体生成失败：{exc}"})
 
 

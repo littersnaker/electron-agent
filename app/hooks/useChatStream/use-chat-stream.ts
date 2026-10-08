@@ -1,5 +1,4 @@
 "use client";
-/* eslint-disable max-lines */ // 统一 SSE 消费与多 Agent 路由，文件天然较长。
 /**
  * 模块职责：聊天流式请求、SSE 消费和会话状态协调。
  */
@@ -14,6 +13,14 @@ import type {
 import { useVisualReview } from "./use-visual-review";
 import { buildRetrievedAttachment } from "../../lib/rag/attachment-rag";
 import { buildImageAttachmentsPayload, buildLlmRequestHeaders } from "../../lib/llm/client-request";
+import {
+  createWorkflow,
+  createWorkflowSaver,
+  recordWorkflowPacket,
+  finishWorkflow,
+  updateWorkflowMessage,
+  type MessageWorkflow,
+} from "../../lib/message-workflow";
 import { apiFetch } from "../../lib/api-client";
 import type {
   AgentLifecycleEventPayload,
@@ -79,18 +86,25 @@ export function useChatStream({
   const mediaAttachmentsRef = useRef<Message["attachments"] | undefined>(undefined);
   const imageResultRef = useRef<Message["imageResult"] | undefined>(undefined);
   const hasLifecycleRef = useRef(false);
-  // 流式文本按 rAF 批量提交：每个 SSE 分包都 setMessages 会让长回复
-  // 以 O(n²) 的代价整段重解析 markdown。分包只累积文本，每帧最多提交一次。
+  const workflowRef = useRef<MessageWorkflow | null>(null);
+  const runMessagesRef = useRef<Message[]>([]);
+  const saverRef = useRef<ReturnType<typeof createWorkflowSaver> | null>(null);
+  // 文本与事件每帧合并提交，避免逐分包重解析整段 Markdown。
   const streamFrameRef = useRef<number | null>(null);
   const finalResponseMarkedRef = useRef(false);
   const scheduleStreamFlush = useCallback(() => {
     if (streamFrameRef.current !== null) return;
     streamFrameRef.current = window.requestAnimationFrame(() => {
       streamFrameRef.current = null;
-      setMessages((current) => [
-        ...current.slice(0, -1),
-        { role: "assistant", content: finalTextRef.current },
-      ]);
+      const workflow = workflowRef.current;
+      if (!workflow) return;
+      runMessagesRef.current = updateWorkflowMessage(runMessagesRef.current, workflow, {
+        content: finalTextRef.current,
+      });
+      saverRef.current?.schedule(runMessagesRef.current);
+      setMessages((current) =>
+        updateWorkflowMessage(current, workflow, { content: finalTextRef.current }),
+      );
     });
   }, [setMessages]);
   useEffect(() => {
@@ -103,7 +117,7 @@ export function useChatStream({
     };
   }, []);
   const checkpointBinding = useChatCheckpointBinding();
-  const stop = useCallback(() => abortRef.current?.abort(), []);
+  const stop = useCallback(() => abortRef.current?.abort("user"), []);
 
   /**
    * 视觉 Review 留档：完成后把缩略图 + 结论组装成卡片消息写进会话流。
@@ -117,6 +131,7 @@ export function useChatStream({
         createdAt: card.createdAt,
         visualReview: card,
       };
+      runMessagesRef.current = [...runMessagesRef.current, cardMessage];
       setMessages((current) => [...current, cardMessage]);
       setSessions((current) =>
         current.map((session) =>
@@ -142,6 +157,7 @@ export function useChatStream({
         createdAt: card.createdAt,
         visualAudit: card,
       };
+      runMessagesRef.current = [...runMessagesRef.current, cardMessage];
       setMessages((current) => [...current, cardMessage]);
       setSessions((current) =>
         current.map((session) =>
@@ -263,10 +279,6 @@ export function useChatStream({
         await options.onCheckpointFinish?.({ status: "failed", error: workspaceError });
         return;
       }
-      /**
-       * RAG 只在提交瞬间执行一次。
-       * 页面输入变化不会反复切片或检索，原始附件也不会被修改。
-       */
       const retrievedFiles = fileOverride
         .map((attachment) => buildRetrievedAttachment(attachment, prompt))
         .filter((attachment): attachment is AttachedFile => Boolean(attachment));
@@ -282,11 +294,19 @@ export function useChatStream({
                 createdAt: new Date().toISOString(),
               },
             ];
+      const workflow = createWorkflow(
+        activeSession.mode,
+        resumeExistingRun || (suppressVisibleUserMessage && interactiveRequest)
+          ? lastMessage?.workflow
+          : undefined,
+      );
+      workflowRef.current = workflow;
       const visibleHistory: Message[] = [
         ...visibleBaseMessages,
         ...visibleUserMessages,
-        { role: "assistant", content: "", createdAt: new Date().toISOString() },
+        { role: "assistant", content: "", createdAt: new Date().toISOString(), workflow },
       ];
+      runMessagesRef.current = visibleHistory;
       const requestMessages = resumeExistingRun
         ? visibleBaseMessages.map(({ role, content }) => ({ role, content }))
         : [
@@ -299,6 +319,7 @@ export function useChatStream({
           : activeSession.title === "新对话"
             ? prompt.slice(0, 18) || fileOverride[0]?.name || "新对话"
             : activeSession.title;
+      saverRef.current = createWorkflowSaver((next) => persistSession(activeSession, next, title));
       const optimisticSession = {
         ...activeSession,
         title,
@@ -308,7 +329,7 @@ export function useChatStream({
         current.map((session) => (session.id === activeSession.id ? optimisticSession : session)),
       );
       setMessages(visibleHistory);
-      void persistSession(activeSession, visibleHistory, title).catch((error) => {
+      void saverRef.current.flush(visibleHistory).catch((error) => {
         console.warn("[useChatStream] 会话保存失败，重启后消息可能丢失", error);
       });
       clearAfterSubmit();
@@ -395,7 +416,21 @@ export function useChatStream({
             if (!line.startsWith("data:")) continue;
             try {
               const packet = JSON.parse(line.slice(5).trim()) as StreamPacket;
-              const streamContent = packet.content;
+              const streamContent =
+                packet.content ??
+                (packet.payload && "content" in packet.payload
+                  ? packet.payload.content
+                  : packet.type === "STATUS" && packet.payload && "detail" in packet.payload
+                    ? packet.payload.detail
+                    : undefined);
+              if (workflowRef.current) {
+                const next = recordWorkflowPacket(workflowRef.current, packet);
+                if (next !== workflowRef.current) {
+                  workflowRef.current = next;
+                  setToolActivities(next.toolActivities);
+                  scheduleStreamFlush();
+                }
+              }
               if (packet.type === "TEXT" && typeof streamContent === "string") {
                 finalTextRef.current += streamContent;
                 setAgentStatus("");
@@ -409,35 +444,10 @@ export function useChatStream({
               }
               if (packet.type === "TOOL_STATUS" && typeof streamContent === "string") {
                 const label = streamContent.trim();
-                const now = Date.now();
                 if (!hasLifecycleRef.current) {
                   agents.activateAgent(inferAgentKind(label), label);
                 }
                 setAgentStatus("Agent 正在执行工具调用…");
-                setToolActivities((current) => {
-                  const last = current[current.length - 1];
-                  if (last?.status === "running" && last.label === label) {
-                    return current;
-                  }
-                  const completed = current.map((activity) =>
-                    activity.status === "running"
-                      ? {
-                          ...activity,
-                          status: "completed" as const,
-                          endedAt: now,
-                        }
-                      : activity,
-                  );
-                  return [
-                    ...completed,
-                    {
-                      id: `tool_${now}_${Math.random().toString(36).slice(2, 7)}`,
-                      label,
-                      status: "running" as const,
-                      startedAt: now,
-                    },
-                  ].slice(-8);
-                });
                 continue;
               }
               if (
@@ -480,8 +490,7 @@ export function useChatStream({
                 hasLifecycleRef.current = true;
                 setAgentLifecycleEvents((current: AgentLifecycleEventPayload[]) => {
                   const next = [...current, lifecycleEvent];
-                  // 生命周期只用于当前轮 UI，限制长度避免长任务无限增长前端状态。
-                  return next.slice(-240);
+                  return next;
                 });
                 agents.applyLifecycleEvent(lifecycleEvent);
                 setAgentStatus(
@@ -549,9 +558,14 @@ export function useChatStream({
           }
         }
       } catch (error) {
-        const aborted = error instanceof DOMException && error.name === "AbortError";
+        const aborted =
+          abortController.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError");
         checkpointResult = aborted
-          ? { status: "interrupted", error: "用户停止或应用中断" }
+          ? {
+              status: "interrupted",
+              error: abortController.signal.reason === "user" ? "用户已停止当前任务" : "应用中断",
+            }
           : {
               status: "failed",
               error: error instanceof Error ? error.message : "模型请求失败",
@@ -560,51 +574,42 @@ export function useChatStream({
           const message = error instanceof Error ? error.message : "模型请求失败";
           finalTextRef.current ||= `⚠️ ${message}`;
           agents.failRunningAgents();
-          setToolActivities((current) =>
-            current.map((activity) =>
-              activity.status === "running"
-                ? {
-                    ...activity,
-                    status: "error" as const,
-                    endedAt: Date.now(),
-                  }
-                : activity,
-            ),
-          );
         }
       } finally {
-        // 作废挂起的 rAF 帧：若放任其在 finalHistory 写入后再触发，
-        // 会用裸文本覆盖掉带 checkpoint 等元数据的最终消息。
+        // 取消尾帧，保留最终消息元数据。
         if (streamFrameRef.current !== null) {
           window.cancelAnimationFrame(streamFrameRef.current);
           streamFrameRef.current = null;
         }
-        setToolActivities((current) =>
-          current.map((activity) =>
-            activity.status === "running"
-              ? {
-                  ...activity,
-                  status: "completed" as const,
-                  endedAt: Date.now(),
-                }
-              : activity,
-          ),
-        );
         agents.finalizeAgents(nextInteractiveRequest);
         const answer =
           finalTextRef.current ||
           (nextInteractiveRequest
             ? interactiveWaitingMessage(nextInteractiveRequest)
             : "已停止生成。");
-        const finalHistory: Message[] = [
-          ...visibleHistory.slice(0, -1),
-          {
-            role: "assistant",
-            content: answer,
-            attachments: mediaAttachmentsRef.current,
-            imageResult: imageResultRef.current,
-          },
-        ];
+        const finished = finishWorkflow(
+          workflowRef.current ?? workflow,
+          abortController.signal.aborted
+            ? abortController.signal.reason === "user"
+              ? "stopped"
+              : "interrupted"
+            : checkpointResult.status === "failed" || answer.startsWith("⚠️")
+              ? "failed"
+              : nextInteractiveRequest
+                ? "waiting"
+                : "completed",
+          nextInteractiveRequest
+            ? interactiveWaitingMessage(nextInteractiveRequest)
+            : checkpointResult.error || "",
+        );
+        workflowRef.current = finished;
+        setToolActivities(finished.toolActivities);
+        const finalHistory = updateWorkflowMessage(runMessagesRef.current, finished, {
+          content: answer,
+          attachments: mediaAttachmentsRef.current,
+          imageResult: imageResultRef.current,
+        });
+        runMessagesRef.current = finalHistory;
         const finalSession = {
           ...activeSession,
           title,
@@ -614,7 +619,7 @@ export function useChatStream({
         setSessions((current) =>
           current.map((session) => (session.id === activeSession.id ? finalSession : session)),
         );
-        void persistSession(activeSession, finalHistory, title).catch((error) => {
+        await saverRef.current?.flush(finalHistory).catch((error) => {
           console.warn("[useChatStream] 会话保存失败，重启后消息可能丢失", error);
         });
         abortRef.current = null;
@@ -647,6 +652,7 @@ export function useChatStream({
       scheduleStreamFlush,
       selectedModel,
       codeAgentMode,
+      mediaImageModelId,
       setMessages,
       setSessions,
     ],

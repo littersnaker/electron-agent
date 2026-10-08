@@ -6,17 +6,14 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  type AssistantMessageRowProps,
-  COLORS,
-  ToolActivityPanel,
-  parseThinkingStream,
-} from "./tool-activity-panel";
+import { type AssistantMessageRowProps, COLORS, parseThinkingStream } from "./tool-activity-panel";
 import { ThinkingSkeleton } from "./thinking-skeleton";
 import { StepsTimeline } from "./steps-timeline";
 export function AssistantMessageRow({
   content,
-  toolActivities = [],
+  workflow,
+  workflowChoice,
+  onWorkflowToggle,
   agentStatus,
   isStreaming = false,
 }: AssistantMessageRowProps) {
@@ -47,7 +44,12 @@ export function AssistantMessageRow({
     thinkIsClose();
   }, [isThinking, thinking, finalText, userCollapsedThinking]);
 
-  const hasToolActivity = toolActivities.length > 0;
+  const hasToolActivity = Boolean(
+    workflow &&
+    (workflow.toolActivities.length ||
+      workflow.lifecycleEvents.length ||
+      workflow.workListSnapshot?.items.length),
+  );
   const hasVisibleContent = Boolean(thinking || finalText.trim());
 
   if (!hasVisibleContent && !hasToolActivity) {
@@ -56,15 +58,12 @@ export function AssistantMessageRow({
 
   return (
     <div className="flex w-full flex-col gap-3.5 ">
-      {hasToolActivity && (
-        <ToolActivityPanel
-          activities={toolActivities}
-          agentStatus={agentStatus}
-          isStreaming={isStreaming}
-        />
-      )}
-
-      <StepsTimeline steps={toolActivities} />
+      <StepsTimeline
+        workflow={workflow}
+        isLive={isStreaming}
+        choice={workflowChoice}
+        onToggle={onWorkflowToggle}
+      />
 
       {thinking && (
         <section

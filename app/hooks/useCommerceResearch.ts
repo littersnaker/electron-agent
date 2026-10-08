@@ -4,6 +4,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { ChatSession, Message } from "../constants/page-constants";
+import {
+  createWorkflow,
+  createWorkflowSaver,
+  recordWorkflowPacket,
+  finishWorkflow,
+  updateWorkflowMessage,
+} from "../lib/message-workflow";
 import { apiFetch } from "../lib/api-client";
 import type {
   CommerceMarketplaceCode,
@@ -11,10 +18,6 @@ import type {
   CommerceResearchReport,
 } from "../lib/commerce/types";
 import type { AmazonListingDemoReport, CommerceWorkflowMode } from "../lib/commerce/listing/types";
-import {
-  getCommerceActivityStageId,
-  getCommerceProgressTitle,
-} from "../lib/commerce/progress-stages";
 import { buildLlmRequestHeaders } from "../lib/llm/client-request";
 import type { LlmCredentials, LlmEndpointOverrides } from "../lib/llm/types";
 import {
@@ -117,7 +120,7 @@ export function useCommerceResearch({
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    abortRef.current?.abort("user");
   }, []);
 
   const reset = useCallback(() => {
@@ -142,10 +145,14 @@ export function useCommerceResearch({
       const lastMessage = messages[messages.length - 1];
       const baseMessages =
         resumeExistingRun && lastMessage?.role === "assistant" ? messages.slice(0, -1) : messages;
+      let workflow = createWorkflow(
+        `commerce-${effectiveWorkflowMode}`,
+        resumeExistingRun ? lastMessage?.workflow : undefined,
+      );
       const optimisticHistory: Message[] = [
         ...baseMessages,
         ...(resumeExistingRun ? [] : [userMessage]),
-        { role: "assistant", content: "" },
+        { role: "assistant", content: "", workflow, createdAt: new Date().toISOString() },
       ];
       const title =
         activeSession.title === "新对话"
@@ -153,6 +160,8 @@ export function useCommerceResearch({
             (effectiveWorkflowMode === "listing" ? "Listing Demo" : "市场研究")
           : activeSession.title;
 
+      let runMessages = optimisticHistory;
+      const saver = createWorkflowSaver((next) => persistSession(activeSession, next, title));
       setMessages(optimisticHistory);
       setSessions((current: ChatSession[]) =>
         current.map((session: ChatSession) =>
@@ -161,7 +170,7 @@ export function useCommerceResearch({
             : session,
         ),
       );
-      void persistSession(activeSession, optimisticHistory, title).catch((error) => {
+      void saver.flush(optimisticHistory).catch((error) => {
         console.warn("[useCommerceResearch] 会话乐观保存失败，重启后消息可能丢失", error);
       });
       clearAfterSubmit();
@@ -184,6 +193,15 @@ export function useCommerceResearch({
       let runFailed = false;
       let checkpointResult: CheckpointFinishResult = { status: "completed" };
       const requestModel = options.modelOverride || selectedModel;
+      const publish = () => {
+        runMessages = updateWorkflowMessage(runMessages, workflow, {
+          content: finalText,
+          commerceReport: finalReport,
+          commerceListing: finalListing,
+        });
+        setMessages(runMessages);
+        saver.schedule(runMessages);
+      };
 
       try {
         const headers = {
@@ -230,62 +248,25 @@ export function useCommerceResearch({
             if (!line.startsWith("data:")) continue;
             try {
               const packet = JSON.parse(line.slice(5).trim()) as StreamPacket;
+              workflow = recordWorkflowPacket(workflow, packet);
+              setToolActivities(workflow.toolActivities);
+              publish();
 
               if (packet.type === "COMMERCE_PROGRESS" && isCommerceProgressEvent(packet.payload)) {
                 const event = packet.payload;
-                const now = Date.now();
                 setAgentStatus(event.detail);
                 agents.updateCommerceProgress(event);
-                setToolActivities((current: ToolActivity[]) => {
-                  const completed = current.map((activity: ToolActivity) =>
-                    activity.status === "running"
-                      ? {
-                          ...activity,
-                          status: "completed" as const,
-                          endedAt: now,
-                        }
-                      : activity,
-                  );
-                  if (event.stage === "done") return completed;
-                  return [
-                    ...completed,
-                    {
-                      id: `commerce_${event.stage}_${now}`,
-                      label: getCommerceProgressTitle(effectiveWorkflowMode, event.stage),
-                      detail: event.detail,
-                      stageId: getCommerceActivityStageId(effectiveWorkflowMode, event.stage),
-                      status: "running" as const,
-                      startedAt: now,
-                    },
-                  ].slice(-8);
-                });
                 continue;
               }
 
               if (packet.type === "COMMERCE_REPORT" && isCommerceResearchReport(packet.payload)) {
                 finalReport = packet.payload;
-                setMessages((current: Message[]) => [
-                  ...current.slice(0, -1),
-                  {
-                    role: "assistant",
-                    content: finalText,
-                    commerceReport: finalReport,
-                    commerceListing: finalListing,
-                  },
-                ]);
+                publish();
                 continue;
               }
-
               if (packet.type === "COMMERCE_LISTING" && isAmazonListingReport(packet.payload)) {
                 finalListing = packet.payload;
-                setMessages((current: Message[]) => [
-                  ...current.slice(0, -1),
-                  {
-                    role: "assistant",
-                    content: finalText,
-                    commerceListing: finalListing,
-                  },
-                ]);
+                publish();
                 continue;
               }
 
@@ -300,32 +281,12 @@ export function useCommerceResearch({
                 checkpointResult = { status: "failed", error: detail };
                 setAgentStatus(detail);
                 agents.failCommerceRun(detail);
-                const now = Date.now();
-                setToolActivities((current: ToolActivity[]) =>
-                  current.map((activity: ToolActivity) =>
-                    activity.status === "running"
-                      ? {
-                          ...activity,
-                          status: "error" as const,
-                          endedAt: now,
-                        }
-                      : activity,
-                  ),
-                );
                 continue;
               }
 
               if (packet.type === "TEXT" && typeof packet.content === "string") {
                 finalText += packet.content;
-                setMessages((current: Message[]) => [
-                  ...current.slice(0, -1),
-                  {
-                    role: "assistant",
-                    content: finalText,
-                    commerceReport: finalReport,
-                    commerceListing: finalListing,
-                  },
-                ]);
+                publish();
                 continue;
               }
 
@@ -343,9 +304,14 @@ export function useCommerceResearch({
           }
         }
       } catch (error) {
-        const aborted = error instanceof DOMException && error.name === "AbortError";
+        const aborted =
+          abortController.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError");
         checkpointResult = aborted
-          ? { status: "interrupted", error: "用户停止或应用中断" }
+          ? {
+              status: "interrupted",
+              error: abortController.signal.reason === "user" ? "用户已停止当前任务" : "应用中断",
+            }
           : {
               status: "failed",
               error: error instanceof Error ? error.message : "Commerce Agent 请求失败",
@@ -366,31 +332,26 @@ export function useCommerceResearch({
           agents.failCommerceRun(message);
         }
       } finally {
-        const now = Date.now();
-        setToolActivities((current: ToolActivity[]) =>
-          current.map((activity: ToolActivity) =>
-            activity.status === "running"
-              ? {
-                  ...activity,
-                  status: runFailed ? ("error" as const) : ("completed" as const),
-                  endedAt: now,
-                }
-              : activity,
-          ),
-        );
-
         const answer =
           finalText ||
           (effectiveWorkflowMode === "listing" ? "已停止 Listing Demo。" : "已停止市场研究。");
-        const finalHistory: Message[] = [
-          ...optimisticHistory.slice(0, -1),
-          {
-            role: "assistant",
-            content: answer,
-            commerceReport: finalReport,
-            commerceListing: finalListing,
-          },
-        ];
+        workflow = finishWorkflow(
+          workflow,
+          abortController.signal.aborted
+            ? abortController.signal.reason === "user"
+              ? "stopped"
+              : "interrupted"
+            : runFailed
+              ? "failed"
+              : "completed",
+          checkpointResult.error || "",
+        );
+        setToolActivities(workflow.toolActivities);
+        const finalHistory = updateWorkflowMessage(runMessages, workflow, {
+          content: answer,
+          commerceReport: finalReport,
+          commerceListing: finalListing,
+        });
         setMessages(finalHistory);
         setSessions((current: ChatSession[]) =>
           current.map((session: ChatSession) =>
@@ -399,7 +360,7 @@ export function useCommerceResearch({
               : session,
           ),
         );
-        void persistSession(activeSession, finalHistory, title).catch((error) => {
+        await saver.flush(finalHistory).catch((error) => {
           console.warn("[useCommerceResearch] 会话最终保存失败，重启后消息可能丢失", error);
         });
         setIsResearching(false);

@@ -29,6 +29,7 @@ class StoredMessage(FlexibleModel):
 
     role: Literal["user", "assistant"]
     content: str
+    workflow: dict[str, Any] | None = None
     attachments: list[MessageAttachment] | None = None
     commerce_report: dict[str, Any] | None = Field(default=None, alias="commerceReport")
     commerce_listing: dict[str, Any] | None = Field(default=None, alias="commerceListing")

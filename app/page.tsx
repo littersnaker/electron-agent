@@ -217,8 +217,6 @@ export default function Home() {
       : effectiveComposerMode === "chat"
         ? chat.tokenInfo
         : media.usageInfo;
-  const activeToolActivities =
-    workspace.activeSession?.mode === "commerce" ? commerce.toolActivities : chat.toolActivities;
   const resetConversationUi = () => {
     composer.resetComposer();
     chat.resetTransient();
@@ -471,7 +469,6 @@ export default function Home() {
                     key={workspace.activeSessionId}
                     messages={workspace.messages}
                     isStreaming={isBusy}
-                    toolActivities={activeToolActivities}
                     agentStatus={activeStatus}
                     knowledgeSources={chat.knowledgeSources}
                     knowledgeSearched={chat.knowledgeSearched}

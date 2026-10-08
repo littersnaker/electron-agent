@@ -266,6 +266,7 @@ export interface StreamPacket {
     | AmazonListingDemoReport
     | VisualVerifyPayload
     | KnowledgeSourcesPayload
+    | { stage: string; detail: string }
     | { content?: string; attachments?: MessageAttachment[] };
   agent?: AgentEventPayload;
 }

@@ -1,12 +1,12 @@
 // 模块说明：负责 ChatList 用户界面组件。
 "use client";
 
-/* eslint-disable react-hooks/exhaustive-deps */
 import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import AssistantMessageRow, { type ToolActivity } from "./AssistantMessageRow";
+import AssistantMessageRow from "./AssistantMessageRow";
 import type { Message } from "../constants/page-constants";
 import type { KnowledgeMetrics, KnowledgeSourceItem } from "../types/workspace";
+import type { WorkflowDisclosure } from "./assistant-message-row/steps-timeline";
 import MessageAttachmentGallery from "./MessageAttachmentGallery";
 import AmazonListingCard from "./commerce/AmazonListingCard";
 import CommerceReportCard from "./commerce/CommerceReportCard";
@@ -20,7 +20,6 @@ import { stripMarkdown, writeClipboard } from "../lib/clipboard";
 interface ChatListProps {
   messages: Message[];
   isStreaming: boolean;
-  toolActivities?: ToolActivity[];
   agentStatus?: string;
   knowledgeSources?: KnowledgeSourceItem[] | null;
   knowledgeSearched?: boolean;
@@ -71,7 +70,6 @@ function AssistantBadge() {
 function ChatList({
   messages,
   isStreaming,
-  toolActivities = [],
   agentStatus,
   knowledgeSources = null,
   knowledgeSearched = false,
@@ -83,6 +81,11 @@ function ChatList({
   imageEnabled = false,
 }: ChatListProps) {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const atBottomRef = useRef(true);
+  const [workflowChoices, setWorkflowChoices] = useState<Record<string, WorkflowDisclosure>>({});
+  const liveWorkflowId = isStreaming
+    ? [...messages].reverse().find((message) => message.workflow)?.workflow?.id
+    : undefined;
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -181,16 +184,8 @@ function ChatList({
   );
 
   useEffect(() => {
-    if (!virtuosoRef.current) return;
-
-    if (isStreaming) {
-      virtuosoRef.current.scrollToIndex({
-        index: messages.length - 1,
-        align: "end",
-        behavior: "smooth",
-      });
-    }
-  }, [messages.length, messages[messages.length - 1]?.content, isStreaming]);
+    if (isStreaming && atBottomRef.current) virtuosoRef.current?.autoscrollToBottom();
+  }, [messages, isStreaming]);
 
   return (
     <div className="min-h-0 flex-1">
@@ -204,245 +199,269 @@ function ChatList({
           isBusy={Boolean(isStreaming)}
         />
       ) : (
-      <Virtuoso
-        ref={virtuosoRef}
-        data={messages}
-        initialTopMostItemIndex={initialTopMostItemIndex}
-        alignToBottom
-        followOutput="smooth"
-        increaseViewportBy={{ top: 360, bottom: 360 }}
-        overscan={10}
-        components={{
-          Footer: () => <div className="h-5" />,
-        }}
-        itemContent={(index, message) => {
-          const isUser = message.role === "user";
-          const isLastMessage = index === messages.length - 1;
-          const shouldRenderAssistant =
-            !isUser &&
-            (Boolean(message.content) ||
-              Boolean(message.attachments?.length) ||
-              Boolean(message.commerceReport) ||
-              Boolean(message.commerceListing) ||
-              Boolean(message.visualReview) ||
-              Boolean(message.visualAudit) ||
-              (isLastMessage &&
-                (isStreaming || toolActivities.length > 0 || Boolean(agentStatus))));
+        <Virtuoso
+          ref={virtuosoRef}
+          data={messages}
+          initialTopMostItemIndex={initialTopMostItemIndex}
+          alignToBottom
+          followOutput={(isAtBottom) => (isAtBottom ? "auto" : false)}
+          atBottomStateChange={(atBottom) => {
+            atBottomRef.current = atBottom;
+          }}
+          increaseViewportBy={{ top: 360, bottom: 360 }}
+          overscan={10}
+          components={{
+            Footer: () => <div className="h-5" />,
+          }}
+          itemContent={(index, message) => {
+            const isUser = message.role === "user";
+            const isLastMessage = index === messages.length - 1;
+            const shouldRenderAssistant =
+              !isUser &&
+              (Boolean(
+                message.workflow?.toolActivities.length ||
+                message.workflow?.lifecycleEvents.length ||
+                message.workflow?.workListSnapshot?.items.length,
+              ) ||
+                Boolean(message.content) ||
+                Boolean(message.attachments?.length) ||
+                Boolean(message.commerceReport) ||
+                Boolean(message.commerceListing) ||
+                Boolean(message.visualReview) ||
+                Boolean(message.visualAudit) ||
+                (isLastMessage && (isStreaming || Boolean(agentStatus))));
 
-          if (isUser) {
-            const copied = copiedMessageIndex === index;
+            if (isUser) {
+              const copied = copiedMessageIndex === index;
+
+              return (
+                <div
+                  className="group mb-5 flex justify-end px-1 sm:px-3"
+                  onContextMenu={(event) => openContextMenu(event, message)}
+                >
+                  <div className="flex max-w-[82%] flex-col items-end sm:max-w-[72%]">
+                    <div
+                      className="w-fit max-w-full rounded-[20px] rounded-br-[7px] px-4 py-3 text-[14px] font-normal leading-6 tracking-[-0.006em] text-white"
+                      style={{
+                        background:
+                          "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
+                        boxShadow: "var(--message-user-shadow)",
+                      }}
+                    >
+                      <MessageAttachmentGallery attachments={message.attachments} compact />
+                      {message.content && (
+                        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                      )}
+                    </div>
+
+                    <div className="mt-1 flex h-7 items-center justify-end pr-0.5">
+                      <span className="mr-2 text-[10px]" style={{ color: COLORS.textMuted }}>
+                        {formatMessageTime(message.createdAt)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void copyUserMessage(message.content, index)}
+                        className="message-copy-button relative flex h-7 w-7 items-center justify-center rounded-[9px] border border-transparent opacity-100 outline-none transition-[opacity,transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--glass-hover)] hover:shadow-[0_5px_16px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] active:translate-y-0 active:scale-[0.94] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--glass-hover)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-blue)_24%,transparent)] sm:pointer-events-none sm:translate-y-[2px] sm:opacity-0 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
+                        style={{
+                          background: copied
+                            ? "color-mix(in srgb, var(--accent-green) 12%, transparent)"
+                            : "transparent",
+                          borderColor: copied
+                            ? "color-mix(in srgb, var(--accent-green) 25%, transparent)"
+                            : undefined,
+                          color: copied ? "var(--accent-green)" : "var(--text-tertiary)",
+                          backdropFilter: "blur(18px) saturate(140%)",
+                          WebkitBackdropFilter: "blur(18px) saturate(140%)",
+                        }}
+                        aria-label={copied ? "消息已复制" : "复制这条消息"}
+                      >
+                        {copied ? (
+                          <svg
+                            viewBox="0 0 20 20"
+                            className="h-[14px] w-[14px]"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="m4.35 10.15 3.2 3.2 8.1-8.1"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        ) : (
+                          <svg
+                            viewBox="0 0 20 20"
+                            className="h-[14px] w-[14px]"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <rect
+                              x="6.25"
+                              y="5.75"
+                              width="8.75"
+                              height="8.75"
+                              rx="2.05"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                            />
+                            <path
+                              d="M5.15 12.15H4.8a2 2 0 0 1-2-2V4.8a2 2 0 0 1 2-2h5.35a2 2 0 0 1 2 2v.35"
+                              stroke="currentColor"
+                              strokeWidth="1.3"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        )}
+
+                        <span
+                          className="message-copy-tooltip pointer-events-none absolute bottom-[calc(100%+7px)] right-0 z-20 whitespace-nowrap rounded-[7px] border px-2 py-1 text-[10px] font-medium leading-none tracking-[-0.01em]"
+                          style={{
+                            background: "color-mix(in srgb, var(--app-bg) 86%, transparent)",
+                            borderColor: "var(--border)",
+                            color: "var(--text-secondary)",
+                            boxShadow:
+                              "0 8px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.08)",
+                            backdropFilter: "blur(18px) saturate(145%)",
+                            WebkitBackdropFilter: "blur(18px) saturate(145%)",
+                          }}
+                        >
+                          {copied ? "已复制" : "复制"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            if (!shouldRenderAssistant) return <div className="h-1" />;
 
             return (
               <div
-                className="group mb-5 flex justify-end px-1 sm:px-3"
+                className="mb-6 flex items-start gap-3 px-1 sm:px-3"
                 onContextMenu={(event) => openContextMenu(event, message)}
               >
-                <div className="flex max-w-[82%] flex-col items-end sm:max-w-[72%]">
+                <AssistantBadge />
+                <div className="min-w-0 max-w-[calc(100%-40px)] flex-1 pt-0.5">
                   <div
-                    className="w-fit max-w-full rounded-[20px] rounded-br-[7px] px-4 py-3 text-[14px] font-normal leading-6 tracking-[-0.006em] text-white"
-                    style={{
-                      background:
-                        "linear-gradient(180deg, var(--message-user-start) 0%, var(--message-user-end) 100%)",
-                      boxShadow: "var(--message-user-shadow)",
-                    }}
+                    className="mb-1.5 flex items-baseline gap-2 text-[11px] font-medium tracking-wide"
+                    style={{ color: COLORS.textMuted }}
                   >
-                    <MessageAttachmentGallery attachments={message.attachments} compact />
-                    {message.content && (
-                      <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                    )}
-                  </div>
-
-                  <div className="mt-1 flex h-7 items-center justify-end pr-0.5">
-                    <span className="mr-2 text-[10px]" style={{ color: COLORS.textMuted }}>
+                    <span>
+                      {message.commerceListing
+                        ? "Amazon Listing Builder"
+                        : message.commerceReport
+                          ? "Market Intelligence Agent"
+                          : "Agent"}
+                    </span>
+                    <span className="text-[10px] font-normal" style={{ color: COLORS.textMuted }}>
                       {formatMessageTime(message.createdAt)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => void copyUserMessage(message.content, index)}
-                      className="message-copy-button relative flex h-7 w-7 items-center justify-center rounded-[9px] border border-transparent opacity-100 outline-none transition-[opacity,transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--glass-hover)] hover:shadow-[0_5px_16px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.10)] active:translate-y-0 active:scale-[0.94] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--glass-hover)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-blue)_24%,transparent)] sm:pointer-events-none sm:translate-y-[2px] sm:opacity-0 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
-                      style={{
-                        background: copied
-                          ? "color-mix(in srgb, var(--accent-green) 12%, transparent)"
-                          : "transparent",
-                        borderColor: copied
-                          ? "color-mix(in srgb, var(--accent-green) 25%, transparent)"
-                          : undefined,
-                        color: copied ? "var(--accent-green)" : "var(--text-tertiary)",
-                        backdropFilter: "blur(18px) saturate(140%)",
-                        WebkitBackdropFilter: "blur(18px) saturate(140%)",
-                      }}
-                      aria-label={copied ? "消息已复制" : "复制这条消息"}
+                  </div>
+                  {isLastMessage && knowledgeSearched && (
+                    <div
+                      className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px]"
+                      style={{ color: COLORS.textMuted }}
                     >
-                      {copied ? (
-                        <svg
-                          viewBox="0 0 20 20"
-                          className="h-[14px] w-[14px]"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="m4.35 10.15 3.2 3.2 8.1-8.1"
-                            stroke="currentColor"
-                            strokeWidth="1.75"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
+                      {knowledgeSources && knowledgeSources.length > 0 ? (
+                        <>
+                          <span
+                            className="rounded-full border px-2 py-0.5 font-medium"
+                            style={{
+                              borderColor: COLORS.border,
+                              background: "color-mix(in srgb, var(--accent-blue) 10%, transparent)",
+                              color: "var(--accent-blue)",
+                            }}
+                          >
+                            知识库命中 {knowledgeSources.length} 条
+                          </span>
+                          {knowledgeMetrics && (
+                            <span
+                              className="rounded-full border px-2 py-0.5"
+                              style={{
+                                borderColor: COLORS.border,
+                                color: COLORS.textMuted,
+                              }}
+                              title={`命中率 = 精排结果中正相关（重排分数≥0）来源的占比；最高相关度 ${knowledgeMetrics.topScore.toFixed(3)}`}
+                            >
+                              命中率 {Math.round(knowledgeMetrics.hitRate * 100)}% · 均分{" "}
+                              {knowledgeMetrics.avgScore.toFixed(2)}
+                              {knowledgeMetrics.reranked ? "" : "（未重排）"}
+                            </span>
+                          )}
+                          <span className="min-w-0 truncate">
+                            {knowledgeSources
+                              .map((item) => {
+                                const name = item.sourcePath.split("/").pop() || item.sourcePath;
+                                return item.position ? `${name}（${item.position}）` : name;
+                              })
+                              .join("、")}
+                          </span>
+                        </>
                       ) : (
-                        <svg
-                          viewBox="0 0 20 20"
-                          className="h-[14px] w-[14px]"
-                          fill="none"
-                          aria-hidden="true"
+                        <span
+                          className="rounded-full border px-2 py-0.5"
+                          style={{
+                            borderColor: COLORS.border,
+                            color: COLORS.textMuted,
+                          }}
                         >
-                          <rect
-                            x="6.25"
-                            y="5.75"
-                            width="8.75"
-                            height="8.75"
-                            rx="2.05"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                          />
-                          <path
-                            d="M5.15 12.15H4.8a2 2 0 0 1-2-2V4.8a2 2 0 0 1 2-2h5.35a2 2 0 0 1 2 2v.35"
-                            stroke="currentColor"
-                            strokeWidth="1.3"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                          未检索到相关知识库内容
+                        </span>
                       )}
-
-                      <span
-                        className="message-copy-tooltip pointer-events-none absolute bottom-[calc(100%+7px)] right-0 z-20 whitespace-nowrap rounded-[7px] border px-2 py-1 text-[10px] font-medium leading-none tracking-[-0.01em]"
-                        style={{
-                          background: "color-mix(in srgb, var(--app-bg) 86%, transparent)",
-                          borderColor: "var(--border)",
-                          color: "var(--text-secondary)",
-                          boxShadow:
-                            "0 8px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.08)",
-                          backdropFilter: "blur(18px) saturate(145%)",
-                          WebkitBackdropFilter: "blur(18px) saturate(145%)",
-                        }}
-                      >
-                        {copied ? "已复制" : "复制"}
-                      </span>
-                    </button>
+                    </div>
+                  )}
+                  <div
+                    className="min-w-0 rounded-[18px] border px-4 py-3.5"
+                    style={{
+                      color: COLORS.text,
+                      background: COLORS.material,
+                      borderColor: COLORS.border,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
+                    }}
+                  >
+                    {message.commerceReport && (
+                      <CommerceReportCard report={message.commerceReport} />
+                    )}
+                    {message.commerceListing && (
+                      <AmazonListingCard report={message.commerceListing} />
+                    )}
+                    {message.imageResult && (
+                      <ImageRecognitionResultCard result={message.imageResult} />
+                    )}
+                    {message.visualReview && <VisualReviewCard card={message.visualReview} />}
+                    {message.visualAudit && <VisualAuditCard card={message.visualAudit} />}
+                    <MemoizedAssistantMessageRow
+                      content={message.content}
+                      workflow={message.workflow}
+                      workflowChoice={
+                        message.workflow ? workflowChoices[message.workflow.id] : undefined
+                      }
+                      onWorkflowToggle={
+                        message.workflow
+                          ? (choice) => {
+                              const id = message.workflow!.id;
+                              setWorkflowChoices((current) => ({ ...current, [id]: choice }));
+                            }
+                          : undefined
+                      }
+                      agentStatus={isLastMessage ? agentStatus : undefined}
+                      isStreaming={
+                        message.workflow
+                          ? message.workflow.id === liveWorkflowId
+                          : isLastMessage && isStreaming
+                      }
+                    />
+                    <MessageAttachmentGallery attachments={message.attachments} />
                   </div>
                 </div>
               </div>
             );
-          }
-
-          if (!shouldRenderAssistant) return <div className="h-1" />;
-
-          return (
-            <div
-              className="mb-6 flex items-start gap-3 px-1 sm:px-3"
-              onContextMenu={(event) => openContextMenu(event, message)}
-            >
-              <AssistantBadge />
-              <div className="min-w-0 max-w-[calc(100%-40px)] flex-1 pt-0.5">
-                <div
-                  className="mb-1.5 flex items-baseline gap-2 text-[11px] font-medium tracking-wide"
-                  style={{ color: COLORS.textMuted }}
-                >
-                  <span>
-                    {message.commerceListing
-                      ? "Amazon Listing Builder"
-                      : message.commerceReport
-                        ? "Market Intelligence Agent"
-                        : "Agent"}
-                  </span>
-                  <span className="text-[10px] font-normal" style={{ color: COLORS.textMuted }}>
-                    {formatMessageTime(message.createdAt)}
-                  </span>
-                </div>
-                {isLastMessage && knowledgeSearched && (
-                  <div
-                    className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px]"
-                    style={{ color: COLORS.textMuted }}
-                  >
-                    {knowledgeSources && knowledgeSources.length > 0 ? (
-                      <>
-                        <span
-                          className="rounded-full border px-2 py-0.5 font-medium"
-                          style={{
-                            borderColor: COLORS.border,
-                            background: "color-mix(in srgb, var(--accent-blue) 10%, transparent)",
-                            color: "var(--accent-blue)",
-                          }}
-                        >
-                          知识库命中 {knowledgeSources.length} 条
-                        </span>
-                        {knowledgeMetrics && (
-                          <span
-                            className="rounded-full border px-2 py-0.5"
-                            style={{
-                              borderColor: COLORS.border,
-                              color: COLORS.textMuted,
-                            }}
-                            title={`命中率 = 精排结果中正相关（重排分数≥0）来源的占比；最高相关度 ${knowledgeMetrics.topScore.toFixed(3)}`}
-                          >
-                            命中率 {Math.round(knowledgeMetrics.hitRate * 100)}% · 均分{" "}
-                            {knowledgeMetrics.avgScore.toFixed(2)}
-                            {knowledgeMetrics.reranked ? "" : "（未重排）"}
-                          </span>
-                        )}
-                        <span className="min-w-0 truncate">
-                          {knowledgeSources
-                            .map((item) => {
-                              const name = item.sourcePath.split("/").pop() || item.sourcePath;
-                              return item.position ? `${name}（${item.position}）` : name;
-                            })
-                            .join("、")}
-                        </span>
-                      </>
-                    ) : (
-                      <span
-                        className="rounded-full border px-2 py-0.5"
-                        style={{
-                          borderColor: COLORS.border,
-                          color: COLORS.textMuted,
-                        }}
-                      >
-                        未检索到相关知识库内容
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div
-                  className="min-w-0 rounded-[18px] border px-4 py-3.5"
-                  style={{
-                    color: COLORS.text,
-                    background: COLORS.material,
-                    borderColor: COLORS.border,
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.025)",
-                  }}
-                >
-                  {message.commerceReport && <CommerceReportCard report={message.commerceReport} />}
-                  {message.commerceListing && (
-                    <AmazonListingCard report={message.commerceListing} />
-                  )}
-                  {message.imageResult && (
-                    <ImageRecognitionResultCard result={message.imageResult} />
-                  )}
-                  {message.visualReview && <VisualReviewCard card={message.visualReview} />}
-                  {message.visualAudit && <VisualAuditCard card={message.visualAudit} />}
-                  <MemoizedAssistantMessageRow
-                    content={message.content}
-                    toolActivities={isLastMessage ? toolActivities : []}
-                    agentStatus={isLastMessage ? agentStatus : undefined}
-                    isStreaming={isLastMessage && isStreaming}
-                  />
-                  <MessageAttachmentGallery attachments={message.attachments} />
-                </div>
-              </div>
-            </div>
-          );
-        }}
-        computeItemKey={(index, item) => `${item.role}-${index}`}
-      />
+          }}
+          computeItemKey={(index, item) => `${item.role}-${index}`}
+        />
       )}
 
       <style>{`

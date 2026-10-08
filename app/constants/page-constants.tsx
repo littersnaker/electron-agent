@@ -1,4 +1,5 @@
 // 模块说明：集中维护 page constants 相关常量。
+import type { MessageWorkflow } from "../lib/message-workflow";
 import type { CommerceResearchReport } from "../lib/commerce/types";
 import type { AmazonListingDemoReport } from "../lib/commerce/listing/types";
 
@@ -18,6 +19,8 @@ export type MessageAttachment = {
 export type Message = {
   role: "user" | "assistant";
   content: string;
+  /** 本轮工作的事件快照，随消息保存与恢复。 */
+  workflow?: MessageWorkflow;
   /** 消息发送时间（ISO），历史会话未存时为空。 */
   createdAt?: string;
   /** 用户附件与 AI 生成结果使用同一种结构，UI 不需要写两套渲染逻辑。 */

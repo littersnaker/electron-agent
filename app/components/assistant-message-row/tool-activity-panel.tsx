@@ -3,6 +3,8 @@
  * 模块职责：工具活动类型、思考流解析与工具状态面板。
  * 说明：该文件由原大型模块按单一职责拆分，便于测试、维护与复用。
  */
+import type { WorkflowDisclosure } from "./steps-timeline";
+import type { MessageWorkflow } from "../../lib/message-workflow";
 import { useEffect, useState } from "react";
 export type ToolActivityStatus = "running" | "completed" | "error";
 
@@ -20,6 +22,9 @@ export interface ToolActivity {
 
 export interface AssistantMessageRowProps {
   content: string;
+  workflow?: MessageWorkflow;
+  workflowChoice?: WorkflowDisclosure;
+  onWorkflowToggle?: (choice: WorkflowDisclosure) => void;
   toolActivities?: ToolActivity[];
   agentStatus?: string;
   isStreaming?: boolean;
