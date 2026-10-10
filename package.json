@@ -83,6 +83,9 @@
     "pnpm": ">=10 <12"
   },
   "dependencies": {
-    "@xyflow/react": "^12.11.3"
+    "@hugeicons/core-free-icons": "^4.3.5",
+    "@hugeicons/react": "^1.1.10",
+    "@xyflow/react": "^12.11.3",
+    "motion": "^14.1.0"
   }
 }

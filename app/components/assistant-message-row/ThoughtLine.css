@@ -1,0 +1,192 @@
+.thought-line {
+  --tl-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  width: 100%;
+  color: var(--tl-color);
+  font-weight: 500;
+  font-family: inherit;
+  font-size: var(--tl-font);
+  line-height: 1.5;
+}
+.thought-line__head {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.thought-line__head {
+  cursor: pointer;
+  border-radius: 4px;
+}
+button.thought-line__head:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 4px;
+}
+.thought-line__glyph {
+  display: inline-flex;
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  margin-right: 0.2em;
+  color: var(--tl-glyph);
+}
+.thought-line__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+.thought-line__dot {
+  width: 0.5em;
+  height: 0.5em;
+  margin: auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+.thought-line__label {
+  animation: thought-line-settle var(--tl-settle) var(--tl-ease);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thought-line__breath {
+  transition:
+    opacity var(--tl-settle) var(--tl-ease),
+    filter var(--tl-settle) var(--tl-ease);
+}
+.thought-line[data-animate] .thought-line__breath[data-shimmer] {
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--tl-color) 85%, transparent) 30%,
+    var(--tl-color) 50%,
+    color-mix(in srgb, var(--tl-color) 85%, transparent) 70%
+  );
+  background-size: 250% 100%;
+  background-position: 125% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: thought-line-shimmer var(--tl-shimmer) linear infinite;
+}
+.thought-line[data-animate] .thought-line__breath:not([data-shimmer]) {
+  animation: thought-line-breathe var(--tl-breath) ease-in-out infinite;
+}
+.thought-line__timer {
+  flex: none;
+  font-size: 0.85em;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.thought-line__chevron {
+  display: flex;
+  flex: none;
+  opacity: 0.65;
+  transition: transform var(--tl-settle) var(--tl-ease);
+}
+.thought-line[data-open] .thought-line__chevron {
+  transform: rotate(180deg);
+}
+.thought-line__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.thought-line__trace {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  transition: grid-template-rows var(--tl-settle) var(--tl-ease);
+}
+.thought-line__trace[data-open] {
+  grid-template-rows: 1fr;
+}
+.thought-line__fold {
+  min-height: 0;
+  overflow: hidden;
+}
+.thought-line__steps {
+  padding: 0.6em 0 0.2em 1.6em;
+  font-size: 0.9em;
+  font-weight: 400;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thought-line__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin-bottom: 0.45em;
+}
+.thought-line__mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 1em;
+  height: 1.5em;
+  opacity: 0.65;
+}
+.thought-line__step[data-done] {
+  color: var(--text-secondary);
+}
+.thought-line__pulse {
+  display: block;
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+  animation: thought-line-breathe var(--tl-breath) ease-in-out infinite;
+}
+@keyframes thought-line-shimmer {
+  to {
+    background-position: -125% 0;
+  }
+}
+@keyframes thought-line-breathe {
+  0%,
+  100% {
+    opacity: var(--tl-trough);
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thought-line__breath,
+  .thought-line__pulse {
+    animation: none !important;
+  }
+  .thought-line__trace,
+  .thought-line__chevron {
+    transition: none;
+  }
+}
+
+@keyframes thought-line-settle {
+  from {
+    opacity: 0.5;
+    filter: blur(var(--tl-blur));
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thought-line__label {
+    animation: none;
+  }
+  .thought-line__breath[data-shimmer] {
+    background: none;
+    color: var(--tl-color);
+  }
+}
